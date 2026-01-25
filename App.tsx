@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Problem, User, Quota, Topic } from './types';
+import { Problem, User, Quota, Topic, ProblemStatus } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
+import { MathText } from './components/MathText';
 import { api } from './api';
 import { 
   PlusCircle, 
@@ -28,7 +29,9 @@ import {
   ExternalLink,
   AlertCircle,
   Layers,
-  Zap
+  Zap,
+  Download,
+  CheckCircle
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -82,6 +85,8 @@ export default function App() {
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Admin Editing State
   const [editingQuotaId, setEditingQuotaId] = useState<string | null>(null);
@@ -103,6 +108,7 @@ export default function App() {
   // Pool View State (Sorting/Filtering)
   const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
   const [poolFilterTopic, setPoolFilterTopic] = useState<string>('All');
+  const [poolFilterStatus, setPoolFilterStatus] = useState<string>('All');
   const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<number>(0);
   const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<number>(10);
   const [poolIds, setPoolIds] = useState<string[]>([]);
@@ -201,6 +207,14 @@ export default function App() {
           filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
       }
 
+      // Filter by Status
+      if (poolFilterStatus !== 'All') {
+          filtered = filtered.filter(p => {
+             const s = p.status || 'pending';
+             return s === poolFilterStatus;
+          });
+      }
+
       // Filter by Difficulty
       filtered = filtered.filter(p => {
           const d = p.difficulty || 0;
@@ -226,7 +240,7 @@ export default function App() {
 
       setPoolIds(filtered.map(p => p.id));
     }
-  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterDiffMin, poolFilterDiffMax]); 
+  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax]); 
 
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, name: 'Default', instructions: '', dueDate: null };
@@ -384,6 +398,7 @@ export default function App() {
     setIsVerified(false);
     setEditingProblemId(null);
     setSubmissionError(null);
+    setAiAnalysis(null);
   };
 
   const handleStartEdit = (prob: Problem) => {
@@ -402,6 +417,25 @@ export default function App() {
       } else {
           setSelectedTopics([...selectedTopics, topic]);
       }
+  };
+
+  const handleAiAnalyze = async () => {
+     if (!statement) return;
+     setIsAnalyzing(true);
+     setAiAnalysis(null);
+     try {
+       const result = await api.analyzeProblem({
+         title: title || 'Untitled',
+         statement,
+         difficulty: parseFloat(difficulty)
+       });
+       setAiAnalysis(result);
+     } catch(e) {
+       console.error(e);
+       setAiAnalysis("Could not reach AI service. Please try again.");
+     } finally {
+       setIsAnalyzing(false);
+     }
   };
 
   const handleSubmit = async () => {
@@ -474,6 +508,57 @@ export default function App() {
         setProblems(oldProblems);
         console.error("Vote failed");
     }
+  };
+
+  const handleStatusChange = async (problemId: string, status: ProblemStatus) => {
+     try {
+        await api.updateProblemStatus(problemId, status);
+        // Optimistic update
+        const updated = problems.map(p => p.id === problemId ? { ...p, status } : p);
+        setProblems(updated);
+     } catch(e) {
+        console.error("Failed to update status");
+     }
+  };
+
+  const handleExportLatex = () => {
+      // Very basic LaTeX export
+      const activeProblems = problems.filter(p => p.quotaId === activeQuotaId);
+      let tex = `\\documentclass{article}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{enumitem}
+
+\\title{${activeQuota.name}}
+\\date{\\today}
+
+\\begin{document}
+\\maketitle
+
+\\section*{Problems}
+\\begin{enumerate}
+`;
+
+      activeProblems.forEach(p => {
+         tex += `  \\item \\textbf{${p.title}} (Diff: ${p.difficulty})
+         
+         ${p.statement}
+         
+         \\vspace{0.5cm}
+`;
+      });
+
+      tex += `\\end{enumerate}
+\\end{document}`;
+
+      const blob = new Blob([tex], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeQuota.name.replace(/\s+/g, '_')}.tex`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
   };
 
   // --- Component Logic ---
@@ -571,7 +656,7 @@ export default function App() {
       <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-sm">
         <div className="p-6 border-b border-slate-100">
           <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center gap-2">
-            <BookOpen className="w-7 h-7 text-indigo-600" /> Quota Tracker
+            <BookOpen className="w-7 h-7 text-indigo-600" /> WAMO Quota Tracker
           </h2>
         </div>
         
@@ -708,6 +793,7 @@ export default function App() {
                         currentUserRole={currentUser.role}
                         onUpvote={handleToggleVote}
                         onEdit={handleStartEdit}
+                        onStatusChange={handleStatusChange}
                         votingPower={currentUser.votingPower}
                     />
                   ))}
@@ -797,10 +883,30 @@ export default function App() {
                     value={statement}
                     onChange={(e) => setStatement(e.target.value)}
                     rows={8}
-                    placeholder="Let ABC be a triangle where..."
-                    className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-base leading-relaxed"
+                    placeholder="Let $ABC$ be a triangle where..."
+                    className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-base leading-relaxed mb-4"
                   />
-                  <p className="mt-2 text-xs text-slate-400 text-right">Markdown supported (basic)</p>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                     <div className="flex justify-between items-center mb-2">
+                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Live Preview (LaTeX supported: $...$ or $$...$$)</span>
+                       <Button size="sm" variant="secondary" onClick={handleAiAnalyze} isLoading={isAnalyzing} className="text-xs py-1 h-7">
+                          ✨ Analyze with AI
+                       </Button>
+                     </div>
+                     <MathText 
+                         text={statement || 'Type above to preview...'} 
+                         className="font-serif text-slate-800 text-base leading-relaxed whitespace-pre-wrap min-h-[40px]" 
+                     />
+                     
+                     {/* AI Feedback Box */}
+                     {aiAnalysis && (
+                         <div className="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm text-indigo-900 relative animate-in fade-in zoom-in-95">
+                             <h5 className="font-bold flex items-center gap-2 mb-1"><Zap className="w-4 h-4 text-indigo-600" /> AI Feedback</h5>
+                             <p className="whitespace-pre-wrap">{aiAnalysis}</p>
+                             <button onClick={() => setAiAnalysis(null)} className="absolute top-2 right-2 text-indigo-400 hover:text-indigo-700"><X className="w-4 h-4" /></button>
+                         </div>
+                     )}
+                  </div>
                 </div>
 
                 {/* Anti-Cheat Pledge */}
@@ -853,7 +959,7 @@ export default function App() {
             </header>
             
             {/* Filters Bar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row gap-4 items-center">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row gap-4 items-center flex-wrap">
                 <div className="flex items-center gap-2 text-sm text-slate-500 font-semibold">
                     <Filter className="w-4 h-4" /> Filters:
                 </div>
@@ -866,6 +972,18 @@ export default function App() {
                 >
                     <option value="All">All Topics</option>
                     {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+
+                {/* Status Filter */}
+                <select 
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={poolFilterStatus}
+                    onChange={(e) => setPoolFilterStatus(e.target.value)}
+                >
+                    <option value="All">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="shortlisted">Shortlisted</option>
+                    <option value="accepted">Accepted</option>
                 </select>
 
                 {/* Difficulty Filter */}
@@ -930,6 +1048,7 @@ export default function App() {
                       currentUserRole={currentUser.role}
                       onUpvote={handleToggleVote}
                       onEdit={handleStartEdit}
+                      onStatusChange={handleStatusChange}
                       votingPower={currentUser.votingPower}
                     />
                   );
@@ -942,7 +1061,12 @@ export default function App() {
         {/* VIEW: ADMIN PANEL */}
         {view === 'admin' && isDirector && (
           <div className="max-w-5xl mx-auto">
-             <h1 className="text-3xl font-bold text-slate-900 mb-8">Contest Administration</h1>
+             <div className="flex justify-between items-center mb-8">
+                <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
+                <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
+                    <Download className="w-4 h-4" /> Export TeX
+                </Button>
+             </div>
              
              <div className="grid md:grid-cols-2 gap-8 mb-8">
                 {/* Quota Management */}

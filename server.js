@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const { GoogleGenAI } = require("@google/genai");
 require('dotenv').config();
 
 const app = express();
@@ -21,6 +22,9 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+
+// AI Initialization
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- DB Initialization & Seeding ---
 const initDB = async () => {
@@ -59,6 +63,7 @@ const initDB = async () => {
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'pending',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -75,6 +80,7 @@ const initDB = async () => {
     await client.query(`
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS difficulty NUMERIC(3,1) DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
     `);
 
     // Seed Admin if not exists
@@ -117,6 +123,43 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// --- Routes: AI Analysis ---
+app.post('/api/ai/analyze', authenticateToken, async (req, res) => {
+  try {
+    const { statement, title, difficulty } = req.body;
+    
+    if (!process.env.API_KEY) {
+       return res.json({ text: "AI Analysis is not configured (Missing API Key)." });
+    }
+
+    const prompt = `
+      Act as a strict Math Olympiad Editor. Analyze the following math problem proposed for a middle school contest.
+      
+      Title: ${title}
+      Proposed Difficulty (0-10): ${difficulty}
+      Problem Statement (LaTeX): 
+      ${statement}
+
+      Please provide a brief critique covering:
+      1. Clarity & Ambiguity Check (Is there only one answer? Is phrasing clear?)
+      2. Difficulty Assessment (Does it match the proposed rating?)
+      3. Suggestions for improvement.
+      
+      Keep the response concise (under 100 words).
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-latest',
+      contents: prompt,
+    });
+    
+    res.json({ text: response.text });
+  } catch (err) {
+    console.error("AI Error:", err);
+    res.status(500).json({ error: "Failed to analyze problem" });
+  }
+});
 
 // --- Routes: Auth ---
 
@@ -290,6 +333,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       quotaId: row.quota_id, // Ensure we send this
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
+      status: row.status || 'pending',
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || []
     }));
@@ -308,8 +352,8 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
     const result = await pool.query(
-      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [req.user.id, quotaId, title, statement, diffVal, topics || []]
+      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending']
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -347,6 +391,26 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
+  }
+});
+
+// New Route: Update Status (Admin Only)
+app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['pending', 'shortlisted', 'accepted'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  try {
+    await pool.query('UPDATE problems SET status = $1 WHERE id = $2', [status, id]);
+    res.json({ success: true, status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Status update failed' });
   }
 });
 

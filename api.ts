@@ -1,4 +1,4 @@
-import { Problem, User, Quota } from './types';
+import { Problem, User, Quota, ProblemStatus } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -130,6 +130,30 @@ export const api = {
       body: JSON.stringify(problem)
     });
     if (!res.ok) throw new Error('Update problem failed');
+  },
+  
+  updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; 
+
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/status`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error('Status update failed');
+  },
+  
+  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
+    if (USE_MOCK_BACKEND) return "AI Analysis Mock: Looks good.";
+    
+    const res = await fetch(`${API_BASE_URL}/api/ai/analyze`, {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(problem)
+    });
+    if (!res.ok) throw new Error('Analysis failed');
+    const data = await res.json();
+    return data.text;
   },
 
   toggleVote: async (problemId: string): Promise<void> => {

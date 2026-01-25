@@ -1,6 +1,7 @@
 import React from 'react';
-import { Problem } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Tag, Target, Pencil } from 'lucide-react';
+import { Problem, ProblemStatus } from '../types';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, Bookmark, Star, AlertCircle, ChevronDown } from 'lucide-react';
+import { MathText } from './MathText';
 
 interface ProblemCardProps {
   problem: Problem;
@@ -9,6 +10,7 @@ interface ProblemCardProps {
   currentUserRole: string;
   onUpvote: (problemId: string) => void;
   onEdit: (problem: Problem) => void;
+  onStatusChange?: (problemId: string, status: ProblemStatus) => void;
   votingPower: number;
 }
 
@@ -19,13 +21,16 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   currentUserRole,
   onUpvote,
   onEdit,
+  onStatusChange,
   votingPower
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
+  const status = problem.status || 'pending';
   
   // Can edit if admin or author
   const canEdit = currentUserRole === 'admin' || problem.authorId === currentUserId;
+  const isAdmin = currentUserRole === 'admin';
 
   const topicColors: Record<string, string> = {
     'Algebra': 'bg-blue-100 text-blue-700',
@@ -34,8 +39,26 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
     'Number Theory': 'bg-purple-100 text-purple-700'
   };
 
+  const StatusBadge = () => {
+    if (status === 'accepted') {
+      return (
+        <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold border border-green-200">
+           <CheckCircle className="w-3 h-3" /> Accepted
+        </span>
+      );
+    }
+    if (status === 'shortlisted') {
+      return (
+        <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold border border-yellow-200">
+           <Star className="w-3 h-3" /> Shortlisted
+        </span>
+      );
+    }
+    return null; // Pending status doesn't need a loud badge
+  };
+
   return (
-    <div className="group bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row">
+    <div className={`group bg-white rounded-xl border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-200 ring-1 ring-green-100' : 'border-slate-200'}`}>
       
       {/* Vote Section */}
       <div className="flex flex-row md:flex-col items-center justify-between md:justify-center p-4 md:p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[80px] gap-2 bg-slate-50/50">
@@ -60,16 +83,51 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
         <div className="flex justify-between items-start mb-4">
           <div className="flex flex-col gap-1 flex-1">
             <div className="flex items-start justify-between gap-4">
-                <h3 className="text-lg font-bold text-slate-900 leading-tight">{problem.title}</h3>
-                {canEdit && (
-                    <button 
-                        onClick={() => onEdit(problem)}
-                        className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-slate-100 transition-colors"
-                        title="Edit Problem"
-                    >
-                        <Pencil className="w-4 h-4" />
-                    </button>
-                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="text-lg font-bold text-slate-900 leading-tight">
+                        <MathText text={problem.title} />
+                    </h3>
+                    <StatusBadge />
+                </div>
+                
+                <div className="flex items-center gap-1">
+                    {/* Admin Status Controls */}
+                    {isAdmin && onStatusChange && (
+                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 mr-2">
+                             <button 
+                                onClick={() => onStatusChange(problem.id, 'pending')} 
+                                className={`p-1.5 rounded transition-all ${status === 'pending' ? 'bg-white shadow text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
+                                title="Set Pending"
+                             >
+                                <AlertCircle className="w-4 h-4" />
+                             </button>
+                             <button 
+                                onClick={() => onStatusChange(problem.id, 'shortlisted')} 
+                                className={`p-1.5 rounded transition-all ${status === 'shortlisted' ? 'bg-yellow-100 text-yellow-600 shadow-sm' : 'text-slate-400 hover:text-yellow-500'}`}
+                                title="Shortlist"
+                             >
+                                <Star className="w-4 h-4" />
+                             </button>
+                             <button 
+                                onClick={() => onStatusChange(problem.id, 'accepted')} 
+                                className={`p-1.5 rounded transition-all ${status === 'accepted' ? 'bg-green-100 text-green-600 shadow-sm' : 'text-slate-400 hover:text-green-500'}`}
+                                title="Accept"
+                             >
+                                <CheckCircle className="w-4 h-4" />
+                             </button>
+                        </div>
+                    )}
+
+                    {canEdit && (
+                        <button 
+                            onClick={() => onEdit(problem)}
+                            className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-slate-100 transition-colors"
+                            title="Edit Problem"
+                        >
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
             </div>
             
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
@@ -103,9 +161,10 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
             ))}
         </div>
 
-        <div className="bg-white p-5 rounded-lg font-serif text-slate-800 border border-slate-200 whitespace-pre-wrap leading-relaxed">
-          {problem.statement}
-        </div>
+        <MathText 
+           text={problem.statement} 
+           className="bg-white p-5 rounded-lg font-serif text-slate-800 border border-slate-200 whitespace-pre-wrap leading-relaxed" 
+        />
       </div>
     </div>
   );

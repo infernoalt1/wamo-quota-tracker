@@ -13,6 +13,8 @@ export interface Quota {
 
 export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
 
+export type ProblemStatus = 'pending' | 'shortlisted' | 'accepted';
+
 export interface Problem {
   id: string;
   authorId: string;
@@ -25,6 +27,7 @@ export interface Problem {
   createdAt: number;
   score: number;
   votedBy: string[]; // User IDs who have voted
+  status: ProblemStatus;
 }
 
 export interface User {
