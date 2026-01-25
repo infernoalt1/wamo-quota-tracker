@@ -11,6 +11,8 @@ export interface Quota {
   dueDate: number | null; // Timestamp
 }
 
+export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
+
 export interface Problem {
   id: string;
   authorId: string;
@@ -18,6 +20,8 @@ export interface Problem {
   quotaId: string;    // Crucial for tracking which round this belongs to
   title: string;
   statement: string;
+  difficulty: number;
+  topics: Topic[];
   createdAt: number;
   score: number;
   votedBy: string[]; // User IDs who have voted

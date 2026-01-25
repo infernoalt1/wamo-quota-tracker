@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Problem, User, Quota } from './types';
+import { Problem, User, Quota, Topic } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { api } from './api';
@@ -13,21 +13,22 @@ import {
   TrendingUp,
   Target,
   ShieldAlert,
-  CheckCircle,
-  FileText,
-  AlertCircle,
-  Zap,
-  Layers,
-  Info,
   BadgeCheck,
   Pencil,
   Save,
   X,
   Trash2,
   Lock,
-  Calendar,
   Clock,
-  RotateCcw
+  RotateCcw,
+  Info,
+  Filter,
+  ArrowUpDown,
+  Search,
+  ExternalLink,
+  AlertCircle,
+  Layers,
+  Zap
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -51,6 +52,8 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
   </button>
 );
 
+const TOPICS: Topic[] = ['Algebra', 'Geometry', 'Combinatorics', 'Number Theory'];
+
 export default function App() {
   // --- Global State ---
   const [users, setUsers] = useState<User[]>([]);
@@ -71,9 +74,12 @@ export default function App() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState(false);
 
-  // --- Form State ---
+  // --- Form State (Submit/Edit) ---
+  const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
+  const [difficulty, setDifficulty] = useState<string>('3.0');
+  const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   
@@ -94,7 +100,11 @@ export default function App() {
   const [newQuotaTarget, setNewQuotaTarget] = useState(5);
   const [newQuotaInstr, setNewQuotaInstr] = useState('');
 
-  // Pool View State (for stable sorting)
+  // Pool View State (Sorting/Filtering)
+  const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
+  const [poolFilterTopic, setPoolFilterTopic] = useState<string>('All');
+  const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<number>(0);
+  const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<number>(10);
   const [poolIds, setPoolIds] = useState<string[]>([]);
 
   // --- Initial Load ---
@@ -177,18 +187,46 @@ export default function App() {
       const isDifferent = JSON.stringify(updatedUsers.map(u => u.submittedCount)) !== JSON.stringify(users.map(u => u.submittedCount));
       if (isDifferent) {
          setUsers(updatedUsers);
-         // When using real backend we don't need _updateMockUser, local state update is enough for display
       }
     }
   }, [problems, activeQuotaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Handle Pool Sorting
+  // Handle Pool Sorting & Filtering
   useEffect(() => {
     if (view === 'pool') {
-      const sorted = [...problems].sort((a, b) => (b.score || 0) - (a.score || 0));
-      setPoolIds(sorted.map(p => p.id));
+      let filtered = [...problems];
+
+      // Filter by Topic
+      if (poolFilterTopic !== 'All') {
+          filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
+      }
+
+      // Filter by Difficulty
+      filtered = filtered.filter(p => {
+          const d = p.difficulty || 0;
+          return d >= poolFilterDiffMin && d <= poolFilterDiffMax;
+      });
+
+      // Sort
+      filtered.sort((a, b) => {
+          const scoreA = a.score || 0;
+          const scoreB = b.score || 0;
+          const diffA = a.difficulty || 0;
+          const diffB = b.difficulty || 0;
+
+          switch(poolSort) {
+              case 'highest': return scoreB - scoreA;
+              case 'lowest': return scoreA - scoreB;
+              case 'hardest': return diffB - diffA;
+              case 'easiest': return diffA - diffB;
+              case 'newest': return b.createdAt - a.createdAt;
+              default: return 0;
+          }
+      });
+
+      setPoolIds(filtered.map(p => p.id));
     }
-  }, [view, problems.length]); 
+  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterDiffMin, poolFilterDiffMax]); 
 
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, name: 'Default', instructions: '', dueDate: null };
@@ -336,28 +374,67 @@ export default function App() {
      });
   }
 
-  // -- Submission --
+  // -- Submission & Editing --
+  
+  const resetForm = () => {
+    setTitle('');
+    setStatement('');
+    setDifficulty('3.0');
+    setSelectedTopics([]);
+    setIsVerified(false);
+    setEditingProblemId(null);
+    setSubmissionError(null);
+  };
+
+  const handleStartEdit = (prob: Problem) => {
+      setEditingProblemId(prob.id);
+      setTitle(prob.title);
+      setStatement(prob.statement);
+      setDifficulty(prob.difficulty.toString());
+      setSelectedTopics(prob.topics || []);
+      setIsVerified(true); // Auto-verify on edit since it's already there
+      setView('submit');
+  };
+
+  const handleTopicToggle = (topic: Topic) => {
+      if (selectedTopics.includes(topic)) {
+          setSelectedTopics(selectedTopics.filter(t => t !== topic));
+      } else {
+          setSelectedTopics([...selectedTopics, topic]);
+      }
+  };
 
   const handleSubmit = async () => {
     if (!currentUser || !title || !statement || !isVerified) return;
+    if (selectedTopics.length === 0) {
+        setSubmissionError("Please select at least one topic.");
+        return;
+    }
     
     setSubmissionError(null);
     setIsSubmitting(true);
 
     try {
-      await api.submitProblem({
-          authorId: currentUser.id,
-          authorName: currentUser.name,
+      const payload = {
           title,
           statement,
+          difficulty: parseFloat(difficulty),
+          topics: selectedTopics,
           quotaId: activeQuotaId
-      });
+      };
+
+      if (editingProblemId) {
+          await api.updateProblem(editingProblemId, payload);
+      } else {
+          await api.submitProblem({
+              ...payload,
+              authorId: currentUser.id,
+              authorName: currentUser.name,
+          });
+      }
       
       await refreshData();
-      
-      setTitle('');
-      setStatement('');
-      setIsVerified(false);
+      resetForm();
       setView('dashboard');
     } catch (e: any) {
       setSubmissionError(e.message || "System error during validation.");
@@ -393,7 +470,6 @@ export default function App() {
     
     try {
         await api.toggleVote(problemId);
-        // Ensure local state matches eventual consistency or refetch
     } catch (e) {
         setProblems(oldProblems);
         console.error("Vote failed");
@@ -495,7 +571,7 @@ export default function App() {
       <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-sm">
         <div className="p-6 border-b border-slate-100">
           <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center gap-2">
-            <BookOpen className="w-7 h-7 text-indigo-600" /> WAMO Quota Tracker
+            <BookOpen className="w-7 h-7 text-indigo-600" /> Quota Tracker
           </h2>
         </div>
         
@@ -510,7 +586,7 @@ export default function App() {
             icon={<PlusCircle className="w-5 h-5" />} 
             label="Write Problem" 
             active={view === 'submit'} 
-            onClick={() => setView('submit')} 
+            onClick={() => { resetForm(); setView('submit'); }} 
           />
           <NavItem 
             icon={<BookOpen className="w-5 h-5" />} 
@@ -614,7 +690,7 @@ export default function App() {
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-slate-900">Your Submissions</h3>
-                <Button variant="ghost" onClick={() => setView('submit')} className="text-sm">
+                <Button variant="ghost" onClick={() => { resetForm(); setView('submit'); }} className="text-sm">
                   <PlusCircle className="w-4 h-4" /> Add Problem
                 </Button>
               </div>
@@ -629,7 +705,9 @@ export default function App() {
                         problem={p} 
                         showAuthor={true} 
                         currentUserId={currentUser.id}
+                        currentUserRole={currentUser.role}
                         onUpvote={handleToggleVote}
+                        onEdit={handleStartEdit}
                         votingPower={currentUser.votingPower}
                     />
                   ))}
@@ -641,28 +719,20 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW: SUBMIT */}
+        {/* VIEW: SUBMIT / EDIT */}
         {view === 'submit' && (
           <div className="max-w-3xl mx-auto">
             <header className="mb-8">
               <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-4 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
                  ← Back to Dashboard
               </Button>
-              <h1 className="text-3xl font-bold text-slate-900">New Submission</h1>
+              <h1 className="text-3xl font-bold text-slate-900">
+                  {editingProblemId ? 'Edit Problem' : 'New Submission'}
+              </h1>
               <p className="text-slate-500">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
             </header>
             
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-               <div className="px-8 pt-6 pb-2">
-                 <div className="bg-white border border-blue-200 p-4 rounded-xl flex gap-3 items-start">
-                    <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="text-sm font-bold text-blue-800">Round Instructions</h4>
-                      <p className="text-sm text-blue-700 mt-1">{activeQuota.instructions}</p>
-                    </div>
-                 </div>
-               </div>
-
               <div className="p-8 space-y-8">
                 {/* Title */}
                 <div>
@@ -674,6 +744,48 @@ export default function App() {
                     placeholder="e.g. The Three Triangles"
                     className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black placeholder:text-slate-400"
                   />
+                </div>
+
+                {/* Topics & Difficulty */}
+                <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Difficulty Rating</label>
+                        <div className="flex gap-2 items-center">
+                            <input 
+                                type="number" 
+                                step="0.1"
+                                min="0"
+                                max="50"
+                                value={difficulty}
+                                onChange={(e) => setDifficulty(e.target.value)}
+                                className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black"
+                            />
+                        </div>
+                        <a 
+                            href="https://artofproblemsolving.com/wiki/index.php/AoPS_Wiki:Competition_ratings" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1"
+                        >
+                            <ExternalLink className="w-3 h-3" /> AoPS Rating Guide (Tenths place only)
+                        </a>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Topics (Select at least 1)</label>
+                        <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            {TOPICS.map(t => (
+                                <label key={t} className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition-colors">
+                                    <input 
+                                        type="checkbox"
+                                        checked={selectedTopics.includes(t)}
+                                        onChange={() => handleTopicToggle(t)}
+                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm text-slate-700">{t}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Statement */}
@@ -721,7 +833,7 @@ export default function App() {
                   disabled={!title || !statement || !isVerified}
                   isLoading={isSubmitting}
                 >
-                  Submit Problem
+                  {editingProblemId ? 'Update Problem' : 'Submit Problem'}
                 </Button>
               </div>
             </div>
@@ -731,7 +843,7 @@ export default function App() {
         {/* VIEW: POOL (BLIND REVIEW) */}
         {view === 'pool' && (
           <div className="max-w-5xl mx-auto">
-            <header className="mb-8 flex justify-between items-center">
+            <header className="mb-8 flex flex-col md:flex-row justify-between md:items-center gap-4">
                <div>
                   <h1 className="text-3xl font-bold text-slate-900">Problem Pool</h1>
                   <p className="text-slate-500 mt-2">
@@ -739,18 +851,73 @@ export default function App() {
                   </p>
                </div>
             </header>
+            
+            {/* Filters Bar */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row gap-4 items-center">
+                <div className="flex items-center gap-2 text-sm text-slate-500 font-semibold">
+                    <Filter className="w-4 h-4" /> Filters:
+                </div>
+                
+                {/* Topic Filter */}
+                <select 
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={poolFilterTopic}
+                    onChange={(e) => setPoolFilterTopic(e.target.value)}
+                >
+                    <option value="All">All Topics</option>
+                    {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+
+                {/* Difficulty Filter */}
+                <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                    <span className="text-xs font-bold text-slate-400 uppercase">Diff</span>
+                    <input 
+                        type="number" 
+                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500"
+                        value={poolFilterDiffMin}
+                        onChange={e => setPoolFilterDiffMin(Number(e.target.value))}
+                        placeholder="Min"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input 
+                        type="number" 
+                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500"
+                        value={poolFilterDiffMax}
+                        onChange={e => setPoolFilterDiffMax(Number(e.target.value))}
+                        placeholder="Max"
+                    />
+                </div>
+
+                <div className="flex-1"></div>
+
+                {/* Sorting */}
+                <div className="flex items-center gap-2">
+                    <ArrowUpDown className="w-4 h-4 text-slate-400" />
+                    <select 
+                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={poolSort}
+                        onChange={(e) => setPoolSort(e.target.value as any)}
+                    >
+                        <option value="highest">Votes: High to Low</option>
+                        <option value="lowest">Votes: Low to High</option>
+                        <option value="hardest">Difficulty: Hardest First</option>
+                        <option value="easiest">Difficulty: Easiest First</option>
+                        <option value="newest">Newest First</option>
+                    </select>
+                </div>
+            </div>
 
             <div className="grid gap-6">
-              {problems.length === 0 ? (
+              {poolIds.length === 0 ? (
                 <div className="text-center py-24 bg-white rounded-3xl border border-slate-200 shadow-sm">
                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <BookOpen className="w-10 h-10 text-slate-300" />
+                      <Search className="w-10 h-10 text-slate-300" />
                    </div>
-                   <h2 className="text-xl font-bold text-slate-900">The pool is empty</h2>
-                   <p className="text-slate-500 mt-2">Be the first to submit a problem!</p>
+                   <h2 className="text-xl font-bold text-slate-900">No problems found</h2>
+                   <p className="text-slate-500 mt-2">Try adjusting your filters.</p>
                 </div>
               ) : (
-                // Use poolIds to render in frozen order, but find the live problem object
+                // Use poolIds to render in filtered/sorted order
                 poolIds.map(id => {
                   const p = problems.find(prob => prob.id === id);
                   if (!p) return null;
@@ -760,7 +927,9 @@ export default function App() {
                       problem={p} 
                       showAuthor={p.authorId === currentUser.id} // ONLY show if it is MY problem. Admin sees blind.
                       currentUserId={currentUser.id}
+                      currentUserRole={currentUser.role}
                       onUpvote={handleToggleVote}
+                      onEdit={handleStartEdit}
                       votingPower={currentUser.votingPower}
                     />
                   );
@@ -998,7 +1167,7 @@ export default function App() {
                          </td>
                          <td className="px-6 py-4 text-sm">
                              <div className="flex items-center gap-1">
-                                <span className={`font-bold ${u.customTargets?.[activeQuotaId] ? 'text-indigo-600' : 'text-slate-500'}`}>
+                                <span className="font-bold text-slate-700">
                                     {uTarget}
                                 </span>
                              </div>

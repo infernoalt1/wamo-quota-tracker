@@ -56,6 +56,8 @@ const initDB = async () => {
         quota_id UUID REFERENCES quotas(id),
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
+        difficulty NUMERIC(3,1) DEFAULT 0,
+        topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -280,6 +282,8 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
       quotaId: row.quota_id, // Ensure we send this
+      difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
+      topics: row.topics || [],
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || []
     }));
@@ -293,17 +297,46 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
-    const { title, statement, quotaId } = req.body;
+    const { title, statement, quotaId, difficulty, topics } = req.body;
     
     const result = await pool.query(
-      'INSERT INTO problems (author_id, quota_id, title, statement) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.user.id, quotaId, title, statement]
+      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [req.user.id, quotaId, title, statement, difficulty || 0, topics || []]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Submission failed' });
+  }
+});
+
+app.put('/api/problems/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { title, statement, difficulty, topics } = req.body;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    // 1. Verify ownership or admin status
+    const check = await pool.query('SELECT author_id FROM problems WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Problem not found' });
+    
+    const authorId = check.rows[0].author_id;
+    if (authorId !== userId && userRole !== 'admin') {
+      return res.status(403).json({ error: 'Not authorized to edit this problem' });
+    }
+
+    // 2. Update
+    const result = await pool.query(
+      'UPDATE problems SET title = $1, statement = $2, difficulty = $3, topics = $4 WHERE id = $5 RETURNING *',
+      [title, statement, difficulty, topics, id]
+    );
+
+    res.json({ success: true, problem: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Update failed' });
   }
 });
 

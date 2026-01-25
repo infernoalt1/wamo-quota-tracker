@@ -1,12 +1,14 @@
 import React from 'react';
 import { Problem } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Tag, Target, Pencil } from 'lucide-react';
 
 interface ProblemCardProps {
   problem: Problem;
   showAuthor?: boolean;
   currentUserId: string;
+  currentUserRole: string;
   onUpvote: (problemId: string) => void;
+  onEdit: (problem: Problem) => void;
   votingPower: number;
 }
 
@@ -14,17 +16,29 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   problem, 
   showAuthor = false, 
   currentUserId,
+  currentUserRole,
   onUpvote,
+  onEdit,
   votingPower
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
+  
+  // Can edit if admin or author
+  const canEdit = currentUserRole === 'admin' || problem.authorId === currentUserId;
+
+  const topicColors: Record<string, string> = {
+    'Algebra': 'bg-blue-100 text-blue-700',
+    'Geometry': 'bg-green-100 text-green-700',
+    'Combinatorics': 'bg-orange-100 text-orange-700',
+    'Number Theory': 'bg-purple-100 text-purple-700'
+  };
 
   return (
     <div className="group bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row">
       
       {/* Vote Section */}
-      <div className="flex flex-row md:flex-col items-center justify-between md:justify-center p-4 md:p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[80px] gap-2">
+      <div className="flex flex-row md:flex-col items-center justify-between md:justify-center p-4 md:p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[80px] gap-2 bg-slate-50/50">
          <button 
             onClick={() => onUpvote(problem.id)}
             className={`flex flex-col items-center gap-1 transition-all ${
@@ -44,9 +58,21 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
 
       <div className="p-6 flex-1">
         <div className="flex justify-between items-start mb-4">
-          <div className="flex flex-col gap-1">
-            <h3 className="text-lg font-bold text-slate-900 leading-tight">{problem.title}</h3>
-            <div className="flex items-center gap-3 text-xs text-slate-500">
+          <div className="flex flex-col gap-1 flex-1">
+            <div className="flex items-start justify-between gap-4">
+                <h3 className="text-lg font-bold text-slate-900 leading-tight">{problem.title}</h3>
+                {canEdit && (
+                    <button 
+                        onClick={() => onEdit(problem)}
+                        className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-slate-100 transition-colors"
+                        title="Edit Problem"
+                    >
+                        <Pencil className="w-4 h-4" />
+                    </button>
+                )}
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
                {showAuthor ? (
                   <span className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
                     By {problem.authorName}
@@ -56,12 +82,25 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                     <MoreHorizontal className="w-3 h-3" /> Blind Review
                   </span>
                )}
+               <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                  <Target className="w-3 h-3" />
+                  Diff: <span className="font-bold">{problem.difficulty}</span>
+               </span>
                <span className="flex items-center gap-1">
                  <Calendar className="w-3 h-3" />
                  {new Date(problem.createdAt).toLocaleDateString()}
                </span>
             </div>
           </div>
+        </div>
+        
+        {/* Topics */}
+        <div className="flex flex-wrap gap-2 mb-4">
+            {problem.topics && problem.topics.map(t => (
+                <span key={t} className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${topicColors[t] || 'bg-gray-100 text-gray-700'}`}>
+                    {t}
+                </span>
+            ))}
         </div>
 
         <div className="bg-white p-5 rounded-lg font-serif text-slate-800 border border-slate-200 whitespace-pre-wrap leading-relaxed">

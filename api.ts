@@ -121,6 +121,17 @@ export const api = {
     }
   },
 
+  updateProblem: async (problemId: string, problem: Partial<Problem>): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; // Not implemented for mock
+    
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}`, {
+      method: 'PUT',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(problem)
+    });
+    if (!res.ok) throw new Error('Update problem failed');
+  },
+
   toggleVote: async (problemId: string): Promise<void> => {
     if (USE_MOCK_BACKEND) return mockApi.toggleVote(problemId);
 
