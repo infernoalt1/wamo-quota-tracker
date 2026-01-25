@@ -70,6 +70,12 @@ const initDB = async () => {
         PRIMARY KEY (user_id, problem_id)
       );
     `);
+    
+    // --- MIGRATION: Ensure new columns exist for old databases ---
+    await client.query(`
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS difficulty NUMERIC(3,1) DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
+    `);
 
     // Seed Admin if not exists
     const adminCheck = await client.query("SELECT * FROM users WHERE role = 'admin'");
@@ -299,9 +305,11 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
     const { title, statement, quotaId, difficulty, topics } = req.body;
     
+    const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
+    
     const result = await pool.query(
       'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [req.user.id, quotaId, title, statement, difficulty || 0, topics || []]
+      [req.user.id, quotaId, title, statement, diffVal, topics || []]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -328,9 +336,11 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     }
 
     // 2. Update
+    const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
+    
     const result = await pool.query(
       'UPDATE problems SET title = $1, statement = $2, difficulty = $3, topics = $4 WHERE id = $5 RETURNING *',
-      [title, statement, difficulty, topics, id]
+      [title, statement, diffVal, topics, id]
     );
 
     res.json({ success: true, problem: result.rows[0] });
