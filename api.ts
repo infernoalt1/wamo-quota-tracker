@@ -3,9 +3,11 @@ import { Problem, User, Quota } from './types';
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
 
-// In production, the backend serves the frontend, so the URL is relative.
-// In development, we might need localhost:3000 if not using a proxy.
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000';
+// Determine if we are in local development (Vite default port 5173)
+// If on localhost:5173, assume backend is on port 3000.
+// Otherwise (production/render), use relative path '' so requests go to the same origin.
+const isLocalDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+const API_BASE_URL = isLocalDev ? 'http://localhost:3000' : '';
 
 // --- INTERFACE ---
 
