@@ -1,8 +1,1 @@
-interface ImportMetaEnv {
-  readonly PROD: boolean;
-  readonly [key: string]: any;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}
+/// <reference types="vite/client" />

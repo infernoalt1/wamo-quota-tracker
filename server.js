@@ -41,16 +41,18 @@ const initDB = async () => {
     const client = await pool.connect();
     
     // Create Tables if they don't exist
+    // Note: We use a named constraint for role check to easily drop/modify it later
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL, 
         password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('admin', 'writer')),
+        role TEXT NOT NULL,
         voting_power INTEGER DEFAULT 1,
         custom_targets JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer'))
       );
       
       CREATE TABLE IF NOT EXISTS quotas (
@@ -91,6 +93,15 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
     `);
+
+    // --- MIGRATION: Update Role Constraint to include 'director' ---
+    // We try to drop the old implicit constraint (often named users_role_check) and add the new one.
+    try {
+       await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+       await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer'))`);
+    } catch (e) {
+       console.log("Constraint update warning (may already exist):", e.message);
+    }
 
     // Seed Admin if not exists
     const adminCheck = await client.query("SELECT * FROM users WHERE role = 'admin'");
@@ -159,7 +170,7 @@ app.post('/api/ai/analyze', authenticateToken, async (req, res) => {
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
     
@@ -197,10 +208,13 @@ app.post('/auth/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    // Ensure role is valid
+    const safeRole = ['admin', 'director', 'writer'].includes(role) ? role : 'writer';
+
     // Return all fields needed for the frontend User interface
     const result = await pool.query(
       'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, role, voting_power, custom_targets',
-      [name, email, hashedPassword, role || 'writer']
+      [name, email, hashedPassword, safeRole]
     );
     
     const u = result.rows[0];
@@ -275,23 +289,45 @@ app.get('/api/users', async (req, res) => {
 });
 
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.sendStatus(403);
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
   const { id } = req.params;
-  const { name, password, votingPower, customTargets } = req.body;
+  const { name, password, votingPower, customTargets, role } = req.body;
   
   try {
+    // Permission Check: Sub-Director Limitations
+    if (req.user.role === 'director') {
+        // 1. Cannot modify password
+        if (password && password.trim() !== '') {
+            return res.status(403).json({ error: "Directors cannot modify passwords" });
+        }
+        
+        // 2. Cannot modify Admins
+        const targetCheck = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
+        if (targetCheck.rows.length > 0 && targetCheck.rows[0].role === 'admin') {
+             return res.status(403).json({ error: "Directors cannot modify Admins" });
+        }
+    }
+
     let query = 'UPDATE users SET name = $1, voting_power = $2, custom_targets = $3';
     let params = [name, votingPower, customTargets];
-    
+    let paramIndex = 4;
+
+    // Update Password (if allowed and present)
     if (password && password.trim() !== '') {
         const hashedPassword = await bcrypt.hash(password, 10);
-        query += ', password_hash = $4 WHERE id = $5';
-        params.push(hashedPassword, id);
-    } else {
-        query += ' WHERE id = $4';
-        params.push(id);
+        query += `, password_hash = $${paramIndex++}`;
+        params.push(hashedPassword);
     }
+    
+    // Update Role (Admin only)
+    if (role && req.user.role === 'admin') {
+         query += `, role = $${paramIndex++}`;
+         params.push(role);
+    }
+
+    query += ` WHERE id = $${paramIndex}`;
+    params.push(id);
     
     await pool.query(query, params);
     res.json({ success: true });
@@ -302,12 +338,23 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
 });
 
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.sendStatus(403);
-    const client = await pool.connect();
+    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     
+    const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const userId = req.params.id;
+
+        // Permission Check: Director cannot delete Admin or Director
+        if (req.user.role === 'director') {
+             const targetCheck = await client.query('SELECT role FROM users WHERE id = $1', [userId]);
+             const targetRole = targetCheck.rows[0]?.role;
+             if (targetRole === 'admin' || targetRole === 'director') {
+                 await client.query('ROLLBACK');
+                 return res.status(403).json({ error: "Directors can only delete Writers" });
+             }
+        }
+
         await client.query('DELETE FROM votes WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM votes WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
         await client.query('DELETE FROM problems WHERE author_id = $1', [userId]);
@@ -384,7 +431,7 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     if (check.rows.length === 0) return res.status(404).json({ error: 'Problem not found' });
     
     const authorId = check.rows[0].author_id;
-    if (authorId !== userId && userRole !== 'admin') {
+    if (authorId !== userId && userRole !== 'admin' && userRole !== 'director') {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
 
@@ -405,7 +452,7 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
 
 // New Route: Update Status (Admin Only)
 app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.sendStatus(403);
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
   const { id } = req.params;
   const { status } = req.body;
@@ -465,7 +512,7 @@ app.get('/api/quotas', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/quotas', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.sendStatus(403);
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
   const { name, target, instructions, dueDate } = req.body;
   
@@ -490,7 +537,7 @@ app.post('/api/quotas', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.sendStatus(403);
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   const { id } = req.params;
   const { name, target, instructions, dueDate } = req.body;
   try {

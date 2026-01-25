@@ -31,7 +31,8 @@ import {
   Layers,
   Zap,
   Download,
-  CheckCircle
+  CheckCircle,
+  Crown
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -99,6 +100,7 @@ export default function App() {
   // Admin Create New User State
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'writer' | 'director'>('writer');
   
   // Quota Create New State
   const [newQuotaName, setNewQuotaName] = useState('');
@@ -327,14 +329,15 @@ export default function App() {
         const newUser = await api.createUser({
           name: newUserName.trim(),
           password: newUserPassword.trim(),
-          role: 'writer',
+          role: newUserRole,
           submittedCount: 0,
-          votingPower: 1, 
+          votingPower: newUserRole === 'director' ? 5 : 1, // Auto-set higher power for directors 
           customTargets: {}
         });
         setUsers([...users, newUser]);
         setNewUserName('');
         setNewUserPassword('');
+        setNewUserRole('writer');
     } catch(e) {
         console.error("Failed to create user", e);
     }
@@ -347,6 +350,7 @@ export default function App() {
         await refreshData();
     } catch(e) {
         console.error("Delete failed");
+        alert("Action failed. You may not have permission to delete this user.");
     }
   }
 
@@ -367,12 +371,14 @@ export default function App() {
           name: editUserForm.name,
           votingPower: editUserForm.votingPower,
           password: editUserForm.password, // Only updates if not empty string
-          customTargets: editUserForm.customTargets || currentTargets
+          customTargets: editUserForm.customTargets || currentTargets,
+          role: editUserForm.role // Allows admin to promote/demote if backend supports
       });
       await refreshData();
       setEditingUserId(null);
     } catch (e) {
       console.error("Failed to update user");
+      alert("Update failed. Directors cannot change passwords.");
     }
   };
 
@@ -607,6 +613,7 @@ export default function App() {
                     >
                       <span className="font-medium text-gray-700 group-hover:text-indigo-700">{user.name}</span>
                       {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Director</span>}
+                      {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Director</span>}
                     </button>
                   ))}
                </div>
@@ -647,7 +654,7 @@ export default function App() {
   // Count only for active quota
   const userProblemCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
   const progressPercent = Math.min((userProblemCount / userTarget) * 100, 100);
-  const isDirector = currentUser.role === 'admin';
+  const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans">
@@ -696,7 +703,7 @@ export default function App() {
 
         <div className="p-4 bg-white border-t border-slate-100">
           <div className="flex items-center gap-3 mb-4 p-2 rounded-lg bg-white border border-slate-100 shadow-sm">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${isDirector ? 'bg-purple-600' : 'bg-indigo-600'}`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : 'bg-slate-500'}`}>
               {currentUser.name.charAt(0)}
             </div>
             <div className="flex-1 min-w-0">
@@ -1163,7 +1170,7 @@ export default function App() {
                 {/* Add User */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                    <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                      <UserPlus className="w-5 h-5 text-indigo-600" /> Add New Writer
+                      <UserPlus className="w-5 h-5 text-indigo-600" /> Add New User
                    </h3>
                    <div className="space-y-4">
                       <input 
@@ -1180,6 +1187,22 @@ export default function App() {
                         placeholder="Password"
                         className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
+                      
+                      <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
+                          <button 
+                             onClick={() => setNewUserRole('writer')} 
+                             className={`flex-1 text-sm font-medium py-1.5 rounded-md transition-all ${newUserRole === 'writer' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                             Writer
+                          </button>
+                          <button 
+                             onClick={() => setNewUserRole('director')} 
+                             className={`flex-1 text-sm font-medium py-1.5 rounded-md transition-all ${newUserRole === 'director' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                             Director
+                          </button>
+                      </div>
+
                       <div className="flex justify-end pt-2">
                          <Button onClick={addUser} disabled={!newUserName.trim() || !newUserPassword.trim()}>
                            Create Account
@@ -1194,7 +1217,7 @@ export default function App() {
                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                   <div>
                     <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-indigo-600" /> Writer Management
+                        <TrendingUp className="w-5 h-5 text-indigo-600" /> User Management
                     </h3>
                     <p className="text-xs text-slate-400 mt-1">Configuring for Active Round: {activeQuota.name}</p>
                   </div>
@@ -1202,7 +1225,7 @@ export default function App() {
                <table className="w-full text-left">
                  <thead className="bg-white border-b border-slate-200">
                    <tr>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Writer</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">User</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Password</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Role & Power</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Active Target</th>
@@ -1217,6 +1240,10 @@ export default function App() {
                      const uCount = u.submittedCount || 0;
                      const isMet = uCount >= uTarget;
                      
+                     // Permission check for editing: If current user is director, cannot edit admin
+                     const canEditThisUser = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin');
+                     const canDeleteThisUser = canEditThisUser && u.role !== 'director'; // Directors shouldn't delete other directors unless Admin
+
                      if (editingUserId === u.id) {
                          // EDIT MODE ROW
                          return (
@@ -1227,17 +1254,36 @@ export default function App() {
                                         value={editUserForm.name} 
                                         onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
                                     />
+                                    {/* Role Editing (Admin only) */}
+                                    {currentUser.role === 'admin' && (
+                                       <select 
+                                         className="mt-1 w-full text-xs border border-indigo-200 rounded p-1 bg-white"
+                                         value={editUserForm.role}
+                                         onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
+                                       >
+                                           <option value="writer">Writer</option>
+                                           <option value="director">Director</option>
+                                           <option value="admin">Admin</option>
+                                       </select>
+                                    )}
                                 </td>
                                 <td className="px-6 py-4">
-                                    <div className="flex items-center gap-1">
-                                        <Lock className="w-3 h-3 text-slate-400"/>
-                                        <input 
-                                            className="w-24 px-2 py-1 border border-indigo-200 rounded text-sm text-black" 
-                                            placeholder="Reset Pass"
-                                            value={editUserForm.password}
-                                            onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
-                                        />
-                                    </div>
+                                    {/* Permission check: Sub-directors cannot edit passwords */}
+                                    {currentUser.role === 'admin' ? (
+                                        <div className="flex items-center gap-1">
+                                            <Lock className="w-3 h-3 text-slate-400"/>
+                                            <input 
+                                                className="w-24 px-2 py-1 border border-indigo-200 rounded text-sm text-black" 
+                                                placeholder="Reset Pass"
+                                                value={editUserForm.password}
+                                                onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-slate-400 italic flex items-center gap-1">
+                                            <Lock className="w-3 h-3"/> Locked
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="px-6 py-4">
                                      <div className="flex items-center gap-1">
@@ -1278,7 +1324,8 @@ export default function App() {
                        <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
                          <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
                            {u.name}
-                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 rounded uppercase">Dir</span>}
+                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
+                           {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 rounded uppercase">Director</span>}
                          </td>
                          <td className="px-6 py-4 text-sm font-mono text-black">
                             {u.password || '********'}
@@ -1311,10 +1358,12 @@ export default function App() {
                          </td>
                          <td className="px-6 py-4">
                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded transition-colors" title="Edit User">
-                                    <Pencil className="w-4 h-4" />
-                                </button>
-                                {u.role !== 'admin' && (
+                                {canEditThisUser && (
+                                    <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded transition-colors" title="Edit User">
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                )}
+                                {canDeleteThisUser && (
                                     <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors" title="Delete User">
                                         <Trash2 className="w-4 h-4" />
                                     </button>

@@ -34,7 +34,7 @@ export interface User {
   id: string;
   name: string;
   password: string; // Stored locally for this app version
-  role: 'admin' | 'writer';
+  role: 'admin' | 'director' | 'writer';
   submittedCount: number; // Dynamic count based on active quota
   votingPower: number;
   customTargets: Record<string, number>; // Map of quotaId -> target override

@@ -28,9 +28,9 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   const score = problem.score || 0;
   const status = problem.status || 'pending';
   
-  // Can edit if admin or author
-  const canEdit = currentUserRole === 'admin' || problem.authorId === currentUserId;
-  const isAdmin = currentUserRole === 'admin';
+  // Can edit if admin, director or author
+  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'director';
+  const canEdit = isAdmin || problem.authorId === currentUserId;
 
   const topicColors: Record<string, string> = {
     'Algebra': 'bg-blue-100 text-blue-700',
