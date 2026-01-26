@@ -7,6 +7,7 @@ import { api } from '../api';
 
 interface ProblemCardProps {
   problem: Problem;
+  quotaName?: string; // New prop for display
   showAuthor?: boolean;
   currentUserId: string;
   currentUserRole: string;
@@ -14,19 +15,18 @@ interface ProblemCardProps {
   onEdit: (problem: Problem) => void;
   onStatusChange?: (problemId: string, status: ProblemStatus) => void;
   votingPower: number;
-  acceptedInQuotaName?: string; // New prop to show where it's accepted
 }
 
 export const ProblemCard: React.FC<ProblemCardProps> = ({ 
   problem, 
+  quotaName,
   showAuthor = false, 
   currentUserId,
   currentUserRole,
   onUpvote,
   onEdit,
   onStatusChange,
-  votingPower,
-  acceptedInQuotaName
+  votingPower
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
@@ -50,13 +50,13 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   const StatusBadge = () => {
     if (status === 'accepted') {
       return (
-        <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2.5 py-1 rounded-full text-xs font-bold border border-green-200 whitespace-nowrap">
+        <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2.5 py-1 rounded-full text-xs font-bold border border-green-200 shadow-sm">
            <CheckCircle className="w-3.5 h-3.5" /> 
-           {acceptedInQuotaName ? `Accepted in ${acceptedInQuotaName}` : 'Accepted'}
+           <span>Accepted {quotaName ? `in ${quotaName}` : ''}</span>
         </span>
       );
     }
-    return null;
+    return null; // Pending status doesn't need a loud badge
   };
 
   const toggleExpand = async () => {
@@ -87,7 +87,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   };
 
   return (
-    <div className={`group bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-300 ring-1 ring-green-100' : 'border-slate-200'}`}>
+    <div className={`group bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-200 ring-2 ring-green-50' : 'border-slate-200'}`}>
       
       {/* Vote Section */}
       <div className="flex flex-row md:flex-col items-center justify-between md:justify-center p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[90px] gap-2 bg-slate-50/50">
