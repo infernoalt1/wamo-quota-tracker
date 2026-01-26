@@ -432,6 +432,7 @@ export default function App() {
                   {users.map(user => (
                     <button key={user.id} onClick={() => setSelectedLoginId(user.id)} className="w-full p-2.5 hover:bg-slate-50 rounded-lg text-left text-sm flex items-center justify-between group transition-colors">
                       <span className="font-medium text-slate-700 group-hover:text-indigo-700">{user.name}</span>
+                      {/* Badge UI removed from here */}
                     </button>
                   ))}
                </div>

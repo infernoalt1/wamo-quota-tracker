@@ -205,29 +205,16 @@ app.post('/auth/guest-login', async (req, res) => {
   }
 });
 
-// PROTECTED REGISTRATION: Only Admin/Director can add users
-app.post('/auth/register', authenticateToken, async (req, res) => {
+app.post('/auth/register', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
-    
-    // Authorization Check
-    const currentUserRole = req.user.role;
-    if (currentUserRole !== 'admin' && currentUserRole !== 'director') {
-       return res.status(403).json({ error: "Unauthorized" });
-    }
-
-    // Role Enforcement: Directors can only create Writers
-    let safeRole = role;
-    if (currentUserRole === 'director') {
-        safeRole = 'writer';
-    } else {
-        // Admins can create anything
-        safeRole = ['admin', 'director', 'writer'].includes(role) ? role : 'writer';
-    }
-
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    // Ensure role is valid
+    const safeRole = ['admin', 'director', 'writer'].includes(role) ? role : 'writer';
+
+    // Return all fields needed for the frontend User interface
     const result = await pool.query(
       'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, role, voting_power, custom_targets',
       [name, email, hashedPassword, safeRole]
@@ -318,19 +305,10 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: "Directors cannot modify passwords" });
         }
         
-        // 2. Cannot modify Admins or Directors
-        // We need to check the target user's role before update
+        // 2. Cannot modify Admins
         const targetCheck = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
-        if (targetCheck.rows.length > 0) {
-             const targetRole = targetCheck.rows[0].role;
-             if (targetRole === 'admin' || targetRole === 'director') {
-                 // But wait, can a Director modify their OWN custom targets? 
-                 // Usually yes, but for this specific request "should not be able to modify any information regarding the Administrator"
-                 // The general rule: Director manages Writers.
-                 if (targetRole === 'admin') {
-                    return res.status(403).json({ error: "Directors cannot modify Admins" });
-                 }
-             }
+        if (targetCheck.rows.length > 0 && targetCheck.rows[0].role === 'admin') {
+             return res.status(403).json({ error: "Directors cannot modify Admins" });
         }
     }
 

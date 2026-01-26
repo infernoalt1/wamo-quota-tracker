@@ -1,6 +1,7 @@
 import { Problem, User, Quota, ProblemStatus } from './types';
 
 // --- CONFIGURATION ---
+// Default to localhost:3000 for the backend server
 const API_BASE_URL = 'http://localhost:3000';
 
 // --- INTERFACE ---
@@ -8,15 +9,20 @@ const API_BASE_URL = 'http://localhost:3000';
 export const api = {
   // Auth
   login: async (loginIdOrEmail: string, password?: string): Promise<{ user: User, token?: string }> => {
-    const res = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: loginIdOrEmail, password })
-    });
-    if (!res.ok) throw new Error('Login failed');
-    const data = await res.json();
-    if (data.accessToken) localStorage.setItem('token', data.accessToken);
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginIdOrEmail, password })
+      });
+      if (!res.ok) throw new Error('Login failed');
+      const data = await res.json();
+      if (data.accessToken) localStorage.setItem('token', data.accessToken);
+      return data;
+    } catch (error) {
+      console.error("Login API Error:", error);
+      throw error;
+    }
   },
 
   guestLogin: async (): Promise<{ user: User, token?: string }> => {
@@ -39,9 +45,14 @@ export const api = {
 
   // Users
   getUsers: async (): Promise<User[]> => {
-    const res = await fetch(`${API_BASE_URL}/api/users`, { headers: getAuthHeader() });
-    if (!res.ok) throw new Error('Failed to fetch users');
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users`, { headers: getAuthHeader() });
+      if (!res.ok) throw new Error('Failed to fetch users');
+      return res.json();
+    } catch (error) {
+      console.error("Get Users API Error:", error);
+      throw error;
+    }
   },
 
   createUser: async (user: Partial<User>): Promise<User> => {

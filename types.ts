@@ -14,7 +14,7 @@ export interface Quota {
 
 export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
 
-export type ProblemStatus = 'pending' | 'accepted';
+export type ProblemStatus = 'pending' | 'shortlisted' | 'accepted';
 
 export interface Problem {
   id: string;

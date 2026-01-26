@@ -1,6 +1,6 @@
 import React from 'react';
 import { Problem, ProblemStatus } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, Star, AlertCircle, Image as ImageIcon } from 'lucide-react';
 import { MathText } from './MathText';
 
 interface ProblemCardProps {
@@ -105,7 +105,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
           <div className="flex items-center gap-1 shrink-0">
               {isAdmin && onStatusChange && (
                   <div className="flex items-center bg-slate-50 border border-slate-200 rounded p-0.5 gap-0.5">
-                        <button onClick={() => onStatusChange(problem.id, 'pending')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'pending' ? 'text-slate-800' : 'text-slate-400'}`} title="Mark Pending"><AlertCircle className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => onStatusChange(problem.id, 'pending')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'pending' ? 'text-slate-800' : 'text-slate-400'}`} title="Pending"><AlertCircle className="w-3.5 h-3.5" /></button>
                         <button onClick={() => onStatusChange(problem.id, 'accepted')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'accepted' ? 'text-green-600' : 'text-slate-400'}`} title="Accept"><CheckCircle className="w-3.5 h-3.5" /></button>
                   </div>
               )}
@@ -127,13 +127,13 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
 
         <div className="bg-slate-50 p-4 rounded-lg border border-slate-100/50">
             <MathText text={problem.statement} className="text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-serif" />
-            
-            {problem.imageData && (
-               <div className="mt-4 pt-4 border-t border-slate-200">
-                   <img src={problem.imageData} alt="Problem Attachment" className="max-w-full h-auto rounded-md border border-slate-200 shadow-sm mx-auto sm:mx-0" />
-               </div>
-            )}
         </div>
+        
+        {problem.imageData && (
+           <div className="mt-3">
+               <img src={problem.imageData} alt="Problem Attachment" className="max-w-full h-auto max-h-[400px] rounded border border-slate-200" />
+           </div>
+        )}
       </div>
     </div>
   );
