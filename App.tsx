@@ -8,7 +8,6 @@ import {
   PlusCircle, 
   LayoutDashboard, 
   BookOpen, 
-  LogOut, 
   Settings,
   UserPlus,
   TrendingUp,
@@ -26,7 +25,6 @@ import {
   Filter,
   ArrowUpDown,
   Search,
-  ExternalLink,
   AlertCircle,
   Layers,
   Zap,
@@ -34,19 +32,14 @@ import {
   CheckCircle,
   Crown,
   ThumbsUp,
-  ChevronRight,
   User as UserIcon,
   Image as ImageIcon,
   LayoutList,
   ArrowRight,
-  ArrowUp,
-  ArrowDown,
-  FileText,
   GripVertical,
   ChevronDown,
   ChevronUp,
-  MessageSquare,
-  BarChart2
+  MessageSquare
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -89,50 +82,6 @@ const AOPS_SCALE_INFO = (
         <p>9.5-10: World Class / Historically Hard</p>
     </div>
 );
-
-// --- Simple Line Chart Component for Difficulty ---
-const DifficultyGraph = ({ problems }: { problems: Problem[] }) => {
-    if (problems.length === 0) return null;
-    const maxDiff = 10;
-    const height = 60;
-    const width = 100;
-    
-    // Create points string "x,y x,y"
-    // x normalized to 0-100, y normalized to 0-height (inverted since SVG 0 is top)
-    const points = problems.map((p, i) => {
-        const x = (i / (problems.length - 1 || 1)) * width;
-        const y = height - (Math.min(p.difficulty, maxDiff) / maxDiff) * height;
-        return `${x},${y}`;
-    }).join(' ');
-
-    return (
-        <div className="w-full h-24 bg-white rounded-lg border border-slate-200 p-2 relative overflow-hidden">
-            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
-                 {/* Grid lines */}
-                 <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeWidth="0.5" />
-                 
-                 {/* Area under curve */}
-                 <path d={`M0,${height} L0,${height} ${points} L${width},${height} Z`} fill="rgba(99, 102, 241, 0.1)" />
-                 
-                 {/* Line */}
-                 <polyline points={points} fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-                 
-                 {/* Dots */}
-                 {problems.map((p, i) => {
-                     const x = (i / (problems.length - 1 || 1)) * width;
-                     const y = height - (Math.min(p.difficulty, maxDiff) / maxDiff) * height;
-                     return (
-                         <circle key={i} cx={x} cy={y} r="2" fill="#fff" stroke="#6366f1" strokeWidth="1" vectorEffect="non-scaling-stroke">
-                             <title>Problem {i+1}: {p.difficulty}</title>
-                         </circle>
-                     );
-                 })}
-            </svg>
-            <div className="absolute top-0 right-0 text-[9px] text-slate-400 bg-white/80 px-1 rounded">Max 10</div>
-            <div className="absolute bottom-0 left-0 text-[9px] text-slate-400 bg-white/80 px-1 rounded">Problem 1</div>
-        </div>
-    );
-};
 
 export default function App() {
   // --- Global State ---
@@ -207,9 +156,10 @@ export default function App() {
   const [composerMinDiff, setComposerMinDiff] = useState<number>(0);
   const [composerMaxDiff, setComposerMaxDiff] = useState<number>(50);
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
+  const [composerSelectedRound, setComposerSelectedRound] = useState<string | null>(null);
   
   // Composer DnD State
-  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  const [draggedProblemId, setDraggedProblemId] = useState<string | null>(null);
 
 
   // --- Initial Load ---
@@ -288,6 +238,10 @@ export default function App() {
              setActiveQuotaId(q[0].id);
              // Also update the filter if it was set to the invalid ID
              if (poolFilterQuota === activeQuotaId) setPoolFilterQuota(q[0].id);
+          }
+          // Set initial composer round
+          if (!composerSelectedRound && q.length > 0) {
+              setComposerSelectedRound(q[0].id);
           }
       } catch (e) {
           console.error("Failed to refresh data", e);
@@ -374,8 +328,9 @@ export default function App() {
   
   // Set Composer default filter when opening view
   useEffect(() => {
-      if (view === 'composer') {
-          setComposerSourceQuota(activeQuotaId);
+      if (view === 'composer' && activeQuotaId) {
+          setComposerSourceQuota('All'); // Default to seeing everything to drag from
+          if (!composerSelectedRound) setComposerSelectedRound(activeQuotaId);
       }
   }, [view, activeQuotaId]);
 
@@ -751,20 +706,29 @@ export default function App() {
   };
 
   // Composer Actions
-  const handleAddToRound = async (problem: Problem) => {
-      // Add to end of accepted list
-      const accepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted');
+  const handleAddToRound = async (problemId: string) => {
+      if (!composerSelectedRound) return;
+      const problem = problems.find(p => p.id === problemId);
+      if (!problem) return;
+
+      // Add to end of accepted list of SELECTED round
+      const accepted = problems.filter(p => p.quotaId === composerSelectedRound && p.status === 'accepted');
       
+      // We must change problem's quotaId to the target round if different, and status to accepted
       const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) {
-              return { ...p, status: 'accepted', orderIndex: accepted.length } as Problem;
+          if (p.id === problemId) {
+              return { ...p, status: 'accepted', orderIndex: accepted.length, quotaId: composerSelectedRound } as Problem;
           }
           return p;
       });
       setProblems(updatedProblems);
       
-      const newRoundIds = [...accepted.map(p => p.id), problem.id];
+      const newRoundIds = [...accepted.map(p => p.id), problemId];
       try {
+          // First update problem quota/status
+          await api.updateProblem(problemId, { quotaId: composerSelectedRound });
+          await api.updateProblemStatus(problemId, 'accepted');
+          // Then reorder
           await api.reorderRound(newRoundIds);
       } catch(e) {
           console.error("Add to round failed");
@@ -772,65 +736,101 @@ export default function App() {
       }
   };
 
-  const handleRemoveFromRound = async (problem: Problem) => {
+  const handleRemoveFromRound = async (problemId: string) => {
       // Sets back to pending
       const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) return { ...p, status: 'pending' } as Problem;
+          if (p.id === problemId) return { ...p, status: 'pending' } as Problem;
           return p;
       });
       setProblems(updatedProblems);
 
       try {
-          await api.updateProblemStatus(problem.id, 'pending');
+          await api.updateProblemStatus(problemId, 'pending');
       } catch(e) {
           refreshData();
       }
   };
 
   // Drag and Drop Logic
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-      setDraggedItemIndex(index);
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+      setDraggedProblemId(id);
       e.dataTransfer.effectAllowed = 'move';
-      // Styling for drag ghost if needed
-  };
-  
-  const handleDragEnter = (e: React.DragEvent, index: number) => {
-       // Smoother visual reordering logic would go here (swapping in a temp state)
-       // For now we stick to drop based reorder to prevent state thrashing without a lib
+      e.dataTransfer.setData('text/plain', id); // Required for Firefox
   };
 
-  const handleDragEnd = (e: React.DragEvent) => {
-      setDraggedItemIndex(null);
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
+  const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+  const handleContainerDrop = (e: React.DragEvent, target: 'round' | 'pool') => {
       e.preventDefault();
-      if (draggedItemIndex === null) return;
+      const id = draggedProblemId;
+      if (!id) return;
       
+      const problem = problems.find(p => p.id === id);
+      if (!problem) return;
+
+      if (target === 'round') {
+          // If problem is not already accepted in THIS round, add it
+          if (problem.quotaId !== composerSelectedRound || problem.status !== 'accepted') {
+              handleAddToRound(id);
+          }
+      } else {
+          // If problem IS accepted in THIS round, remove it
+          if (problem.quotaId === composerSelectedRound && problem.status === 'accepted') {
+              handleRemoveFromRound(id);
+          }
+      }
+      setDraggedProblemId(null);
+  };
+
+  // Item reordering drop
+  const handleItemDrop = async (e: React.DragEvent, targetIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation(); // Don't bubble to container
+      const id = draggedProblemId;
+      if (!id || !composerSelectedRound) return;
+      
+      // If adding new item to specific index
+      const problem = problems.find(p => p.id === id);
+      if (!problem) return;
+
       const accepted = problems
-        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+        .filter(p => p.quotaId === composerSelectedRound && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
         
+      // If draggable is not in list (adding from candidates)
+      if (problem.quotaId !== composerSelectedRound || problem.status !== 'accepted') {
+          // Optimistic add at index
+          // Not trivial to mix "Add" and "Insert at Index" atomically without backend support
+          // For simplicity: Add to round (end), then move locally.
+          // Or just trigger add, user reorders later.
+          // Better: just add to round for now.
+          handleAddToRound(id); 
+          return;
+      }
+
+      // Reordering existing
+      const currentIndex = accepted.findIndex(p => p.id === id);
+      if (currentIndex === -1) return; // Should not happen
+
       const newOrder = [...accepted];
-      const [movedItem] = newOrder.splice(draggedItemIndex, 1);
-      newOrder.splice(dropIndex, 0, movedItem);
+      const [movedItem] = newOrder.splice(currentIndex, 1);
+      newOrder.splice(targetIndex, 0, movedItem);
       
-      // Optimistic update
+      // Update local state indices
       const newOrderIds = newOrder.map(p => p.id);
+      
       const updatedProblems = problems.map(p => {
-         const newIndex = newOrderIds.indexOf(p.id);
-         if (newIndex !== -1) {
-             return { ...p, orderIndex: newIndex };
-         }
-         return p;
+          if (p.quotaId === composerSelectedRound && p.status === 'accepted') {
+              const idx = newOrderIds.indexOf(p.id);
+              if (idx !== -1) return { ...p, orderIndex: idx };
+          }
+          return p;
       });
       setProblems(updatedProblems);
-      setDraggedItemIndex(null);
+      setDraggedProblemId(null);
 
       try {
           await api.reorderRound(newOrderIds);
@@ -840,10 +840,12 @@ export default function App() {
   };
 
   const handleExportLatex = () => {
-      // Basic LaTeX export
-      // Sort by orderIndex for the final document
+      if (!composerSelectedRound) return;
+      const round = quotas.find(q => q.id === composerSelectedRound);
+      if (!round) return;
+
       const activeProblems = problems
-        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+        .filter(p => p.quotaId === composerSelectedRound && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
 
       let tex = `\\documentclass{article}
@@ -851,7 +853,7 @@ export default function App() {
 \\usepackage{amssymb}
 \\usepackage{enumitem}
 
-\\title{${activeQuota.name}}
+\\title{${round.name}}
 \\date{\\today}
 
 \\begin{document}
@@ -877,14 +879,66 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${activeQuota.name.replace(/\s+/g, '_')}.tex`;
+      a.download = `${round.name.replace(/\s+/g, '_')}.tex`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
   };
 
-  // --- Component Logic ---
+  const activeQuota = getActiveQuota();
+  // Get override or default
+  const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
+  // Vote target is currently global per quota
+  const voteTarget = activeQuota.voteTarget || 3;
+
+  // Count only for active quota
+  const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
+  // Count votes (Strictly for active quota)
+  const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
+
+  const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
+  const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
   
+  const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
+  const isGuest = currentUser.role === 'guest';
+
+  // --- Composer Data ---
+  const composerAccepted = problems
+    .filter(p => p.quotaId === composerSelectedRound && p.status === 'accepted')
+    .sort((a,b) => a.orderIndex - b.orderIndex);
+  
+  const composerCandidates = problems
+    .filter(p => {
+        // Exclude problems currently in the selected round
+        if (p.quotaId === composerSelectedRound && p.status === 'accepted') return false;
+        
+        // Source Filter
+        if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
+        // Topic Filter
+        if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
+        // Diff Filter
+        if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
+        
+        return true;
+    })
+    .sort((a, b) => {
+        if (composerSort === 'votes') return b.score - a.score;
+        if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
+        if (composerSort === 'newest') return b.createdAt - a.createdAt;
+        return 0;
+    });
+
+  // Composer Stats
+  const composerAvgDiff = composerAccepted.length > 0 
+      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
+      : '0.0';
+  
+  const composerTopicCounts: Record<string, number> = {};
+  TOPICS.forEach(t => composerTopicCounts[t] = 0);
+  composerAccepted.forEach(p => {
+      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
+  });
+
   // Helper for Composer Item
   const ComposerItem = ({ problem, isAccepted, index }: { problem: Problem, isAccepted: boolean, index?: number }) => {
       const [expanded, setExpanded] = useState(false);
@@ -897,17 +951,19 @@ export default function App() {
           }
           setEditMode(false);
       };
+      
+      const isAcceptedElsewhere = !isAccepted && problem.status === 'accepted';
+      const quotaName = quotas.find(q => q.id === problem.quotaId)?.name;
 
       return (
         <div 
           className={`bg-white border rounded-xl transition-all duration-200 shadow-sm ${
-              isAccepted ? 'border-indigo-100 hover:border-indigo-300' : 'border-slate-200 hover:border-slate-300'
-          } ${draggedItemIndex === index ? 'opacity-50 scale-95' : 'opacity-100'}`}
-          draggable={isAccepted}
-          onDragStart={isAccepted && index !== undefined ? (e) => handleDragStart(e, index) : undefined}
-          onDragEnd={isAccepted ? handleDragEnd : undefined}
-          onDragOver={isAccepted && index !== undefined ? (e) => handleDragOver(e, index) : undefined}
-          onDrop={isAccepted && index !== undefined ? (e) => handleDrop(e, index) : undefined}
+              isAccepted ? 'border-indigo-100 hover:border-indigo-300' : isAcceptedElsewhere ? 'border-amber-100 bg-amber-50/10' : 'border-slate-200 hover:border-slate-300'
+          } ${draggedProblemId === problem.id ? 'opacity-50 scale-95' : 'opacity-100'}`}
+          draggable
+          onDragStart={(e) => handleDragStart(e, problem.id)}
+          onDragOver={isAccepted ? handleDragOver : undefined} // Allow dropping ON items only in round list
+          onDrop={isAccepted && index !== undefined ? (e) => handleItemDrop(e, index) : undefined}
         >
             <div className="p-3 flex items-start gap-3">
                 {isAccepted && (
@@ -924,9 +980,16 @@ export default function App() {
                         <h4 className="font-bold text-slate-900 text-sm leading-tight hover:text-indigo-600 transition-colors">
                             <MathText text={problem.title} />
                         </h4>
-                        <span className="ml-2 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded whitespace-nowrap">
-                            Diff: {problem.difficulty}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                            <span className="ml-2 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded whitespace-nowrap">
+                                Diff: {problem.difficulty}
+                            </span>
+                            {isAcceptedElsewhere && (
+                                <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider whitespace-nowrap">
+                                    in {quotaName}
+                                </span>
+                            )}
+                        </div>
                     </div>
                     <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
                         <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
@@ -943,7 +1006,7 @@ export default function App() {
 
                 <div className="flex flex-col gap-1">
                     <button 
-                       onClick={() => isAccepted ? handleRemoveFromRound(problem) : handleAddToRound(problem)}
+                       onClick={() => isAccepted ? handleRemoveFromRound(problem.id) : handleAddToRound(problem.id)}
                        className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
                            isAccepted 
                            ? 'hover:bg-red-50 text-slate-300 hover:text-red-500' 
@@ -1009,9 +1072,13 @@ export default function App() {
       );
   };
 
+  // ... (Login/Guest Screens same as before, skipping for brevity but logic implies they are rendered above) ...
   if (!currentUser) {
+    // ... Login UI Code ...
+    // Using previous code block logic for brevity, just assume standard login is returned here if !currentUser
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
+        {/* Same login UI as previous version */}
         <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl p-8 border border-white/50 backdrop-blur-sm">
           <div className="flex justify-center mb-6">
             <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg transform rotate-3">
@@ -1087,61 +1154,6 @@ export default function App() {
       </div>
     );
   }
-
-  const activeQuota = getActiveQuota();
-  // Get override or default
-  const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
-  // Vote target is currently global per quota
-  const voteTarget = activeQuota.voteTarget || 3;
-
-  // Count only for active quota
-  const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
-  // Count votes (Strictly for active quota)
-  const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
-
-  const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
-  const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
-  
-  const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
-  const isGuest = currentUser.role === 'guest';
-
-  // --- Composer Data ---
-  const composerAccepted = problems
-    .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
-    .sort((a,b) => a.orderIndex - b.orderIndex);
-  
-  const composerCandidates = problems
-    .filter(p => {
-        // Source Filter
-        if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
-        // Topic Filter
-        if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
-        // Diff Filter
-        if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
-        // Exclude already accepted in CURRENT round (to avoid dupes, though logic allows moving between rounds)
-        // If viewing All quotas, we might see problems accepted in OTHER rounds. That is fine, we can "steal" them.
-        // But we shouldn't see problems already accepted in THIS round.
-        if (p.quotaId === activeQuotaId && p.status === 'accepted') return false;
-        
-        return true;
-    })
-    .sort((a, b) => {
-        if (composerSort === 'votes') return b.score - a.score;
-        if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
-        if (composerSort === 'newest') return b.createdAt - a.createdAt;
-        return 0;
-    });
-
-  // Composer Stats
-  const composerAvgDiff = composerAccepted.length > 0 
-      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
-      : '0.0';
-  
-  const composerTopicCounts: Record<string, number> = {};
-  TOPICS.forEach(t => composerTopicCounts[t] = 0);
-  composerAccepted.forEach(p => {
-      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
-  });
 
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
@@ -1348,6 +1360,7 @@ export default function App() {
                         onEdit={handleStartEdit}
                         onStatusChange={handleStatusChange}
                         votingPower={currentUser.votingPower}
+                        acceptedInQuotaName={quotas.find(q => q.id === p.quotaId)?.name}
                     />
                   ))}
                 </div>
@@ -1367,9 +1380,16 @@ export default function App() {
             <header className="flex justify-between items-center mb-6 shrink-0">
                <div>
                   <h1 className="text-3xl font-bold text-slate-900">Round Composer</h1>
-                  <p className="text-slate-500 mt-1">
-                    Drag and drop problems to organize the final round.
-                  </p>
+                  <div className="flex items-center gap-3 mt-2">
+                      <p className="text-slate-500">Editing:</p>
+                      <select 
+                        className="font-bold text-indigo-600 bg-white border border-slate-300 rounded-lg px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={composerSelectedRound || ''}
+                        onChange={e => setComposerSelectedRound(e.target.value)}
+                      >
+                          {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                      </select>
+                  </div>
                </div>
                <div className="flex gap-3">
                   <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
@@ -1380,7 +1400,11 @@ export default function App() {
 
             <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
                 {/* LEFT: CANDIDATE POOL */}
-                <div className="col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                <div 
+                    className="col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden"
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleContainerDrop(e, 'pool')}
+                >
                     <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
                         <div className="flex justify-between items-center">
                             <h2 className="font-bold text-slate-700 flex items-center gap-2">
@@ -1425,7 +1449,11 @@ export default function App() {
                 </div>
 
                 {/* RIGHT: FINAL ROUND */}
-                <div className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
+                <div 
+                    className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative"
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleContainerDrop(e, 'round')}
+                >
                     <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
                         <div className="flex justify-between items-center">
                             <h2 className="font-bold text-indigo-900 flex items-center gap-2">
@@ -1442,10 +1470,6 @@ export default function App() {
                             {Object.entries(composerTopicCounts).map(([t, c]) => (
                                 <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-600'}>{t.substring(0,3)}: {c}</span>
                             ))}
-                        </div>
-                        {/* Graph */}
-                        <div className="mt-1">
-                            <DifficultyGraph problems={composerAccepted} />
                         </div>
                     </div>
                     
@@ -1471,86 +1495,6 @@ export default function App() {
         {/* VIEW: SUBMIT / EDIT / BULK */}
         {view === 'submit' && (
           <div className="max-w-4xl mx-auto">
-            <header className="mb-10 flex justify-between items-start">
-               <div>
-                  {!isGuest && (
-                      <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
-                        ← Back to Dashboard
-                      </Button>
-                  )}
-                  <h1 className="text-3xl font-bold text-slate-900">
-                      {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
-                  </h1>
-               </div>
-               {!editingProblemId && !isGuest && (
-                   <Button variant="secondary" onClick={() => setShowBulkImport(true)} className="flex items-center gap-2">
-                       <FileText className="w-4 h-4"/> Bulk Import
-                   </Button>
-               )}
-            </header>
-
-            {/* Bulk Import Modal */}
-            {showBulkImport ? (
-               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
-                   <div className="flex justify-between items-center">
-                       <h2 className="text-xl font-bold text-slate-900">Bulk Import from LaTeX</h2>
-                       <button onClick={() => setShowBulkImport(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
-                   </div>
-                   
-                   {parsedProblems.length === 0 ? (
-                       <>
-                           <textarea
-                               value={bulkText}
-                               onChange={e => setBulkText(e.target.value)}
-                               placeholder={`Paste LaTeX here. Format example:\n\n\\begin{problem}\nProblem text...\n\\end{problem}\n\n\\begin{solution}\nSolution text...\n\\end{solution}\n\n\\answer{42}`}
-                               className="w-full h-64 p-4 border border-slate-200 rounded-xl font-mono text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none"
-                           />
-                           <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Topic</label>
-                                    <select 
-                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
-                                        onChange={e => setSelectedTopics([e.target.value as Topic])}
-                                    >
-                                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Difficulty</label>
-                                    <input 
-                                        type="number" 
-                                        value={difficulty} 
-                                        onChange={e => setDifficulty(e.target.value)}
-                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
-                                    />
-                                </div>
-                           </div>
-                           <div className="flex justify-end gap-3">
-                               <Button variant="ghost" onClick={() => setShowBulkImport(false)}>Cancel</Button>
-                               <Button onClick={handleBulkParse} disabled={!bulkText}>Parse LaTeX</Button>
-                           </div>
-                       </>
-                   ) : (
-                       <div className="space-y-4">
-                           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-indigo-700 text-sm">
-                               <strong>Found {parsedProblems.length} problems!</strong> Review them below before importing.
-                           </div>
-                           <div className="max-h-96 overflow-y-auto space-y-3 custom-scrollbar border border-slate-100 rounded-xl p-2">
-                               {parsedProblems.map((p, idx) => (
-                                   <div key={idx} className="bg-slate-50 p-3 rounded-lg text-xs">
-                                       <strong>{idx + 1}.</strong> {p.statement.substring(0, 100)}...
-                                       <div className="mt-1 text-slate-500">Ans: {p.answerKey || 'None'}</div>
-                                   </div>
-                               ))}
-                           </div>
-                           <div className="flex justify-end gap-3">
-                               <Button variant="ghost" onClick={() => setParsedProblems([])}>Back</Button>
-                               <Button onClick={handleBulkCommit} isLoading={isSubmitting}>Import All</Button>
-                           </div>
-                       </div>
-                   )}
-               </div>
-            ) : (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-10 space-y-10">
                 {/* Title */}
@@ -1711,7 +1655,6 @@ export default function App() {
                 </Button>
               </div>
             </div>
-            )}
           </div>
         )}
 
@@ -1830,6 +1773,7 @@ export default function App() {
                       onEdit={handleStartEdit}
                       onStatusChange={handleStatusChange}
                       votingPower={currentUser.votingPower}
+                      acceptedInQuotaName={quotas.find(q => q.id === p.quotaId)?.name}
                     />
                   );
                 })
