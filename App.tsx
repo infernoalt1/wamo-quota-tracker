@@ -432,7 +432,6 @@ export default function App() {
                   {users.map(user => (
                     <button key={user.id} onClick={() => setSelectedLoginId(user.id)} className="w-full p-2.5 hover:bg-slate-50 rounded-lg text-left text-sm flex items-center justify-between group transition-colors">
                       <span className="font-medium text-slate-700 group-hover:text-indigo-700">{user.name}</span>
-                      {/* Badge UI removed from here */}
                     </button>
                   ))}
                </div>
@@ -860,7 +859,7 @@ export default function App() {
                        <tr key={u.id} className="group hover:bg-slate-50 transition-colors">
                          <td className="px-4 py-3 font-medium text-slate-900">{u.name}</td>
                          <td className="px-4 py-3 font-mono text-xs text-slate-400">
-                            {showPasswords ? (u.password || (u.id.startsWith('u') && 'mock123')) : '••••••'}
+                            {showPasswords ? (u.password || '') : '••••••'}
                          </td>
                          <td className="px-4 py-3">
                              {u.role === 'admin' && <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"><Crown className="w-3 h-3"/> Admin</span>}
