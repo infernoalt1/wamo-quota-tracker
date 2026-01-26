@@ -30,7 +30,6 @@ export interface Problem {
   score: number;
   votedBy: string[]; // User IDs who have voted
   status: ProblemStatus;
-  orderIndex: number; // New: For ordering in the final round
 }
 
 export interface User {

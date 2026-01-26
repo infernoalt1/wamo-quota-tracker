@@ -77,7 +77,6 @@ const initDB = async () => {
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
         status TEXT DEFAULT 'pending',
-        order_index INTEGER DEFAULT 0,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -96,7 +95,6 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS image_data TEXT;
-      ALTER TABLE problems ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
 
@@ -161,8 +159,8 @@ const authenticateToken = (req, res, next) => {
 };
 
 // --- Routes: AI Analysis ---
+// kept for backward compatibility but UI won't use it
 app.post('/api/ai/analyze', authenticateToken, async (req, res) => {
-  // Removed AI button logic from UI, but keeping endpoint inactive or basic if triggered.
   res.json({ text: "AI Analysis is disabled." });
 });
 
@@ -415,7 +413,6 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
       status: row.status || 'pending',
-      orderIndex: row.order_index || 0,
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || [],
       imageData: row.image_data
@@ -497,39 +494,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-// New Route: Reorder Round (Admin Only) - Sets status to 'accepted' and updates order_index
-app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-  
-  const { problems } = req.body; // Array of problem IDs in desired order
-  
-  const client = await pool.connect();
-  try {
-      await client.query('BEGIN');
-      
-      // For each problem ID in the list, update its order_index and set status to accepted
-      for (let i = 0; i < problems.length; i++) {
-          await client.query(
-              'UPDATE problems SET order_index = $1, status = $2 WHERE id = $3',
-              [i, 'accepted', problems[i]]
-          );
-      }
-      
-      await client.query('COMMIT');
-      res.json({ success: true });
-  } catch (e) {
-      await client.query('ROLLBACK');
-      console.error(e);
-      res.status(500).json({ error: 'Reorder failed' });
-  } finally {
-      client.release();
-  }
-});
-
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
-  // Guests cannot vote
-  if (req.user.role === 'guest') return res.sendStatus(403);
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

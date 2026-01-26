@@ -157,21 +157,9 @@ export const api = {
     });
     if (!res.ok) throw new Error('Status update failed');
   },
-
-  // New: Reorder Round
-  reorderRound: async (problemIds: string[]): Promise<void> => {
-    if (USE_MOCK_BACKEND) return; 
-
-    const res = await fetch(`${API_BASE_URL}/api/rounds/reorder`, {
-      method: 'POST',
-      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problems: problemIds })
-    });
-    if (!res.ok) throw new Error('Reorder failed');
-  },
   
   analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
-    return "AI Analysis is currently disabled.";
+    return "AI Analysis is disabled.";
   },
 
   toggleVote: async (problemId: string): Promise<void> => {
