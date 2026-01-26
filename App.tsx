@@ -8,7 +8,6 @@ import {
   PlusCircle, 
   LayoutDashboard, 
   BookOpen, 
-  LogOut, 
   Settings,
   UserPlus,
   TrendingUp,
@@ -22,7 +21,6 @@ import {
   Lock,
   Clock,
   RotateCcw,
-  Info,
   Filter,
   ArrowUpDown,
   Search,
@@ -53,7 +51,7 @@ interface NavItemProps {
 const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-sm ${
       active
         ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm'
         : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900 font-medium'
@@ -95,8 +93,6 @@ export default function App() {
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Admin Editing State
   const [editingQuotaId, setEditingQuotaId] = useState<string | null>(null);
@@ -135,7 +131,6 @@ export default function App() {
   }, []);
 
   const initApp = async () => {
-    // 1. Load users for login screen
     try {
         setUsersLoading(true);
         setUsersError(false);
@@ -148,18 +143,14 @@ export default function App() {
         setUsersLoading(false);
     }
 
-    // 2. Try to restore session if token exists
     const token = localStorage.getItem('token');
     if (token) {
         try {
             const me = await api.getMe();
             setCurrentUser(me);
-            
-            // If guest, only show submit view
             if (me.role === 'guest') {
                 setView('submit');
             } else {
-                // Set active quota if saved
                 const savedQ = localStorage.getItem('probfair_active_quota_id');
                 if (savedQ) {
                    setActiveQuotaId(savedQ);
@@ -167,21 +158,16 @@ export default function App() {
                 }
             }
         } catch(e) {
-            // Token invalid
-            console.log("Session invalid or expired");
             localStorage.removeItem('token');
         }
     }
   };
 
-  // --- Data Sync ---
   const refreshData = async () => {
-      // Guests don't sync heavy data
       if (currentUser?.role === 'guest') {
           try {
              const q = await api.getQuotas();
              setQuotas(q);
-             // Always default to active
              if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
                 setActiveQuotaId(q[0].id);
              }
@@ -200,10 +186,8 @@ export default function App() {
           setProblems(p);
           setQuotas(q);
           
-          // Ensure active quota ID is valid
           if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
              setActiveQuotaId(q[0].id);
-             // Also update the filter if it was set to the invalid ID
              if (poolFilterQuota === activeQuotaId) setPoolFilterQuota(q[0].id);
           }
       } catch (e) {
@@ -219,8 +203,6 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Update Users submitted & voted count locally based on ACTIVE QUOTA
-  // This logic runs client side to keep UI snappy
   useEffect(() => {
     if (currentUser?.role === 'guest') return;
 
@@ -238,44 +220,26 @@ export default function App() {
          setUsers(updatedUsers);
       }
     }
-  }, [problems, activeQuotaId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [problems, activeQuotaId]); 
 
-  // Handle Pool Sorting & Filtering
   useEffect(() => {
     if (view === 'pool') {
       let filtered = [...problems];
-
-      // Filter by Quota
-      if (poolFilterQuota !== 'All') {
-          filtered = filtered.filter(p => p.quotaId === poolFilterQuota);
-      }
-
-      // Filter by Topic
-      if (poolFilterTopic !== 'All') {
-          filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
-      }
-
-      // Filter by Status
-      if (poolFilterStatus !== 'All') {
-          filtered = filtered.filter(p => {
+      if (poolFilterQuota !== 'All') filtered = filtered.filter(p => p.quotaId === poolFilterQuota);
+      if (poolFilterTopic !== 'All') filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
+      if (poolFilterStatus !== 'All') filtered = filtered.filter(p => {
              const s = p.status || 'pending';
              return s === poolFilterStatus;
-          });
-      }
-
-      // Filter by Difficulty
+      });
       filtered = filtered.filter(p => {
           const d = p.difficulty || 0;
           return d >= poolFilterDiffMin && d <= poolFilterDiffMax;
       });
-
-      // Sort
       filtered.sort((a, b) => {
           const scoreA = a.score || 0;
           const scoreB = b.score || 0;
           const diffA = a.difficulty || 0;
           const diffB = b.difficulty || 0;
-
           switch(poolSort) {
               case 'highest': return scoreB - scoreA;
               case 'lowest': return scoreA - scoreB;
@@ -285,27 +249,19 @@ export default function App() {
               default: return 0;
           }
       });
-
       setPoolIds(filtered.map(p => p.id));
     }
   }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota]); 
 
-  // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
-
-  // --- Actions ---
 
   const handleLogin = async () => {
     try {
         setLoginError('');
         const { user } = await api.login(selectedLoginId, loginPassword);
         setCurrentUser(user);
-        if (user.role === 'guest') {
-            setView('submit');
-        } else {
-            setView('dashboard');
-        }
+        setView(user.role === 'guest' ? 'submit' : 'dashboard');
         setLoginPassword('');
         setSelectedLoginId('');
     } catch (e) {
@@ -332,8 +288,6 @@ export default function App() {
     setStatement('');
   };
 
-  // -- Quota Management --
-
   const addQuota = async () => {
     if (!newQuotaName.trim()) return;
     try {
@@ -346,46 +300,26 @@ export default function App() {
         });
         setQuotas([...quotas, newQuota]);
         setNewQuotaName('');
-    } catch(e) {
-        console.error("Failed to create round", e);
-    }
+    } catch(e) { console.error(e); }
   };
 
-  const startEditQuota = (q: Quota) => {
-    setEditingQuotaId(q.id);
-    setEditQuotaForm(q);
-  };
-
-  const cancelEditQuota = () => {
-    setEditingQuotaId(null);
-    setEditQuotaForm({});
-  };
+  const startEditQuota = (q: Quota) => { setEditingQuotaId(q.id); setEditQuotaForm(q); };
+  const cancelEditQuota = () => { setEditingQuotaId(null); setEditQuotaForm({}); };
 
   const saveQuota = async () => {
     if (!editingQuotaId || !editQuotaForm.name) return;
     try {
-      await api.updateQuota({
-        id: editingQuotaId,
-        name: editQuotaForm.name || '',
-        target: editQuotaForm.target || 5,
-        voteTarget: editQuotaForm.voteTarget || 3,
-        instructions: editQuotaForm.instructions || '',
-        dueDate: editQuotaForm.dueDate || null
-      });
+      await api.updateQuota({ ...editQuotaForm, id: editingQuotaId } as Quota);
       await refreshData();
       setEditingQuotaId(null);
-    } catch (e) {
-      console.error("Failed to update round");
-    }
+    } catch (e) { console.error("Failed"); }
   };
 
   const switchQuota = (id: string) => {
     setActiveQuotaId(id);
-    setPoolFilterQuota(id); // Auto-filter pool to the new active quota for convenience
+    setPoolFilterQuota(id);
     localStorage.setItem('probfair_active_quota_id', id);
   };
-
-  // -- User Management --
 
   const addUser = async () => {
     if (!newUserName.trim() || !newUserPassword.trim()) return;
@@ -395,418 +329,196 @@ export default function App() {
           password: newUserPassword.trim(),
           role: newUserRole,
           submittedCount: 0,
-          votingPower: newUserRole === 'director' ? 5 : 1, // Auto-set higher power for directors 
+          votingPower: newUserRole === 'director' ? 5 : 1,
           customTargets: {}
         });
         setUsers([...users, newUser]);
-        setNewUserName('');
-        setNewUserPassword('');
-        setNewUserRole('writer');
-    } catch(e) {
-        console.error("Failed to create user", e);
-    }
+        setNewUserName(''); setNewUserPassword(''); setNewUserRole('writer');
+    } catch(e) { console.error(e); }
   };
 
   const deleteUser = async (id: string) => {
-    if (!window.confirm("Are you sure? This deletes their submitted problems too.")) return;
-    try {
-        await api.deleteUser(id);
-        await refreshData();
-    } catch(e) {
-        console.error("Delete failed");
-        alert("Action failed. You may not have permission to delete this user.");
-    }
+    if (!window.confirm("Are you sure?")) return;
+    try { await api.deleteUser(id); await refreshData(); } catch(e) { alert("Action failed."); }
   }
 
-  const startEditUser = (user: User) => {
-    setEditingUserId(user.id);
-    setEditUserForm({ ...user, password: '' });
-  };
+  const startEditUser = (user: User) => { setEditingUserId(user.id); setEditUserForm({ ...user, password: '' }); };
 
   const saveUser = async (userId: string) => {
     if (!editUserForm.name?.trim()) return;
     try {
-      // Handle custom target for Active Quota
-      // We read it from the editing form state or keep existing
       const currentTargets = users.find(u => u.id === userId)?.customTargets || {};
-      
       await api.updateUser({ 
-          id: userId, 
-          name: editUserForm.name,
-          votingPower: editUserForm.votingPower,
-          password: editUserForm.password, // Only updates if not empty string
+          ...editUserForm, id: userId, 
           customTargets: editUserForm.customTargets || currentTargets,
-          role: editUserForm.role // Allows admin to promote/demote if backend supports
       });
       await refreshData();
       setEditingUserId(null);
-    } catch (e) {
-      console.error("Failed to update user");
-      alert("Update failed. Directors cannot change passwords.");
-    }
+    } catch (e) { alert("Update failed."); }
   };
 
   const updateUserTarget = (userId: string, target: number) => {
-     // This updates the local form state if editing
      const existingTargets = editUserForm.customTargets || users.find(u => u.id === userId)?.customTargets || {};
-     setEditUserForm({
-         ...editUserForm,
-         customTargets: {
-             ...existingTargets,
-             [activeQuotaId]: target
-         }
-     });
+     setEditUserForm({ ...editUserForm, customTargets: { ...existingTargets, [activeQuotaId]: target } });
   }
 
   const handleResetVotes = async () => {
-    if (!window.confirm("WARNING: This will remove ALL votes from the database and set all problem scores to zero. This action cannot be undone. Are you sure?")) return;
-    try {
-        await api.resetVotes();
-        await refreshData();
-        alert("All votes have been reset.");
-    } catch(e) {
-        console.error("Failed to reset votes");
-        alert("Reset failed.");
-    }
+    if (!window.confirm("WARNING: This will remove ALL votes. Are you sure?")) return;
+    try { await api.resetVotes(); await refreshData(); alert("Votes reset."); } catch(e) { alert("Failed."); }
   };
 
-  // -- Submission & Editing --
-  
   const resetForm = () => {
-    setTitle('');
-    setStatement('');
-    setDifficulty('3.0');
-    setSelectedTopics([]);
-    setImageData(null);
-    setIsVerified(false);
-    setEditingProblemId(null);
-    setSubmissionError(null);
-    setAiAnalysis(null);
+    setTitle(''); setStatement(''); setDifficulty('3.0'); setSelectedTopics([]); setImageData(null);
+    setIsVerified(false); setEditingProblemId(null); setSubmissionError(null);
   };
 
   const handleStartEdit = (prob: Problem) => {
-      setEditingProblemId(prob.id);
-      setTitle(prob.title);
-      setStatement(prob.statement);
-      setDifficulty(prob.difficulty.toString());
-      setSelectedTopics(prob.topics || []);
-      setImageData(prob.imageData || null);
-      setIsVerified(true); // Auto-verify on edit since it's already there
-      setView('submit');
+      setEditingProblemId(prob.id); setTitle(prob.title); setStatement(prob.statement); setDifficulty(prob.difficulty.toString());
+      setSelectedTopics(prob.topics || []); setImageData(prob.imageData || null); setIsVerified(true); setView('submit');
   };
 
   const handleTopicToggle = (topic: Topic) => {
-      if (selectedTopics.includes(topic)) {
-          setSelectedTopics(selectedTopics.filter(t => t !== topic));
-      } else {
-          setSelectedTopics([...selectedTopics, topic]);
-      }
+      setSelectedTopics(prev => prev.includes(topic) ? prev.filter(t => t !== topic) : [...prev, topic]);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) { // 2MB limit check on client for UX
-          alert("File is too large. Please use an image under 2MB.");
-          return;
-      }
+      if (file.size > 2 * 1024 * 1024) { alert("File > 2MB"); return; }
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImageData(reader.result as string);
-      };
+      reader.onloadend = () => setImageData(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
   const handleSubmit = async () => {
     if (!currentUser || !title || !statement || !isVerified) return;
-    if (selectedTopics.length === 0) {
-        setSubmissionError("Please select at least one topic.");
-        return;
-    }
+    if (selectedTopics.length === 0) { setSubmissionError("Select a topic."); return; }
     
     setSubmissionError(null);
     setIsSubmitting(true);
 
     try {
-      const payload = {
-          title,
-          statement,
-          difficulty: parseFloat(difficulty),
-          topics: selectedTopics,
-          quotaId: activeQuotaId,
-          imageData: imageData || undefined
-      };
-
-      if (editingProblemId) {
-          await api.updateProblem(editingProblemId, payload);
-      } else {
-          await api.submitProblem({
-              ...payload,
-              authorId: currentUser.id,
-              authorName: currentUser.name,
-          });
-      }
+      const payload = { title, statement, difficulty: parseFloat(difficulty), topics: selectedTopics, quotaId: activeQuotaId, imageData: imageData || undefined };
+      if (editingProblemId) await api.updateProblem(editingProblemId, payload);
+      else await api.submitProblem({ ...payload, authorId: currentUser.id, authorName: currentUser.name });
       
-      // If guest, do not refresh data or change view heavily
-      if (currentUser.role === 'guest') {
-          alert("Thank you! Your problem has been submitted for review.");
-          resetForm();
-      } else {
-          await refreshData();
-          resetForm();
-          setView('dashboard');
-      }
-    } catch (e: any) {
-      setSubmissionError(e.message || "System error during validation.");
-    } finally {
-      setIsSubmitting(false);
-    }
+      if (currentUser.role === 'guest') { alert("Proposed!"); resetForm(); }
+      else { await refreshData(); resetForm(); setView('dashboard'); }
+    } catch (e: any) { setSubmissionError(e.message || "Error."); } finally { setIsSubmitting(false); }
   };
 
   const handleToggleVote = async (problemId: string) => {
     if (!currentUser || currentUser.role === 'guest') return;
-    
     const oldProblems = [...problems];
-    const updatedProblems = problems.map(p => {
+    setProblems(prev => prev.map(p => {
        if (p.id === problemId) {
           const hasVoted = p.votedBy?.includes(currentUser.id);
-          if (hasVoted) {
-             return {
-                ...p,
-                score: (p.score || 0) - currentUser.votingPower,
-                votedBy: (p.votedBy || []).filter(id => id !== currentUser.id)
-             };
-          } else {
-             return {
-                ...p,
-                score: (p.score || 0) + currentUser.votingPower,
-                votedBy: [...(p.votedBy || []), currentUser.id]
-             };
-          }
+          return {
+             ...p,
+             score: (p.score || 0) + (hasVoted ? -currentUser.votingPower : currentUser.votingPower),
+             votedBy: hasVoted ? (p.votedBy || []).filter(id => id !== currentUser.id) : [...(p.votedBy || []), currentUser.id]
+          };
        }
        return p;
-    });
-    setProblems(updatedProblems);
-    
-    try {
-        await api.toggleVote(problemId);
-    } catch (e) {
-        setProblems(oldProblems);
-        console.error("Vote failed");
-    }
+    }));
+    try { await api.toggleVote(problemId); } catch (e) { setProblems(oldProblems); }
   };
 
   const handleStatusChange = async (problemId: string, status: ProblemStatus) => {
-     try {
-        await api.updateProblemStatus(problemId, status);
-        // Optimistic update
-        const updated = problems.map(p => p.id === problemId ? { ...p, status } : p);
-        setProblems(updated);
-     } catch(e) {
-        console.error("Failed to update status");
-     }
+     try { await api.updateProblemStatus(problemId, status); setProblems(prev => prev.map(p => p.id === problemId ? { ...p, status } : p)); } catch(e) {}
   };
 
-  // Composer Actions
   const handleAddToRound = async (problem: Problem) => {
-      // Add to end of accepted list
       const accepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted');
-      // Optimistic
-      const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) {
-              return { ...p, status: 'accepted', orderIndex: accepted.length } as Problem;
-          }
-          return p;
-      });
-      setProblems(updatedProblems);
-      
-      // We will just batch reorder everything to be safe and save to DB
-      const newRoundIds = [...accepted.map(p => p.id), problem.id];
-      try {
-          await api.reorderRound(newRoundIds);
-      } catch(e) {
-          console.error("Add to round failed");
-          refreshData(); // Revert on error
-      }
+      setProblems(prev => prev.map(p => p.id === problem.id ? { ...p, status: 'accepted', orderIndex: accepted.length } as Problem : p));
+      try { await api.reorderRound([...accepted.map(p => p.id), problem.id]); } catch(e) { refreshData(); }
   };
 
   const handleRemoveFromRound = async (problem: Problem) => {
-      // Optimistic
-      const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) return { ...p, status: 'shortlisted' } as Problem;
-          return p;
-      });
-      setProblems(updatedProblems);
-
-      // We only need to update status of this one, but reordering others might be good.
-      // For simplicity, just update status. The gaps in order_index don't break sorting.
-      try {
-          await api.updateProblemStatus(problem.id, 'shortlisted');
-      } catch(e) {
-          refreshData();
-      }
+      setProblems(prev => prev.map(p => p.id === problem.id ? { ...p, status: 'shortlisted' } as Problem : p));
+      try { await api.updateProblemStatus(problem.id, 'shortlisted'); } catch(e) { refreshData(); }
   };
 
   const handleReorder = async (index: number, direction: 'up' | 'down') => {
-      const accepted = problems
-        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
-      
-      if (direction === 'up' && index > 0) {
-          const temp = accepted[index];
-          accepted[index] = accepted[index-1];
-          accepted[index-1] = temp;
-      } else if (direction === 'down' && index < accepted.length - 1) {
-          const temp = accepted[index];
-          accepted[index] = accepted[index+1];
-          accepted[index+1] = temp;
-      } else {
-          return;
-      }
+      const accepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted').sort((a,b) => a.orderIndex - b.orderIndex);
+      if ((direction === 'up' && index === 0) || (direction === 'down' && index === accepted.length - 1)) return;
+      const swapIdx = direction === 'up' ? index - 1 : index + 1;
+      [accepted[index], accepted[swapIdx]] = [accepted[swapIdx], accepted[index]];
 
-      // Optimistic update of state
       const newOrderIds = accepted.map(p => p.id);
-      const updatedProblems = problems.map(p => {
-         const newIndex = newOrderIds.indexOf(p.id);
-         if (newIndex !== -1) {
-             return { ...p, orderIndex: newIndex };
-         }
-         return p;
-      });
-      setProblems(updatedProblems);
-
-      // Save
-      try {
-          await api.reorderRound(newOrderIds);
-      } catch(e) {
-          refreshData();
-      }
+      setProblems(prev => prev.map(p => {
+         const newIdx = newOrderIds.indexOf(p.id);
+         return newIdx !== -1 ? { ...p, orderIndex: newIdx } : p;
+      }));
+      try { await api.reorderRound(newOrderIds); } catch(e) { refreshData(); }
   };
 
   const handleExportLatex = () => {
-      // Basic LaTeX export
-      // Sort by orderIndex for the final document
-      const activeProblems = problems
-        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
-
-      let tex = `\\documentclass{article}
-\\usepackage{amsmath}
-\\usepackage{amssymb}
-\\usepackage{enumitem}
-
-\\title{${activeQuota.name}}
-\\date{\\today}
-
-\\begin{document}
-\\maketitle
-
-\\section*{Contest Problems}
-\\begin{enumerate}
-`;
-
-      activeProblems.forEach(p => {
-         tex += `  \\item \\textbf{${p.title}} (Diff: ${p.difficulty})
-         
-         ${p.statement}
-         
-         \\vspace{0.5cm}
-`;
-      });
-
-      tex += `\\end{enumerate}
-\\end{document}`;
-
-      const blob = new Blob([tex], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${activeQuota.name.replace(/\s+/g, '_')}.tex`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const activeProblems = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted').sort((a,b) => a.orderIndex - b.orderIndex);
+      let tex = `\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{enumerate}\n${activeProblems.map(p => `\\item ${p.title} (${p.difficulty})\n\n${p.statement}`).join('\n\n')}\n\\end{enumerate}`;
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([tex], { type: 'text/plain' })); a.download = 'contest.tex'; a.click();
   };
-
-  // --- Component Logic ---
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
-        <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl p-8 border border-white/50 backdrop-blur-sm">
-          <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg transform rotate-3">
-              <BookOpen size={32} strokeWidth={2.5} />
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-sm">
+        <div className="bg-white max-w-xs w-full rounded-xl shadow-lg p-6 border border-slate-100">
+          <div className="flex justify-center mb-4">
+            <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md">
+              <BookOpen size={24} />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-1 text-center tracking-tight">WAMO Tracker</h1>
-          <p className="text-gray-500 mb-8 text-center text-sm">Middle School Math Contest Portal</p>
+          <h1 className="text-xl font-bold text-slate-900 mb-1 text-center">WAMO Tracker</h1>
+          <p className="text-slate-500 mb-6 text-center text-xs">Math Contest Portal</p>
           
           {!selectedLoginId ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
                <div className="flex items-center justify-between px-1">
-                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Select User</p>
-                 {usersError && (
-                     <button onClick={initApp} className="text-xs text-indigo-600 flex items-center gap-1 hover:underline">
-                        <RotateCcw className="w-3 h-3" /> Retry
-                     </button>
-                 )}
+                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select User</p>
                </div>
                
-               <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {usersLoading && users.length === 0 && <div className="text-sm text-gray-400 italic p-4 text-center">Loading users...</div>}
-                  
+               <div className="max-h-[220px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                   {users.map(user => (
                     <button
                       key={user.id}
                       onClick={() => setSelectedLoginId(user.id)}
-                      className="w-full p-3 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
+                      className="w-full p-2.5 hover:bg-slate-50 rounded-lg text-left transition-colors group flex items-center justify-between border border-transparent hover:border-slate-100"
                     >
-                      <span className="font-semibold text-gray-700 group-hover:text-indigo-700">{user.name}</span>
-                      <div className="flex gap-2">
-                        {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Admin</span>}
-                        {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Director</span>}
-                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-indigo-400" />
-                      </div>
+                      <span className="font-medium text-slate-700 group-hover:text-indigo-700 text-sm">{user.name}</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-400" />
                     </button>
                   ))}
                </div>
 
-               <div className="pt-2 border-t border-slate-100">
-                  <Button variant="secondary" onClick={handleGuestLogin} className="w-full text-sm py-2.5">
-                    Continue as Guest
+               <div className="pt-3 border-t border-slate-100">
+                  <Button variant="secondary" onClick={handleGuestLogin} className="w-full text-xs py-2">
+                    Guest Mode
                   </Button>
                </div>
             </div>
           ) : (
-            <div className="space-y-5 animate-in fade-in slide-in-from-right-8 duration-300">
-              <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
                         {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
                     </div>
-                    <div>
-                        <p className="text-xs text-gray-400 font-semibold uppercase">Signing in as</p>
-                        <p className="text-sm font-bold text-gray-900 leading-none mt-0.5">{users.find(u => u.id === selectedLoginId)?.name}</p>
-                    </div>
+                    <p className="text-sm font-bold text-slate-900">{users.find(u => u.id === selectedLoginId)?.name}</p>
                 </div>
-                <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); setLoginError(''); }} className="text-xs text-gray-400 hover:text-gray-600 font-medium">Change</button>
+                <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); }} className="text-xs text-slate-400 hover:text-slate-600">Change</button>
               </div>
-              
-              <div>
-                <input 
-                  type="password"
-                  placeholder="Enter password"
-                  value={loginPassword}
-                  onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white text-gray-900 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-gray-400"
-                  autoFocus
-                />
-                {loginError && <p className="text-red-500 text-xs mt-2 flex items-center gap-1 font-medium"><ShieldAlert className="w-3 h-3"/> {loginError}</p>}
-              </div>
-              
-              <Button onClick={handleLogin} className="w-full py-3 text-lg shadow-indigo-200">Sign In</Button>
+              <input 
+                type="password"
+                placeholder="Password"
+                value={loginPassword}
+                onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                autoFocus
+              />
+              {loginError && <p className="text-red-500 text-xs">{loginError}</p>}
+              <Button onClick={handleLogin} className="w-full">Sign In</Button>
             </div>
           )}
         </div>
@@ -815,1033 +527,349 @@ export default function App() {
   }
 
   const activeQuota = getActiveQuota();
-  // Get override or default
   const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
-  // Vote target is currently global per quota
   const voteTarget = activeQuota.voteTarget || 3;
-
-  // Count only for active quota
   const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
-  // Count votes (Strictly for active quota)
   const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
-
   const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
   const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
-  
   const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
   const isGuest = currentUser.role === 'guest';
-
-  // --- Composer Data ---
-  const composerAccepted = problems
-    .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
-    .sort((a,b) => a.orderIndex - b.orderIndex);
-  
-  const composerCandidates = problems
-    .filter(p => p.quotaId === activeQuotaId && (p.status === 'shortlisted' || p.status === 'pending'))
-    .filter(p => composerFilterTopic === 'All' || p.topics.includes(composerFilterTopic as Topic))
-    .sort((a, b) => b.score - a.score);
-
-  // Composer Stats
-  const composerAvgDiff = composerAccepted.length > 0 
-      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
-      : '0.0';
-  
-  const composerTopicCounts: Record<string, number> = {};
-  TOPICS.forEach(t => composerTopicCounts[t] = 0);
-  composerAccepted.forEach(p => {
-      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
-  });
+  const composerAccepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted').sort((a,b) => a.orderIndex - b.orderIndex);
+  const composerCandidates = problems.filter(p => p.quotaId === activeQuotaId && (p.status === 'shortlisted' || p.status === 'pending') && (composerFilterTopic === 'All' || p.topics.includes(composerFilterTopic as Topic))).sort((a, b) => b.score - a.score);
 
   return (
-    <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
-      
-      {/* Sidebar Navigation */}
-      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.05)]">
-        <div className="p-8 border-b border-slate-50">
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
-            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-indigo-200 shadow-lg">
-                <BookOpen className="w-5 h-5" strokeWidth={3} />
+    <div className="min-h-screen bg-slate-50/50 flex flex-col md:flex-row font-sans text-slate-900 text-sm">
+      <aside className="w-full md:w-60 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20">
+        <div className="p-5 border-b border-slate-100 flex items-center gap-2">
+            <div className="w-6 h-6 bg-indigo-600 rounded flex items-center justify-center text-white">
+                <BookOpen className="w-3.5 h-3.5" strokeWidth={3} />
             </div>
-            WAMO Tracker
-          </h2>
+            <h2 className="text-base font-bold tracking-tight">WAMO Tracker</h2>
         </div>
-        
-        <nav className="flex-1 p-6 space-y-2">
-          {!isGuest && (
-              <NavItem 
-                icon={<LayoutDashboard className="w-5 h-5" />} 
-                label="Dashboard" 
-                active={view === 'dashboard'} 
-                onClick={() => setView('dashboard')} 
-              />
-          )}
-          
-          <NavItem 
-            icon={<PlusCircle className="w-5 h-5" />} 
-            label={isGuest ? "Propose Problem" : "Write Problem"} 
-            active={view === 'submit'} 
-            onClick={() => { resetForm(); setView('submit'); }} 
-          />
-          
-          {!isGuest && (
-            <NavItem 
-                icon={<Layers className="w-5 h-5" />} 
-                label="Problem Pool" 
-                active={view === 'pool'} 
-                onClick={() => setView('pool')} 
-            />
-          )}
-
+        <nav className="flex-1 p-3 space-y-1">
+          {!isGuest && <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />}
+          <NavItem icon={<PlusCircle className="w-4 h-4" />} label={isGuest ? "Propose Problem" : "Write Problem"} active={view === 'submit'} onClick={() => { resetForm(); setView('submit'); }} />
+          {!isGuest && <NavItem icon={<Layers className="w-4 h-4" />} label="Problem Pool" active={view === 'pool'} onClick={() => setView('pool')} />}
           {isDirector && !isGuest && (
             <>
-              <div className="mt-8 mb-2 px-4">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administration</p>
-              </div>
-              <NavItem 
-                icon={<LayoutList className="w-5 h-5" />} 
-                label="Round Composer" 
-                active={view === 'composer'} 
-                onClick={() => setView('composer')} 
-              />
-              <NavItem 
-                icon={<Settings className="w-5 h-5" />} 
-                label="Director Panel" 
-                active={view === 'admin'} 
-                onClick={() => setView('admin')} 
-              />
+              <div className="mt-4 mb-1 px-3"><p className="text-[10px] font-bold text-slate-400 uppercase">Admin</p></div>
+              <NavItem icon={<LayoutList className="w-4 h-4" />} label="Composer" active={view === 'composer'} onClick={() => setView('composer')} />
+              <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={view === 'admin'} onClick={() => setView('admin')} />
             </>
           )}
         </nav>
-
-        <div className="p-6 border-t border-slate-50">
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-2">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : currentUser.role === 'guest' ? 'bg-amber-500' : 'bg-slate-500'}`}>
-                {isGuest ? <UserIcon className="w-5 h-5" /> : currentUser.name.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-slate-900 truncate">{currentUser.name}</p>
-                <p className="text-xs text-slate-500 capitalize flex items-center gap-1">
-                    {currentUser.role}
-                    {!isGuest && <><span className="text-slate-300">•</span> Power: {currentUser.votingPower}</>}
-                </p>
-                </div>
-              </div>
-              <Button variant="ghost" onClick={handleLogout} className="w-full text-xs h-9 justify-center text-slate-500 hover:text-red-600 hover:bg-white shadow-sm border border-transparent hover:border-slate-200">
-                Log Out
-              </Button>
-          </div>
+        <div className="p-3 border-t border-slate-100">
+           <div className="flex items-center gap-2 px-2 mb-2">
+             <div className="w-7 h-7 bg-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-600">
+                 {isGuest ? <UserIcon className="w-3.5 h-3.5"/> : currentUser.name.charAt(0)}
+             </div>
+             <div className="min-w-0">
+                 <p className="font-semibold truncate text-xs">{currentUser.name}</p>
+                 <p className="text-[10px] text-slate-400 capitalize">{currentUser.role}</p>
+             </div>
+           </div>
+           <Button variant="ghost" onClick={handleLogout} className="w-full text-xs h-7 justify-start px-2">Log Out</Button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto custom-scrollbar">
-        
-        {/* VIEW: DASHBOARD */}
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto custom-scrollbar">
         {view === 'dashboard' && !isGuest && (
-          <div className="max-w-6xl mx-auto space-y-10">
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
-                <p className="text-lg text-slate-500 mt-2">Here is the current round status.</p>
-              </div>
+          <div className="max-w-5xl mx-auto space-y-6">
+            <header>
+              <h1 className="text-2xl font-bold text-slate-900">Hello, {currentUser.name.split(' ')[0]}</h1>
             </header>
-
-            {/* Active Round Info */}
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-8 relative">
-                <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-4">
-                    <BookOpen size={200} />
-                </div>
-                <div className="flex justify-between items-start mb-6 relative z-10">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 relative overflow-hidden">
+                <div className="flex justify-between items-start mb-3">
                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                         <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider">Active Round</span>
-                         {activeQuota.dueDate && (
-                           <span className="px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
-                               <Clock className="w-3 h-3"/> {getFormatDate(activeQuota.dueDate)}
-                           </span>
-                         )}
+                      <div className="flex items-center gap-2 mb-1">
+                         <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase">Active Round</span>
+                         {activeQuota.dueDate && <span className="px-2 py-0.5 rounded bg-orange-50 text-orange-700 text-[10px] font-bold uppercase flex items-center gap-1"><Clock className="w-3 h-3"/> {getFormatDate(activeQuota.dueDate)}</span>}
                       </div>
-                      <h2 className="text-3xl font-bold text-slate-900">{activeQuota.name}</h2>
+                      <h2 className="text-lg font-bold text-slate-900">{activeQuota.name}</h2>
                    </div>
                 </div>
-                
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-slate-600 text-sm relative z-10 leading-relaxed">
-                   <strong className="text-slate-900 font-semibold block mb-1 text-base">Director's Note</strong> {activeQuota.instructions}
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-slate-600 text-xs leading-relaxed">
+                   <strong>Note:</strong> {activeQuota.instructions}
                 </div>
             </div>
 
-            {/* Progress Cards Grid */}
-            <div className="grid md:grid-cols-2 gap-8">
-                {/* Writing Progress */}
-                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-56 relative overflow-hidden group hover:border-indigo-200 transition-colors">
-                    <div className="relative z-10">
-                        <div className="flex justify-between items-start mb-4">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
-                                <Pencil className="w-5 h-5 text-indigo-500" /> Writing Quota
-                            </h3>
-                            {submissionCount >= submissionTarget ? 
-                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
-                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-3 py-1 rounded-full">{submissionCount} / {submissionTarget}</span>
-                            }
-                        </div>
-                        <div className="text-5xl font-black text-slate-900 mt-2 tracking-tighter">
-                            {Math.round(subPercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
-                        </div>
+            <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 relative overflow-hidden">
+                    <div className="flex justify-between items-start relative z-10">
+                        <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm"><Pencil className="w-4 h-4 text-indigo-500" /> Writing</h3>
+                        <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">{submissionCount} / {submissionTarget}</span>
                     </div>
-                    
-                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
-                        <div 
-                            className={`h-full rounded-full transition-all duration-1000 ease-out ${submissionCount >= submissionTarget ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
-                            style={{ width: `${subPercent}%` }}
-                        ></div>
-                    </div>
-
-                    {/* Decorative bg */}
-                    <div className="absolute -bottom-6 -right-6 text-indigo-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
-                        <Pencil size={140} />
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden relative z-10 mt-2">
+                        <div className={`h-full rounded-full ${subPercent >= 100 ? 'bg-emerald-500' : 'bg-indigo-600'}`} style={{ width: `${subPercent}%` }}></div>
                     </div>
                 </div>
-
-                {/* Voting Progress */}
-                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-56 relative overflow-hidden group hover:border-teal-200 transition-colors">
-                    <div className="relative z-10">
-                        <div className="flex justify-between items-start mb-4">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
-                                <ThumbsUp className="w-5 h-5 text-teal-500" /> Voting Quota
-                            </h3>
-                            {userVoteCount >= voteTarget ? 
-                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
-                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-3 py-1 rounded-full">{userVoteCount} / {voteTarget}</span>
-                            }
-                        </div>
-                        <div className="text-5xl font-black text-slate-900 mt-2 tracking-tighter">
-                            {Math.round(votePercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
-                        </div>
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 relative overflow-hidden">
+                    <div className="flex justify-between items-start relative z-10">
+                        <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm"><ThumbsUp className="w-4 h-4 text-teal-500" /> Voting</h3>
+                        <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">{userVoteCount} / {voteTarget}</span>
                     </div>
-                    
-                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
-                        <div 
-                            className={`h-full rounded-full transition-all duration-1000 ease-out ${userVoteCount >= voteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
-                            style={{ width: `${votePercent}%` }}
-                        ></div>
-                    </div>
-
-                    {/* Decorative bg */}
-                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
-                        <ThumbsUp size={140} />
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden relative z-10 mt-2">
+                        <div className={`h-full rounded-full ${votePercent >= 100 ? 'bg-emerald-500' : 'bg-teal-500'}`} style={{ width: `${votePercent}%` }}></div>
                     </div>
                 </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-slate-900">Your Submissions</h3>
-                <Button variant="ghost" onClick={() => { resetForm(); setView('submit'); }} className="text-sm">
-                  <PlusCircle className="w-4 h-4" /> Add Problem
-                </Button>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-900">Your Submissions</h3>
+                <Button variant="ghost" onClick={() => { resetForm(); setView('submit'); }} className="text-xs h-8"><PlusCircle className="w-3.5 h-3.5" /> Add Problem</Button>
               </div>
-              
-              {isLoadingData && <p className="text-sm text-gray-400 mb-4">Refreshing data...</p>}
-
-              {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length > 0 ? (
-                <div className="grid gap-8">
+              <div className="grid gap-4">
                   {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).map(p => (
-                    <ProblemCard 
-                        key={p.id} 
-                        problem={p} 
-                        showAuthor={true} 
-                        currentUserId={currentUser.id}
-                        currentUserRole={currentUser.role}
-                        onUpvote={handleToggleVote}
-                        onEdit={handleStartEdit}
-                        onStatusChange={handleStatusChange}
-                        votingPower={currentUser.votingPower}
-                    />
+                    <ProblemCard key={p.id} problem={p} showAuthor={true} currentUserId={currentUser.id} currentUserRole={currentUser.role} onUpvote={handleToggleVote} onEdit={handleStartEdit} onStatusChange={handleStatusChange} votingPower={currentUser.votingPower} />
                   ))}
-                </div>
-              ) : (
-                  <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 border-dashed">
-                      <p className="text-slate-400 italic text-lg">No submissions for this round yet.</p>
-                      <Button variant="secondary" onClick={() => { resetForm(); setView('submit'); }} className="mt-6 mx-auto">Start Writing</Button>
-                  </div>
-              )}
+                  {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length === 0 && <div className="text-center py-8 text-slate-400 italic bg-white rounded-xl border border-slate-200 border-dashed text-xs">No submissions yet.</div>}
+              </div>
             </div>
           </div>
         )}
 
-        {/* VIEW: ROUND COMPOSER */}
         {view === 'composer' && isDirector && !isGuest && (
-          <div className="max-w-7xl mx-auto h-[calc(100vh-6rem)] flex flex-col">
-            <header className="flex justify-between items-center mb-6 shrink-0">
-               <div>
-                  <h1 className="text-3xl font-bold text-slate-900">Round Composer</h1>
-                  <p className="text-slate-500 mt-1">
-                    Drag and drop isn't here yet, so click buttons to move problems.
-                  </p>
-               </div>
-               <div className="flex gap-3">
-                  <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
-                      <Download className="w-4 h-4" /> Export TeX
-                  </Button>
-               </div>
+          <div className="max-w-6xl mx-auto h-[calc(100vh-6rem)] flex flex-col">
+            <header className="flex justify-between items-center mb-4 shrink-0">
+               <div><h1 className="text-xl font-bold text-slate-900">Composer</h1></div>
+               <Button onClick={handleExportLatex} size="sm" variant="secondary" className="text-xs gap-1"><Download className="w-3 h-3" /> Export TeX</Button>
             </header>
-
-            <div className="flex-1 grid grid-cols-2 gap-8 min-h-0">
-                {/* LEFT: CANDIDATE POOL */}
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                        <h2 className="font-bold text-slate-700 flex items-center gap-2">
-                           <LayoutList className="w-4 h-4"/> Candidates ({composerCandidates.length})
-                        </h2>
-                        <select 
-                            className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
-                            value={composerFilterTopic}
-                            onChange={e => setComposerFilterTopic(e.target.value)}
-                        >
+            <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <h2 className="font-bold text-slate-700 text-xs flex items-center gap-1"><LayoutList className="w-3.5 h-3.5"/> Candidates ({composerCandidates.length})</h2>
+                        <select className="px-1 py-0.5 text-[10px] border rounded bg-white" value={composerFilterTopic} onChange={e => setComposerFilterTopic(e.target.value)}>
                             <option value="All">All Topics</option>
                             {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                        {composerCandidates.length === 0 ? (
-                           <div className="text-center py-10 text-slate-400 italic text-sm">No shortlisted problems found.</div>
-                        ) : (
-                           composerCandidates.map(p => (
-                               <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-3 hover:border-indigo-300 transition-all group flex gap-3">
-                                   <div className="flex-1 min-w-0">
-                                       <div className="flex justify-between items-start">
-                                           <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
-                                           <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{p.difficulty}</span>
-                                       </div>
-                                       <div className="text-xs text-slate-500 mt-1 flex gap-2">
-                                           <span>{p.topics[0]}</span>
-                                           <span>•</span>
-                                           <span>Score: {p.score}</span>
-                                       </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                       {composerCandidates.map(p => (
+                           <div key={p.id} className="bg-white border border-slate-200 rounded-lg p-2.5 hover:border-indigo-300 transition-all flex gap-2 items-center">
+                               <div className="flex-1 min-w-0">
+                                   <div className="flex justify-between items-start">
+                                       <h4 className="font-bold text-slate-900 truncate text-xs">{p.title}</h4>
+                                       <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-1 rounded">{p.difficulty}</span>
                                    </div>
-                                   <button 
-                                      onClick={() => handleAddToRound(p)}
-                                      className="w-8 flex items-center justify-center bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-100 transition-colors"
-                                   >
-                                       <ArrowRight className="w-4 h-4"/>
-                                   </button>
+                                   <div className="text-[10px] text-slate-500 flex gap-1 mt-0.5"><span>{p.topics[0]}</span><span>•</span><span>Score: {p.score}</span></div>
                                </div>
-                           ))
-                        )}
+                               <button onClick={() => handleAddToRound(p)} className="w-6 h-6 flex items-center justify-center bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded border border-slate-100"><ArrowRight className="w-3 h-3"/></button>
+                           </div>
+                       ))}
                     </div>
                 </div>
-
-                {/* RIGHT: FINAL ROUND */}
-                <div className="bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
-                    <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
-                        <div className="flex justify-between items-center">
-                            <h2 className="font-bold text-indigo-900 flex items-center gap-2">
-                               <CheckCircle className="w-4 h-4"/> Official Round Order
-                            </h2>
-                            <span className="text-xs font-bold bg-white text-indigo-600 px-2 py-1 rounded-full border border-indigo-100">
-                                {composerAccepted.length} Problems
-                            </span>
-                        </div>
-                        {/* Stats Bar */}
-                        <div className="flex gap-4 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-                            <span>Avg Diff: {composerAvgDiff}</span>
-                            <span className="text-slate-300">|</span>
-                            {Object.entries(composerTopicCounts).map(([t, c]) => (
-                                <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-600'}>{t.substring(0,3)}: {c}</span>
-                            ))}
-                        </div>
+                <div className="bg-white rounded-xl border border-indigo-200 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-3 border-b border-indigo-100 bg-indigo-50/50 flex justify-between items-center">
+                        <h2 className="font-bold text-indigo-900 text-xs flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5"/> Selected ({composerAccepted.length})</h2>
                     </div>
-                    
-                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-50/30">
-                         {composerAccepted.length === 0 ? (
-                            <div className="text-center py-20">
-                                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
-                                    <Layers className="w-6 h-6" />
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                        {composerAccepted.map((p, idx) => (
+                            <div key={p.id} className="bg-white border border-indigo-100 rounded-lg p-2.5 flex items-center gap-2 shadow-sm">
+                                <div className="font-mono font-bold text-indigo-300 text-xs w-4 text-center">{idx + 1}</div>
+                                <div className="flex-1 min-w-0"><h4 className="font-bold text-slate-900 truncate text-xs">{p.title}</h4></div>
+                                <div className="flex flex-col gap-0.5">
+                                    <button onClick={() => handleReorder(idx, 'up')} disabled={idx === 0} className="p-0.5 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"><ArrowUp className="w-3 h-3"/></button>
+                                    <button onClick={() => handleReorder(idx, 'down')} disabled={idx === composerAccepted.length - 1} className="p-0.5 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"><ArrowDown className="w-3 h-3"/></button>
                                 </div>
-                                <p className="text-slate-400 italic text-sm">The round is empty.<br/>Add problems from the left.</p>
+                                <button onClick={() => handleRemoveFromRound(p)} className="w-6 h-6 flex items-center justify-center hover:bg-red-50 text-slate-300 hover:text-red-500 rounded"><X className="w-3 h-3"/></button>
                             </div>
-                         ) : (
-                            composerAccepted.map((p, idx) => (
-                                <div key={p.id} className="bg-white border border-indigo-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                                    <div className="font-mono font-bold text-indigo-300 text-lg w-6 text-center">{idx + 1}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
-                                        <div className="text-xs text-slate-500 flex gap-2">
-                                            <span className="bg-slate-100 px-1 rounded">{p.difficulty}</span>
-                                            <span className="truncate">{p.topics.join(', ')}</span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex flex-col gap-1">
-                                        <button 
-                                            onClick={() => handleReorder(idx, 'up')}
-                                            disabled={idx === 0}
-                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
-                                        >
-                                            <ArrowUp className="w-3 h-3"/>
-                                        </button>
-                                        <button 
-                                            onClick={() => handleReorder(idx, 'down')}
-                                            disabled={idx === composerAccepted.length - 1}
-                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
-                                        >
-                                            <ArrowDown className="w-3 h-3"/>
-                                        </button>
-                                    </div>
-
-                                    <button 
-                                       onClick={() => handleRemoveFromRound(p)}
-                                       className="w-8 h-8 flex items-center justify-center hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-colors ml-1"
-                                    >
-                                        <X className="w-4 h-4"/>
-                                    </button>
-                                </div>
-                            ))
-                         )}
+                        ))}
                     </div>
                 </div>
             </div>
           </div>
         )}
 
-        {/* VIEW: SUBMIT / EDIT */}
         {view === 'submit' && (
-          <div className="max-w-4xl mx-auto">
-            <header className="mb-10">
-              {!isGuest && (
-                  <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
-                     ← Back to Dashboard
-                  </Button>
-              )}
-              <h1 className="text-3xl font-bold text-slate-900">
-                  {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
-              </h1>
-              {isGuest ? (
-                  <div className="mt-2 bg-amber-50 text-amber-900 p-3 rounded-xl border border-amber-200 text-sm">
-                      <strong>Guest Mode:</strong> You are submitting a proposal. If approved, it will be added to the pool.
-                  </div>
-              ) : (
-                  <p className="text-slate-500 mt-2">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
-              )}
+          <div className="max-w-3xl mx-auto">
+            <header className="mb-6">
+              {!isGuest && <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-2 pl-0 text-xs">← Back</Button>}
+              <h1 className="text-xl font-bold text-slate-900">{editingProblemId ? 'Edit' : isGuest ? 'Propose Problem' : 'New Problem'}</h1>
+              {isGuest && <div className="mt-2 bg-amber-50 text-amber-900 p-2 rounded border border-amber-200 text-xs">Guest Mode: Proposal only.</div>}
             </header>
-            
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-10 space-y-10">
-                {/* Title */}
-                <div className="space-y-3">
-                  <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Problem Title</label>
-                  <input 
-                    type="text" 
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. The Three Triangles"
-                    className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black placeholder:text-slate-400 text-lg"
-                  />
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Title</label>
+                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 outline-none text-sm focus:border-indigo-500" placeholder="Problem Title" />
                 </div>
-
-                {/* Topics & Difficulty */}
-                <div className="grid md:grid-cols-2 gap-8">
-                    <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Difficulty Rating</label>
-                        <div className="flex gap-2 items-center">
-                            <input 
-                                type="number" 
-                                step="0.1"
-                                min="0"
-                                max="50"
-                                value={difficulty}
-                                onChange={(e) => setDifficulty(e.target.value)}
-                                className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
-                            />
-                        </div>
-                        <a 
-                            href="https://artofproblemsolving.com/wiki/index.php/AoPS_Wiki:Competition_ratings" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1"
-                        >
-                            <ExternalLink className="w-3 h-3" /> AoPS Rating Guide (Tenths place only)
-                        </a>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Difficulty</label>
+                        <input type="number" step="0.1" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 outline-none text-sm focus:border-indigo-500" />
                     </div>
-                    <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
-                        <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Topics</label>
+                        <div className="flex flex-wrap gap-2">
                             {TOPICS.map(t => (
-                                <label key={t} className="flex items-center gap-3 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
-                                    <input 
-                                        type="checkbox"
-                                        checked={selectedTopics.includes(t)}
-                                        onChange={() => handleTopicToggle(t)}
-                                        className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
-                                    />
-                                    <span className="text-base text-slate-700 font-medium">{t}</span>
-                                </label>
+                                <button key={t} onClick={() => handleTopicToggle(t)} className={`px-2 py-1 rounded text-[10px] font-medium border ${selectedTopics.includes(t) ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{t}</button>
                             ))}
                         </div>
                     </div>
                 </div>
-
-                {/* Statement */}
-                <div className="space-y-3">
-                  <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">
-                    Problem Statement
-                  </label>
-                  <textarea 
-                    value={statement}
-                    onChange={(e) => setStatement(e.target.value)}
-                    rows={8}
-                    placeholder="Let $ABC$ be a triangle where..."
-                    className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-lg leading-relaxed mb-4"
-                  />
-                  
-                  {/* Image Upload */}
-                  <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 border-dashed">
-                      <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center border border-slate-200 text-slate-400 shrink-0">
-                          <ImageIcon className="w-6 h-6" />
-                      </div>
-                      <div className="flex-1">
-                          <label className="block text-sm font-bold text-slate-700 cursor-pointer hover:text-indigo-600 transition-colors">
-                              <span>Upload Image (Optional)</span>
-                              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                          </label>
-                          <p className="text-xs text-slate-400">PNG, JPG up to 2MB</p>
-                      </div>
-                      {imageData && (
-                          <div className="relative w-16 h-16 bg-white rounded-lg border border-slate-200 overflow-hidden">
-                              <img src={imageData} alt="Preview" className="w-full h-full object-cover" />
-                              <button onClick={() => setImageData(null)} className="absolute inset-0 bg-black/50 text-white opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
-                                  <X className="w-4 h-4" />
-                              </button>
-                          </div>
-                      )}
-                  </div>
-
-                  {/* Preview */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mt-4">
-                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-3">Live Preview</span>
-                     <MathText 
-                         text={statement || 'Type above to preview...'} 
-                         className="font-serif text-slate-800 text-lg leading-relaxed whitespace-pre-wrap min-h-[40px]" 
-                     />
-                     {imageData && (
-                        <div className="mt-4 rounded-xl overflow-hidden border border-slate-200">
-                            <img src={imageData} alt="Preview" className="max-h-96 w-auto mx-auto object-contain" />
-                            <div className="bg-slate-50 text-xs text-center text-slate-400 py-1 border-t border-slate-100 flex items-center justify-center gap-1">
-                                <ImageIcon className="w-3 h-3" /> Attachment
-                            </div>
-                        </div>
-                     )}
-                  </div>
-                </div>
-
-                {/* Verification / Disclaimer */}
-                <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 flex items-start gap-4 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
-                   <div className={`mt-0.5 w-6 h-6 rounded-md border border-indigo-300 flex items-center justify-center shrink-0 transition-colors ${isVerified ? 'bg-indigo-600 border-indigo-600' : 'bg-white'}`}>
-                      {isVerified && <BadgeCheck className="w-4 h-4 text-white" />}
-                   </div>
-                   <div className="select-none">
-                      <label className="font-bold text-indigo-900 text-base cursor-pointer">
-                          {isGuest ? "Usage Rights Agreement" : "I certify that this is a valid problem."}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Statement</label>
+                  <textarea value={statement} onChange={(e) => setStatement(e.target.value)} rows={6} className="w-full px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 outline-none text-sm font-serif mb-2 focus:border-indigo-500" placeholder="Let $x$ be..." />
+                  <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-600 hover:text-indigo-600">
+                          <ImageIcon className="w-4 h-4"/> <span>{imageData ? "Change Image" : "Upload Image"}</span>
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                       </label>
-                      <p className="text-sm text-indigo-700/80 mt-1 leading-relaxed">
-                          {isGuest 
-                            ? "By submitting, I allow WAMO to use, edit, and distribute this problem in any official capacity. I confirm this is original work and agree not to share or distribute this problem elsewhere."
-                            : "To prevent quota spam, all submissions are monitored for quality and relevance."
-                          }
-                      </p>
-                   </div>
-                </div>
-
-                {/* Error Message */}
-                {submissionError && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-                    <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-bold text-red-700 text-sm">Submission Rejected</h4>
-                      <p className="text-red-600 text-sm mt-1">{submissionError}</p>
-                    </div>
+                      {imageData && <button onClick={() => setImageData(null)} className="text-red-500 text-xs hover:underline">Remove</button>}
                   </div>
-                )}
-              </div>
-              
-              <div className="p-8 bg-slate-50 border-t border-slate-200 flex justify-end gap-4 items-center">
-                {!isGuest && <Button variant="ghost" onClick={() => setView('dashboard')}>Cancel</Button>}
-                <Button 
-                  onClick={handleSubmit} 
-                  disabled={!title || !statement || !isVerified}
-                  isLoading={isSubmitting}
-                  size="lg"
-                  className="px-8 shadow-indigo-200"
-                >
-                  {editingProblemId ? 'Update Problem' : 'Submit Problem'}
-                </Button>
-              </div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                     <span className="text-[10px] font-bold text-slate-400 uppercase block mb-2">Preview</span>
+                     <MathText text={statement || '...'} className="font-serif text-slate-800 text-sm whitespace-pre-wrap" />
+                     {imageData && <img src={imageData} className="mt-2 max-h-40 rounded border border-slate-200" alt="Preview" />}
+                </div>
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsVerified(!isVerified)}>
+                   <div className={`w-4 h-4 rounded border flex items-center justify-center ${isVerified ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                      {isVerified && <BadgeCheck className="w-3 h-3 text-white" />}
+                   </div>
+                   <span className="text-xs font-medium text-slate-700 select-none">
+                       {isGuest ? "I agree to usage rights." : "I verified this problem."}
+                   </span>
+                </div>
+                <div className="flex justify-end pt-2 border-t border-slate-100">
+                    <Button onClick={handleSubmit} disabled={!title || !statement || !isVerified} isLoading={isSubmitting}>{editingProblemId ? 'Update' : 'Submit'}</Button>
+                </div>
             </div>
           </div>
         )}
 
-        {/* VIEW: POOL (BLIND REVIEW) */}
         {view === 'pool' && !isGuest && (
-          <div className="max-w-6xl mx-auto">
-            <header className="mb-10 flex flex-col md:flex-row justify-between md:items-center gap-4">
-               <div>
-                  <h1 className="text-3xl font-bold text-slate-900">Problem Pool</h1>
-                  <p className="text-slate-500 mt-2">
-                    {problems.length} problems submitted • <span className="text-indigo-600 font-semibold">Blind Review Active</span>
-                  </p>
-               </div>
+          <div className="max-w-5xl mx-auto">
+            <header className="mb-6 flex justify-between items-center">
+               <h1 className="text-2xl font-bold text-slate-900">Problem Pool</h1>
             </header>
-            
-            {/* Filters Bar */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm mb-8 flex flex-col md:flex-row gap-5 items-center flex-wrap">
-                <div className="flex items-center gap-2 text-sm text-slate-500 font-bold uppercase tracking-wider">
-                    <Filter className="w-4 h-4" /> Filters
-                </div>
-
-                {/* Quota Filter */}
-                <select 
-                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
-                    value={poolFilterQuota}
-                    onChange={(e) => setPoolFilterQuota(e.target.value)}
-                >
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-4 flex gap-3 items-center flex-wrap">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase"><Filter className="w-3.5 h-3.5" /> Filters</div>
+                <select className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs" value={poolFilterQuota} onChange={(e) => setPoolFilterQuota(e.target.value)}>
                     <option value="All">All Rounds</option>
-                    {quotas.map(q => (
-                        <option key={q.id} value={q.id}>{q.name}</option>
-                    ))}
+                    {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
                 </select>
-                
-                {/* Topic Filter */}
-                <select 
-                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
-                    value={poolFilterTopic}
-                    onChange={(e) => setPoolFilterTopic(e.target.value)}
-                >
+                <select className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs" value={poolFilterTopic} onChange={(e) => setPoolFilterTopic(e.target.value)}>
                     <option value="All">All Topics</option>
                     {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-
-                {/* Status Filter */}
-                <select 
-                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
-                    value={poolFilterStatus}
-                    onChange={(e) => setPoolFilterStatus(e.target.value)}
-                >
-                    <option value="All">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="shortlisted">Shortlisted</option>
-                    <option value="accepted">Accepted</option>
-                </select>
-
-                {/* Difficulty Filter */}
-                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
-                    <span className="text-xs font-bold text-slate-400 uppercase">Diff</span>
-                    <input 
-                        type="number" 
-                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500 font-bold text-slate-700"
-                        value={poolFilterDiffMin}
-                        onChange={e => setPoolFilterDiffMin(Number(e.target.value))}
-                        placeholder="Min"
-                    />
-                    <span className="text-slate-400">-</span>
-                    <input 
-                        type="number" 
-                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500 font-bold text-slate-700"
-                        value={poolFilterDiffMax}
-                        onChange={e => setPoolFilterDiffMax(Number(e.target.value))}
-                        placeholder="Max"
-                    />
-                </div>
-
                 <div className="flex-1"></div>
-
-                {/* Sorting */}
-                <div className="flex items-center gap-3">
-                    <ArrowUpDown className="w-4 h-4 text-slate-400" />
-                    <select 
-                        className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
-                        value={poolSort}
-                        onChange={(e) => setPoolSort(e.target.value as any)}
-                    >
-                        <option value="highest">Votes: High to Low</option>
-                        <option value="lowest">Votes: Low to High</option>
-                        <option value="hardest">Difficulty: Hardest First</option>
-                        <option value="easiest">Difficulty: Easiest First</option>
-                        <option value="newest">Newest First</option>
-                    </select>
-                </div>
+                <select className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs" value={poolSort} onChange={(e) => setPoolSort(e.target.value as any)}>
+                    <option value="highest">Highest Votes</option>
+                    <option value="newest">Newest</option>
+                </select>
             </div>
-
-            <div className="grid gap-8">
-              {poolIds.length === 0 ? (
-                <div className="text-center py-24 bg-white rounded-3xl border border-slate-200 shadow-sm">
-                   <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <Search className="w-10 h-10 text-slate-300" />
-                   </div>
-                   <h2 className="text-xl font-bold text-slate-900">No problems found</h2>
-                   <p className="text-slate-500 mt-2">Try adjusting your filters.</p>
-                </div>
-              ) : (
-                // Use poolIds to render in filtered/sorted order
+            <div className="grid gap-4">
+              {poolIds.length === 0 ? <div className="text-center py-12 text-slate-400 text-xs">No problems found.</div> : 
                 poolIds.map(id => {
                   const p = problems.find(prob => prob.id === id);
                   if (!p) return null;
-                  return (
-                    <ProblemCard 
-                      key={p.id} 
-                      problem={p} 
-                      showAuthor={p.authorId === currentUser.id} // ONLY show if it is MY problem. Admin sees blind.
-                      currentUserId={currentUser.id}
-                      currentUserRole={currentUser.role}
-                      onUpvote={handleToggleVote}
-                      onEdit={handleStartEdit}
-                      onStatusChange={handleStatusChange}
-                      votingPower={currentUser.votingPower}
-                    />
-                  );
+                  return <ProblemCard key={p.id} problem={p} showAuthor={p.authorId === currentUser.id} currentUserId={currentUser.id} currentUserRole={currentUser.role} onUpvote={handleToggleVote} onEdit={handleStartEdit} onStatusChange={handleStatusChange} votingPower={currentUser.votingPower} />;
                 })
-              )}
+              }
             </div>
           </div>
         )}
 
-        {/* VIEW: ADMIN PANEL */}
         {view === 'admin' && isDirector && !isGuest && (
           <div className="max-w-6xl mx-auto">
-             <div className="flex justify-between items-center mb-10">
-                <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
-                <div className="flex gap-3">
-                  <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
-                      <Download className="w-4 h-4" /> Export TeX
-                  </Button>
-                  {/* DANGER: Reset Votes Button (Admin Only) */}
-                  {currentUser.role === 'admin' && (
-                     <Button onClick={handleResetVotes} size="sm" variant="danger" className="gap-2">
-                         <ShieldAlert className="w-4 h-4" /> Reset All Votes
-                     </Button>
-                  )}
+             <div className="flex justify-between items-center mb-6">
+                <h1 className="text-2xl font-bold text-slate-900">Admin</h1>
+                <div className="flex gap-2">
+                  <Button onClick={handleExportLatex} size="sm" variant="secondary">Export</Button>
+                  {currentUser.role === 'admin' && <Button onClick={handleResetVotes} size="sm" variant="danger">Reset Votes</Button>}
                 </div>
              </div>
              
-             <div className="grid md:grid-cols-2 gap-8 mb-8">
-                {/* Quota Management */}
-                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
-                   <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
-                      <Layers className="w-5 h-5 text-indigo-600" /> Quota / Rounds
-                   </h3>
-                   
-                   <div className="flex-1 space-y-4 mb-8">
+             <div className="grid md:grid-cols-2 gap-6 mb-6">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                   <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-sm"><Layers className="w-4 h-4" /> Rounds</h3>
+                   <div className="flex-1 space-y-3 mb-4">
                       {quotas.map(q => (
-                         <div key={q.id} className={`p-5 rounded-2xl border flex flex-col gap-2 transition-all ${activeQuotaId === q.id ? 'bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500' : 'bg-slate-50 border-slate-200'}`}>
+                         <div key={q.id} className={`p-3 rounded-lg border text-xs ${activeQuotaId === q.id ? 'bg-white border-indigo-500 shadow-sm' : 'bg-slate-50 border-slate-200'}`}>
                             {editingQuotaId === q.id ? (
-                               <div className="space-y-3">
-                                  <input 
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
-                                    value={editQuotaForm.name} 
-                                    onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})}
-                                    placeholder="Name"
-                                  />
-                                  <div className="flex gap-3">
-                                    <div className="flex flex-col gap-1 w-24">
-                                        <label className="text-[10px] uppercase font-bold text-slate-400">Prob Qty</label>
-                                        <input 
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
-                                        type="number"
-                                        value={editQuotaForm.target} 
-                                        onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})}
-                                        />
-                                    </div>
-                                    <div className="flex flex-col gap-1 w-24">
-                                        <label className="text-[10px] uppercase font-bold text-slate-400">Vote Qty</label>
-                                        <input 
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
-                                        type="number"
-                                        value={editQuotaForm.voteTarget} 
-                                        onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})}
-                                        />
-                                    </div>
-                                    <div className="flex-1 flex flex-col gap-1">
-                                        <label className="text-[10px] uppercase font-bold text-slate-400">Due Date</label>
-                                        <input 
-                                          type="date"
-                                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
-                                          value={editQuotaForm.dueDate ? new Date(editQuotaForm.dueDate).toISOString().split('T')[0] : ''}
-                                          onChange={e => setEditQuotaForm({...editQuotaForm, dueDate: e.target.valueAsNumber})}
-                                        />
-                                    </div>
+                               <div className="space-y-2">
+                                  <input className="w-full px-2 py-1 border rounded bg-white" value={editQuotaForm.name} onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})} placeholder="Name" />
+                                  <div className="flex gap-2">
+                                      <input className="w-16 px-2 py-1 border rounded bg-white" type="number" value={editQuotaForm.target} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} placeholder="Target" />
+                                      <input className="w-16 px-2 py-1 border rounded bg-white" type="number" value={editQuotaForm.voteTarget} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} placeholder="Vote" />
                                   </div>
-                                  <input 
-                                      className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
-                                      value={editQuotaForm.instructions} 
-                                      onChange={e => setEditQuotaForm({...editQuotaForm, instructions: e.target.value})}
-                                      placeholder="Instructions"
-                                  />
-                                  <div className="flex justify-end gap-2 mt-2">
-                                     <button onClick={cancelEditQuota} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><X className="w-4 h-4" /></button>
-                                     <button onClick={saveQuota} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"><Save className="w-4 h-4" /></button>
-                                  </div>
+                                  <div className="flex justify-end gap-1"><button onClick={saveQuota} className="text-green-600 font-bold">Save</button><button onClick={cancelEditQuota} className="text-red-500">Cancel</button></div>
                                </div>
                             ) : (
                                <div className="flex justify-between items-center">
                                   <div>
-                                     <div className="flex items-center gap-3">
-                                        <span className="font-bold text-slate-900 text-lg">{q.name}</span>
-                                        {activeQuotaId === q.id && <span className="text-[10px] bg-indigo-600 text-white px-2.5 py-0.5 rounded-full uppercase tracking-wider font-bold shadow-sm">Active</span>}
-                                     </div>
-                                     <div className="text-xs text-slate-500 mt-2 flex gap-3 font-medium">
-                                         <span>Target: {q.target}</span>
-                                         <span>•</span>
-                                         <span>Vote: {q.voteTarget || 3}</span>
-                                         <span>•</span>
-                                         <span className={q.dueDate ? 'text-indigo-600' : 'text-slate-400'}>
-                                             {getFormatDate(q.dueDate)}
-                                         </span>
-                                     </div>
+                                     <div className="flex items-center gap-2"><span className="font-bold text-slate-900">{q.name}</span>{activeQuotaId === q.id && <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded uppercase">Active</span>}</div>
+                                     <div className="text-[10px] text-slate-500 mt-1">T: {q.target} • V: {q.voteTarget || 3}</div>
                                   </div>
-                                  <div className="flex gap-2">
-                                     <button onClick={() => startEditQuota(q)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors">
-                                        <Pencil className="w-4 h-4" />
-                                     </button>
-                                     {activeQuotaId !== q.id && (
-                                        <Button size="sm" variant="secondary" onClick={() => switchQuota(q.id)} className="text-xs h-8 px-3">Activate</Button>
-                                     )}
+                                  <div className="flex gap-1">
+                                     <button onClick={() => startEditQuota(q)} className="p-1 text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
+                                     {activeQuotaId !== q.id && <Button size="sm" variant="secondary" onClick={() => switchQuota(q.id)} className="h-6 text-[10px] px-2 py-0">Use</Button>}
                                   </div>
                                </div>
                             )}
                          </div>
                       ))}
                    </div>
-
-                   <div className="pt-6 border-t border-slate-100">
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Create New Round</p>
-                      <div className="space-y-4">
-                         <div className="flex gap-2">
-                           <input 
-                              type="text" 
-                              placeholder="Round Name" 
-                              value={newQuotaName} 
-                              onChange={e => setNewQuotaName(e.target.value)}
-                              className="flex-1 px-4 py-3 border border-slate-300 rounded-xl text-sm bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
-                           />
-                         </div>
-                         <Button onClick={addQuota} disabled={!newQuotaName.trim()} className="w-full">Create Round</Button>
-                      </div>
+                   <div className="pt-3 border-t border-slate-100 space-y-2">
+                       <input type="text" placeholder="New Round" value={newQuotaName} onChange={e => setNewQuotaName(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-xs" />
+                       <Button onClick={addQuota} disabled={!newQuotaName.trim()} size="sm" className="w-full">Create</Button>
                    </div>
                 </div>
 
-                {/* Add User */}
-                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-                   <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
-                      <UserPlus className="w-5 h-5 text-indigo-600" /> Add New User
-                   </h3>
-                   <div className="space-y-5">
-                      <input 
-                        type="text" 
-                        value={newUserName}
-                        onChange={(e) => setNewUserName(e.target.value)}
-                        placeholder="Full Name"
-                        className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                      <input 
-                        type="text" 
-                        value={newUserPassword}
-                        onChange={(e) => setNewUserPassword(e.target.value)}
-                        placeholder="Password"
-                        className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                      
-                      <div className="flex gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-100">
-                          <button 
-                             onClick={() => setNewUserRole('writer')} 
-                             className={`flex-1 text-sm font-medium py-2 rounded-lg transition-all ${newUserRole === 'writer' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
-                          >
-                             Writer
-                          </button>
-                          <button 
-                             onClick={() => setNewUserRole('director')} 
-                             className={`flex-1 text-sm font-medium py-2 rounded-lg transition-all ${newUserRole === 'director' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
-                          >
-                             Director
-                          </button>
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                   <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-sm"><UserPlus className="w-4 h-4" /> Add User</h3>
+                   <div className="space-y-3">
+                      <input type="text" value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="Full Name" className="w-full px-3 py-2 border rounded-lg text-xs" />
+                      <input type="text" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="Password" className="w-full px-3 py-2 border rounded-lg text-xs" />
+                      <div className="flex gap-2 text-xs">
+                          <button onClick={() => setNewUserRole('writer')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'writer' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'text-slate-500'}`}>Writer</button>
+                          <button onClick={() => setNewUserRole('director')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'director' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'text-slate-500'}`}>Director</button>
                       </div>
-
-                      <div className="flex justify-end pt-2">
-                         <Button onClick={addUser} disabled={!newUserName.trim() || !newUserPassword.trim()} className="w-full">
-                           Create Account
-                         </Button>
-                      </div>
+                      <Button onClick={addUser} disabled={!newUserName.trim()} size="sm" className="w-full">Create</Button>
                    </div>
                 </div>
              </div>
 
-             {/* Writer Progress & Voting Power Table */}
-             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-               <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                  <div>
-                    <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-indigo-600" /> User Management
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">Configuring for Active Round: {activeQuota.name}</p>
-                  </div>
-               </div>
-               <table className="w-full text-left">
-                 <thead className="bg-white border-b border-slate-200">
+             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+               <table className="w-full text-left text-xs">
+                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase">
                    <tr>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">User</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Password</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Role & Power</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Write Override</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Progress</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Actions</th>
+                     <th className="px-4 py-3 font-semibold">User</th>
+                     <th className="px-4 py-3 font-semibold">Pass</th>
+                     <th className="px-4 py-3 font-semibold">Power</th>
+                     <th className="px-4 py-3 font-semibold">Override</th>
+                     <th className="px-4 py-3 font-semibold">Progress</th>
+                     <th className="px-4 py-3 font-semibold"></th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
                    {users.map(u => {
                      const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
-                     const uVoteTarget = activeQuota.voteTarget || 3;
                      const uCount = u.submittedCount || 0;
-                     const uVoteCount = u.voteCount || 0;
-                     
-                     // Permission check
-                     const canEditThisUser = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin');
-                     const canDeleteThisUser = canEditThisUser && u.role !== 'director';
-
                      if (editingUserId === u.id) {
-                         // EDIT MODE ROW
                          return (
-                            <tr key={u.id} className="bg-slate-50 shadow-inner">
-                                <td className="px-6 py-4">
-                                    <input 
-                                        className="w-full px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
-                                        value={editUserForm.name} 
-                                        onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
-                                    />
-                                    {currentUser.role === 'admin' && (
-                                       <select 
-                                         className="mt-2 w-full text-xs border border-indigo-300 rounded p-1 bg-white"
-                                         value={editUserForm.role}
-                                         onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
-                                       >
-                                           <option value="writer">Writer</option>
-                                           <option value="director">Director</option>
-                                           <option value="admin">Admin</option>
-                                       </select>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4">
-                                    {currentUser.role === 'admin' ? (
-                                        <div className="flex items-center gap-1">
-                                            <Lock className="w-3 h-3 text-slate-400"/>
-                                            <input 
-                                                className="w-24 px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
-                                                placeholder="Reset Pass"
-                                                value={editUserForm.password}
-                                                onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
-                                            />
-                                        </div>
-                                    ) : (
-                                        <span className="text-xs text-slate-400 italic flex items-center gap-1">
-                                            <Lock className="w-3 h-3"/> Locked
-                                        </span>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4">
-                                     <div className="flex items-center gap-1">
-                                        <Zap className="w-3 h-3 text-amber-500"/>
-                                        <input 
-                                            type="number"
-                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
-                                            value={editUserForm.votingPower}
-                                            onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value) || 0})}
-                                        />
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-1">
-                                        <Target className="w-3 h-3 text-indigo-500"/>
-                                        <input 
-                                            type="number"
-                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
-                                            value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target}
-                                            onChange={e => updateUserTarget(u.id, parseInt(e.target.value) || 0)}
-                                        />
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4 text-xs text-slate-400">
-                                    Saving...
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex gap-2">
-                                        <button onClick={() => saveUser(u.id)} className="p-1.5 text-green-600 bg-white border border-green-200 rounded-lg hover:bg-green-50"><Save className="w-4 h-4"/></button>
-                                        <button onClick={() => setEditingUserId(null)} className="p-1.5 text-slate-500 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"><X className="w-4 h-4"/></button>
-                                    </div>
-                                </td>
+                            <tr key={u.id} className="bg-slate-50">
+                                <td className="px-4 py-2"><input className="w-full border rounded px-1" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} /></td>
+                                <td className="px-4 py-2"><input className="w-full border rounded px-1" placeholder="Reset" value={editUserForm.password} onChange={e => setEditUserForm({...editUserForm, password: e.target.value})} /></td>
+                                <td className="px-4 py-2"><input className="w-10 border rounded px-1 text-center" value={editUserForm.votingPower} onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value)})} /></td>
+                                <td className="px-4 py-2"><input className="w-10 border rounded px-1 text-center" value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target} onChange={e => updateUserTarget(u.id, parseInt(e.target.value))} /></td>
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2 flex gap-2"><button onClick={() => saveUser(u.id)} className="text-green-600"><Save className="w-3 h-3"/></button><button onClick={() => setEditingUserId(null)} className="text-slate-400"><X className="w-3 h-3"/></button></td>
                             </tr>
                          )
                      }
-
                      return (
-                       <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
-                         <td className="px-6 py-5 font-bold text-slate-800 flex items-center gap-2">
-                           {u.name}
-                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
-                           {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">Director</span>}
-                         </td>
-                         <td className="px-6 py-5 text-sm font-mono text-slate-400">
-                            {u.password || '********'}
-                         </td>
-                         <td className="px-6 py-5 text-sm">
-                           <div className="flex items-center gap-1">
-                              <Zap className="w-4 h-4 text-amber-500" />
-                              <span className="font-bold text-slate-900">{u.votingPower}</span>
-                           </div>
-                         </td>
-                         <td className="px-6 py-5 text-sm">
-                             <div className="flex items-center gap-1">
-                                <span className="font-bold text-slate-900 bg-slate-100 px-2 py-1 rounded-md min-w-[30px] text-center">
-                                    {uTarget}
-                                </span>
-                             </div>
-                         </td>
-                         <td className="px-6 py-5">
-                           <div className="flex flex-col gap-3 min-w-[140px]">
-                              {/* Writing Progress */}
-                              <div className="flex items-center gap-3 text-xs">
-                                <Pencil className="w-3.5 h-3.5 text-indigo-400" />
-                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                    <div 
-                                    className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
-                                    style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}
-                                    ></div>
-                                </div>
-                                <span className={`font-mono font-bold ${uCount >= uTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uCount}/{uTarget}</span>
-                              </div>
-                              {/* Voting Progress */}
-                              <div className="flex items-center gap-3 text-xs">
-                                <ThumbsUp className="w-3.5 h-3.5 text-teal-400" />
-                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                    <div 
-                                    className={`h-full rounded-full ${uVoteCount >= uVoteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
-                                    style={{ width: `${Math.min((uVoteCount / uVoteTarget) * 100, 100)}%` }}
-                                    ></div>
-                                </div>
-                                <span className={`font-mono font-bold ${uVoteCount >= uVoteTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uVoteCount}/{uVoteTarget}</span>
-                              </div>
-                           </div>
-                         </td>
-                         <td className="px-6 py-5">
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                {canEditThisUser && (
-                                    <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors" title="Edit User">
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
-                                )}
-                                {canDeleteThisUser && (
-                                    <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title="Delete User">
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                )}
-                            </div>
+                       <tr key={u.id} className="hover:bg-slate-50">
+                         <td className="px-4 py-3 font-medium text-slate-800">{u.name} <span className="text-slate-400 text-[9px] uppercase ml-1">{u.role}</span></td>
+                         <td className="px-4 py-3 font-mono text-slate-400">•••</td>
+                         <td className="px-4 py-3">{u.votingPower}</td>
+                         <td className="px-4 py-3 text-slate-500">{uTarget}</td>
+                         <td className="px-4 py-3"><div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}></div></div></td>
+                         <td className="px-4 py-3 flex gap-2 justify-end">
+                            <button onClick={() => startEditUser(u)} className="text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
+                            {u.role !== 'admin' && <button onClick={() => deleteUser(u.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>}
                          </td>
                        </tr>
                      );
