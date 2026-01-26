@@ -1,39 +1,58 @@
 import { Problem, User, Quota, ProblemStatus } from './types';
 
 // --- CONFIGURATION ---
-// Default to localhost:3000 for the backend server
-const API_BASE_URL = 'http://localhost:3000';
+const USE_MOCK_BACKEND = false;
+
+// Determine if we are in local development (Vite default port 5173)
+// If on localhost:5173, assume backend is on port 3000.
+// Otherwise (production/render), use relative path '' so requests go to the same origin.
+const isLocalDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+const API_BASE_URL = isLocalDev ? 'http://localhost:3000' : '';
 
 // --- INTERFACE ---
 
 export const api = {
   // Auth
   login: async (loginIdOrEmail: string, password?: string): Promise<{ user: User, token?: string }> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginIdOrEmail, password })
-      });
-      if (!res.ok) throw new Error('Login failed');
-      const data = await res.json();
-      if (data.accessToken) localStorage.setItem('token', data.accessToken);
-      return data;
-    } catch (error) {
-      console.error("Login API Error:", error);
-      throw error;
+    if (USE_MOCK_BACKEND) return mockApi.login(loginIdOrEmail, password);
+    
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: loginIdOrEmail, password })
+    });
+    if (!res.ok) throw new Error('Login failed');
+    const data = await res.json();
+    if (data.accessToken) {
+        localStorage.setItem('token', data.accessToken);
     }
+    return data;
   },
 
   guestLogin: async (): Promise<{ user: User, token?: string }> => {
-    const res = await fetch(`${API_BASE_URL}/auth/guest-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (USE_MOCK_BACKEND) throw new Error("Guest login not mocked");
+    
+    const res = await fetch(`${API_BASE_URL}/auth/guest-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
     if (!res.ok) throw new Error('Guest login failed');
     const data = await res.json();
-    if (data.accessToken) localStorage.setItem('token', data.accessToken);
+    if (data.accessToken) {
+        localStorage.setItem('token', data.accessToken);
+    }
     return data;
   },
 
   getMe: async (): Promise<User> => {
+      if (USE_MOCK_BACKEND) {
+          const id = localStorage.getItem('mock_user_id');
+          if (!id) throw new Error('No session');
+          const users = await mockApi.getUsers();
+          const user = users.find(u => u.id === id);
+          if (user) return user;
+          throw new Error('Session invalid');
+      }
       const res = await fetch(`${API_BASE_URL}/auth/me`, { headers: getAuthHeader() });
       if (!res.ok) throw new Error('Session invalid');
       return res.json();
@@ -41,27 +60,28 @@ export const api = {
 
   logout: () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('mock_user_id');
   },
 
   // Users
   getUsers: async (): Promise<User[]> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/users`, { headers: getAuthHeader() });
-      if (!res.ok) throw new Error('Failed to fetch users');
-      return res.json();
-    } catch (error) {
-      console.error("Get Users API Error:", error);
-      throw error;
-    }
+    if (USE_MOCK_BACKEND) return mockApi.getUsers();
+    
+    const res = await fetch(`${API_BASE_URL}/api/users`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error('Failed to fetch users');
+    return res.json();
   },
 
   createUser: async (user: Partial<User>): Promise<User> => {
+    if (USE_MOCK_BACKEND) return mockApi.addUser(user);
+
+    // Re-using auth register endpoint for creating users via Admin panel
     const res = await fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
           name: user.name,
-          email: `${user.name?.toLowerCase().replace(/\s/g, '')}@probfair.org`,
+          email: `${user.name?.toLowerCase().replace(/\s/g, '')}@probfair.org`, // Auto-gen email for login ID
           password: user.password,
           role: user.role || 'writer'
       })
@@ -71,6 +91,8 @@ export const api = {
   },
 
   updateUser: async (user: Partial<User> & { id: string }): Promise<void> => {
+    if (USE_MOCK_BACKEND) return mockApi.updateUser(user);
+
     const res = await fetch(`${API_BASE_URL}/api/users/${user.id}`, {
       method: 'PUT',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -80,27 +102,43 @@ export const api = {
   },
 
   deleteUser: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE_URL}/api/users/${id}`, { method: 'DELETE', headers: getAuthHeader() });
+    if (USE_MOCK_BACKEND) return mockApi.deleteUser(id);
+    
+    const res = await fetch(`${API_BASE_URL}/api/users/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeader()
+    });
     if (!res.ok) throw new Error('Delete failed');
   },
 
   // Problems
   getProblems: async (): Promise<Problem[]> => {
-    const res = await fetch(`${API_BASE_URL}/api/problems`, { headers: getAuthHeader() });
+    if (USE_MOCK_BACKEND) return mockApi.getProblems();
+    
+    const res = await fetch(`${API_BASE_URL}/api/problems`, {
+        headers: getAuthHeader() 
+    });
     if (!res.ok) throw new Error('Failed to fetch problems');
     return res.json();
   },
 
   submitProblem: async (problem: Partial<Problem>): Promise<void> => {
+    if (USE_MOCK_BACKEND) return mockApi.submitProblem(problem);
+
     const res = await fetch(`${API_BASE_URL}/api/problems`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify(problem)
     });
-    if (!res.ok) throw new Error('Submission failed');
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.rejectionReason || 'Submission failed');
+    }
   },
 
   updateProblem: async (problemId: string, problem: Partial<Problem>): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; // Not implemented for mock
+    
     const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}`, {
       method: 'PUT',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -110,6 +148,8 @@ export const api = {
   },
   
   updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; 
+
     const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/status`, {
       method: 'PATCH',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -117,25 +157,54 @@ export const api = {
     });
     if (!res.ok) throw new Error('Status update failed');
   },
+
+  // New: Reorder Round
+  reorderRound: async (problemIds: string[]): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; 
+
+    const res = await fetch(`${API_BASE_URL}/api/rounds/reorder`, {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problems: problemIds })
+    });
+    if (!res.ok) throw new Error('Reorder failed');
+  },
   
+  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
+    return "AI Analysis is currently disabled.";
+  },
+
   toggleVote: async (problemId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/vote`, { method: 'POST', headers: getAuthHeader() });
+    if (USE_MOCK_BACKEND) return mockApi.toggleVote(problemId);
+
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/vote`, {
+      method: 'POST',
+      headers: getAuthHeader()
+    });
     if (!res.ok) throw new Error('Vote failed');
   },
 
   resetVotes: async (): Promise<void> => {
-    const res = await fetch(`${API_BASE_URL}/api/admin/reset-votes`, { method: 'POST', headers: getAuthHeader() });
+    if (USE_MOCK_BACKEND) return; 
+    
+    const res = await fetch(`${API_BASE_URL}/api/admin/reset-votes`, {
+      method: 'POST',
+      headers: getAuthHeader()
+    });
     if (!res.ok) throw new Error('Reset failed');
   },
 
   // Quotas
   getQuotas: async (): Promise<Quota[]> => {
+    if (USE_MOCK_BACKEND) return mockApi.getQuotas();
     const res = await fetch(`${API_BASE_URL}/api/quotas`, { headers: getAuthHeader() });
     if (!res.ok) throw new Error('Failed to fetch rounds');
     return res.json();
   },
 
   createQuota: async (quota: Partial<Quota>): Promise<Quota> => {
+      if (USE_MOCK_BACKEND) return mockApi.addQuota(quota);
+      
       const res = await fetch(`${API_BASE_URL}/api/quotas`, {
         method: 'POST',
         headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -146,6 +215,8 @@ export const api = {
   },
   
   updateQuota: async (quota: Quota): Promise<void> => {
+    if (USE_MOCK_BACKEND) return mockApi.updateQuota(quota);
+
     const res = await fetch(`${API_BASE_URL}/api/quotas/${quota.id}`, {
       method: 'PUT',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -153,6 +224,11 @@ export const api = {
     });
     if (!res.ok) throw new Error('Update failed');
   },
+
+  // Helpers (Deprecating direct calls in favor of methods above, but keeping for compatibility if any leftover)
+  _updateMockUser: (user: User) => { if(USE_MOCK_BACKEND) mockApi.updateUser(user) },
+  _addMockQuota: (quota: Quota) => { if(USE_MOCK_BACKEND) mockApi.addQuota(quota) },
+  _addMockUser: (user: User) => { if(USE_MOCK_BACKEND) mockApi.addUser(user) },
 };
 
 // --- HELPER: Auth Header ---
@@ -160,3 +236,21 @@ function getAuthHeader() {
     const token = localStorage.getItem('token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
+
+// --- MOCK IMPLEMENTATION (LOCAL STORAGE) ---
+// (Kept for fallback, but unused in production with USE_MOCK_BACKEND = false)
+const DEFAULT_USERS: User[] = [];
+const DEFAULT_QUOTAS: Quota[] = [];
+const mockApi = {
+  login: async (loginIdOrEmail: string, password?: string) => ({ user: {} as User }),
+  getUsers: async () => [] as User[],
+  updateUser: (user: Partial<User> & { id: string }) => {},
+  deleteUser: (id: string) => {},
+  addUser: (user: Partial<User> | User) => ({} as User),
+  getProblems: async () => [] as Problem[],
+  submitProblem: async (problem: Partial<Problem>) => {},
+  toggleVote: async (problemId: string) => {},
+  getQuotas: async () => [] as Quota[],
+  updateQuota: (quota: Quota) => {},
+  addQuota: (quota: Partial<Quota> | Quota) => ({} as Quota)
+};
