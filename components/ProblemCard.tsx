@@ -7,7 +7,7 @@ import { api } from '../api';
 
 interface ProblemCardProps {
   problem: Problem;
-  quotaName?: string; // New prop for display
+  roundName?: string; // New prop for display
   showAuthor?: boolean;
   currentUserId: string;
   currentUserRole: string;
@@ -19,7 +19,7 @@ interface ProblemCardProps {
 
 export const ProblemCard: React.FC<ProblemCardProps> = ({ 
   problem, 
-  quotaName,
+  roundName,
   showAuthor = false, 
   currentUserId,
   currentUserRole,
@@ -52,7 +52,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
       return (
         <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2.5 py-1 rounded-full text-xs font-bold border border-green-200 shadow-sm">
            <CheckCircle className="w-3.5 h-3.5" /> 
-           <span>Accepted {quotaName ? `in ${quotaName}` : ''}</span>
+           <span>Accepted {roundName ? `in ${roundName}` : ''}</span>
         </span>
       );
     }

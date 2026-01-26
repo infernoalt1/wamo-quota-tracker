@@ -1,4 +1,4 @@
-import { Problem, User, Quota, ProblemStatus, Topic, Comment } from './types';
+import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -242,7 +242,7 @@ export const api = {
         headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
         body: JSON.stringify(quota)
       });
-      if (!res.ok) throw new Error('Failed to create round');
+      if (!res.ok) throw new Error('Failed to create quota');
       return res.json();
   },
   
@@ -255,6 +255,25 @@ export const api = {
       body: JSON.stringify(quota)
     });
     if (!res.ok) throw new Error('Update failed');
+  },
+
+  // Rounds
+  getRounds: async (): Promise<Round[]> => {
+    if (USE_MOCK_BACKEND) return [];
+    const res = await fetch(`${API_BASE_URL}/api/rounds`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error("Failed to fetch rounds");
+    return res.json();
+  },
+
+  createRound: async (round: Partial<Round>): Promise<Round> => {
+    if (USE_MOCK_BACKEND) return {} as Round;
+    const res = await fetch(`${API_BASE_URL}/api/rounds`, {
+        method: 'POST',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(round)
+    });
+    if (!res.ok) throw new Error("Failed to create round");
+    return res.json();
   },
 
   // Helpers

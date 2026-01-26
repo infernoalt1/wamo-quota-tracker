@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Problem, User, Quota, Topic, ProblemStatus, Comment } from './types';
+import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
@@ -96,6 +96,7 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [quotas, setQuotas] = useState<Quota[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
   const [activeQuotaId, setActiveQuotaId] = useState<string>('q1');
 
   // --- Session State ---
@@ -143,11 +144,9 @@ export default function App() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'writer' | 'director'>('writer');
   
-  // Quota Create New State
-  const [newQuotaName, setNewQuotaName] = useState('');
-  const [newQuotaTarget, setNewQuotaTarget] = useState(5);
-  const [newVoteTarget, setNewVoteTarget] = useState(3);
-  const [newQuotaInstr, setNewQuotaInstr] = useState('');
+  // Round Create New State
+  const [newRoundName, setNewRoundName] = useState('');
+  const [newRoundDesc, setNewRoundDesc] = useState('');
 
   // Pool View State (Sorting/Filtering)
   const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
@@ -159,14 +158,14 @@ export default function App() {
   const [poolIds, setPoolIds] = useState<string[]>([]);
 
   // Composer State
-  const [composerSelectedQuotaId, setComposerSelectedQuotaId] = useState<string | null>(null);
+  const [composerSelectedRoundId, setComposerSelectedRoundId] = useState<string | null>(null);
   const [composerSourceQuota, setComposerSourceQuota] = useState<string>('All');
   const [composerFilterTopic, setComposerFilterTopic] = useState<string>('All');
   const [composerMinDiff, setComposerMinDiff] = useState<number>(0);
   const [composerMaxDiff, setComposerMaxDiff] = useState<number>(50);
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
   
-  // Composer New Round
+  // Composer New Round UI
   const [isCreatingRound, setIsCreatingRound] = useState(false);
 
 
@@ -232,14 +231,16 @@ export default function App() {
 
       setIsLoadingData(true);
       try {
-          const [u, p, q] = await Promise.all([
+          const [u, p, q, r] = await Promise.all([
               api.getUsers(),
               api.getProblems(),
-              api.getQuotas()
+              api.getQuotas(),
+              api.getRounds()
           ]);
           setUsers(u);
           setProblems(p);
           setQuotas(q);
+          setRounds(r);
           
           // Ensure active quota ID is valid
           if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
@@ -334,7 +335,7 @@ export default function App() {
   useEffect(() => {
       if (view === 'composer') {
           setComposerSourceQuota('All'); // Default to showing all potential candidates
-          setComposerSelectedQuotaId(null); // Force selection screen
+          setComposerSelectedRoundId(null); // Force selection screen
       }
   }, [view]);
 
@@ -380,26 +381,22 @@ export default function App() {
     setStatement('');
   };
 
-  // -- Quota Management --
+  // -- Round Management --
 
-  const addQuota = async () => {
-    if (!newQuotaName.trim()) return;
+  const addRound = async () => {
+    if (!newRoundName.trim()) return;
     try {
-        const newQuota = await api.createQuota({
-          name: newQuotaName.trim(),
-          target: newQuotaTarget,
-          voteTarget: newVoteTarget,
-          instructions: newQuotaInstr.trim() || 'No specific instructions.',
-          dueDate: null
+        const newRound = await api.createRound({
+          name: newRoundName.trim(),
+          description: newRoundDesc.trim() || 'No description.',
         });
-        setQuotas([...quotas, newQuota]);
-        setNewQuotaName('');
+        setRounds([newRound, ...rounds]); // Add to top
+        setNewRoundName('');
+        setNewRoundDesc('');
         
-        // If in composer, switch to this round immediately
-        if (view === 'composer') {
-            setComposerSelectedQuotaId(newQuota.id);
-            setIsCreatingRound(false);
-        }
+        // Switch to this round immediately
+        setComposerSelectedRoundId(newRound.id);
+        setIsCreatingRound(false);
     } catch(e) {
         console.error("Failed to create round", e);
     }
@@ -429,7 +426,7 @@ export default function App() {
       await refreshData();
       setEditingQuotaId(null);
     } catch (e) {
-      console.error("Failed to update round");
+      console.error("Failed to update quota");
     }
   };
 
@@ -717,31 +714,24 @@ export default function App() {
 
   // Composer Actions
   const handleAddToRound = async (problem: Problem) => {
-      if (!composerSelectedQuotaId) return;
+      if (!composerSelectedRoundId) return;
       
       // Get current problems in that round
-      const accepted = problems.filter(p => p.quotaId === composerSelectedQuotaId && p.status === 'accepted');
+      const accepted = problems.filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted');
       
       const updatedProblems = problems.map(p => {
           if (p.id === problem.id) {
-              // Ensure we also move it to the correct quota ID if we are pulling from another source
-              return { ...p, status: 'accepted', orderIndex: accepted.length, quotaId: composerSelectedQuotaId } as Problem;
+              return { ...p, status: 'accepted', orderIndex: accepted.length, roundId: composerSelectedRoundId } as Problem;
           }
           return p;
       });
       setProblems(updatedProblems);
       
-      // We also update the Quota ID on the backend implicitly via status update or need separate call?
-      // Since `quotaId` is on the problem, we should update it.
-      // But for now, let's assume `reorderRound` only sorts. 
-      // We should probably explicitly update the problem to the round AND status.
-      // For simplicity, we just change status here, but if we "pulled" from another round, we need to update quotaId.
-      // Let's do both to be safe.
       try {
-         await api.updateProblem(problem.id, { quotaId: composerSelectedQuotaId });
-         await api.updateProblemStatus(problem.id, 'accepted');
+         // Update problem round assignment
+         await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
          
-         // Fix order
+         // Fix order (append to end)
          const newAcceptedIds = [...accepted.map(p => p.id), problem.id];
          await api.reorderRound(newAcceptedIds);
       } catch(e) {
@@ -750,25 +740,30 @@ export default function App() {
   };
 
   const handleRemoveFromRound = async (problem: Problem) => {
-      // Sets back to pending
+      // Sets back to pending, removes roundId
       const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) return { ...p, status: 'pending' } as Problem;
+          // When removing, we keep quotaId but clear roundId
+          if (p.id === problem.id) return { ...p, status: 'pending', roundId: undefined } as Problem; // undefined for optimistic, will refresh null
           return p;
       });
       setProblems(updatedProblems);
 
       try {
-          await api.updateProblemStatus(problem.id, 'pending');
+          // Send null (or something that clears it)
+          // Since our update supports partials, we might need a specific way to clear.
+          // For now, let's assume sending empty string or explicit null works if backend supports.
+          // Or updateProblem to allow roundId: null.
+          await api.updateProblem(problem.id, { status: 'pending', roundId: null as any });
       } catch(e) {
           refreshData();
       }
   };
 
   const handleMoveProblem = async (index: number, direction: 'up' | 'down') => {
-      if (!composerSelectedQuotaId) return;
+      if (!composerSelectedRoundId) return;
       
       const accepted = problems
-        .filter(p => p.quotaId === composerSelectedQuotaId && p.status === 'accepted')
+        .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
         
       if (direction === 'up' && index === 0) return;
@@ -802,11 +797,13 @@ export default function App() {
 
   const handleExportLatex = () => {
       // Basic LaTeX export
-      const targetQuotaId = view === 'composer' ? composerSelectedQuotaId : activeQuotaId;
-      const targetQuotaName = quotas.find(q => q.id === targetQuotaId)?.name || "Round";
+      const targetRoundId = composerSelectedRoundId;
+      if (!targetRoundId) return;
+
+      const targetRoundName = rounds.find(r => r.id === targetRoundId)?.name || "Round";
       
       const activeProblems = problems
-        .filter(p => p.quotaId === targetQuotaId && p.status === 'accepted')
+        .filter(p => p.roundId === targetRoundId && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
 
       let tex = `\\documentclass{article}
@@ -814,7 +811,7 @@ export default function App() {
 \\usepackage{amssymb}
 \\usepackage{enumitem}
 
-\\title{${targetQuotaName}}
+\\title{${targetRoundName}}
 \\date{\\today}
 
 \\begin{document}
@@ -840,7 +837,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${targetQuotaName.replace(/\s+/g, '_')}.tex`;
+      a.download = `${targetRoundName.replace(/\s+/g, '_')}.tex`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1077,23 +1074,28 @@ export default function App() {
   const isGuest = currentUser.role === 'guest';
 
   // --- Composer Data ---
-  // Using composerSelectedQuotaId instead of activeQuotaId
-  const composerSelectedQuota = quotas.find(q => q.id === composerSelectedQuotaId);
+  // Using composerSelectedRoundId instead of activeQuotaId
+  const composerSelectedRound = rounds.find(r => r.id === composerSelectedRoundId);
   
+  // Problems assigned to the round
   const composerAccepted = problems
-    .filter(p => p.quotaId === composerSelectedQuotaId && p.status === 'accepted')
+    .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
     .sort((a,b) => a.orderIndex - b.orderIndex);
   
+  // Problems NOT assigned to this round, filtered by source quota
   const composerCandidates = problems
     .filter(p => {
-        // Source Filter
+        // Exclude problems already in THIS round
+        if (p.roundId === composerSelectedRoundId && p.status === 'accepted') return false;
+        
+        // Source Filter (Quota)
         if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
+        
         // Topic Filter
         if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
+        
         // Diff Filter
         if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
-        // Exclude already accepted in CURRENT editing round
-        if (p.quotaId === composerSelectedQuotaId && p.status === 'accepted') return false;
         
         return true;
     })
@@ -1210,7 +1212,7 @@ export default function App() {
               </div>
             </header>
 
-            {/* Active Round Info */}
+            {/* Active Quota Info (Renamed from Round to prevent confusion) */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-8 relative">
                 <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-4">
                     <BookOpen size={200} />
@@ -1218,7 +1220,7 @@ export default function App() {
                 <div className="flex justify-between items-start mb-6 relative z-10">
                    <div>
                       <div className="flex items-center gap-2 mb-3">
-                         <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider">Active Round</span>
+                         <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider">Active Quota</span>
                          {activeQuota.dueDate && (
                            <span className="px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
                                <Clock className="w-3 h-3"/> {getFormatDate(activeQuota.dueDate)}
@@ -1313,7 +1315,7 @@ export default function App() {
                     <ProblemCard 
                         key={p.id} 
                         problem={p} 
-                        quotaName={quotas.find(q => q.id === p.quotaId)?.name}
+                        roundName={rounds.find(r => r.id === p.roundId)?.name}
                         showAuthor={true} 
                         currentUserId={currentUser.id}
                         currentUserRole={currentUser.role}
@@ -1338,7 +1340,7 @@ export default function App() {
         {view === 'composer' && isDirector && !isGuest && (
             <div className="max-w-[1600px] mx-auto h-[calc(100vh-6rem)] flex flex-col">
               
-              {!composerSelectedQuotaId ? (
+              {!composerSelectedRoundId ? (
                 // --- COMPOSER: LANDING / SELECTION ---
                 <div className="max-w-5xl mx-auto w-full">
                     <header className="mb-10 text-center">
@@ -1352,41 +1354,21 @@ export default function App() {
                            <div className="space-y-4">
                                <input 
                                   type="text" 
-                                  placeholder="Round Name (e.g. Fall 2024 Round 1)" 
-                                  value={newQuotaName} 
-                                  onChange={e => setNewQuotaName(e.target.value)}
+                                  placeholder="Round Name (e.g. Fall 2024 Final)" 
+                                  value={newRoundName} 
+                                  onChange={e => setNewRoundName(e.target.value)}
                                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-base bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                                   autoFocus
                                />
-                               <div className="flex gap-3">
-                                   <div className="flex-1">
-                                      <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Target</label>
-                                      <input 
-                                         type="number" 
-                                         value={newQuotaTarget} 
-                                         onChange={e => setNewQuotaTarget(parseInt(e.target.value))}
-                                         className="w-full px-3 py-2 border border-slate-300 rounded-xl"
-                                      />
-                                   </div>
-                                   <div className="flex-1">
-                                      <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Vote Req</label>
-                                      <input 
-                                         type="number" 
-                                         value={newVoteTarget} 
-                                         onChange={e => setNewVoteTarget(parseInt(e.target.value))}
-                                         className="w-full px-3 py-2 border border-slate-300 rounded-xl"
-                                      />
-                                   </div>
-                               </div>
                                <textarea
-                                   placeholder="Instructions..."
-                                   value={newQuotaInstr}
-                                   onChange={e => setNewQuotaInstr(e.target.value)}
+                                   placeholder="Description..."
+                                   value={newRoundDesc}
+                                   onChange={e => setNewRoundDesc(e.target.value)}
                                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm h-24 resize-none"
                                />
                                <div className="flex gap-3 pt-2">
                                   <Button variant="ghost" onClick={() => setIsCreatingRound(false)} className="flex-1">Cancel</Button>
-                                  <Button onClick={addQuota} disabled={!newQuotaName.trim()} className="flex-1">Create & Edit</Button>
+                                  <Button onClick={addRound} disabled={!newRoundName.trim()} className="flex-1">Create & Edit</Button>
                                </div>
                            </div>
                         </div>
@@ -1400,26 +1382,23 @@ export default function App() {
                                 <span className="font-bold text-lg">Create New Round</span>
                             </div>
                             
-                            {quotas.map(q => {
-                                const qProbCount = problems.filter(p => p.quotaId === q.id && p.status === 'accepted').length;
+                            {rounds.map(r => {
+                                const rProbCount = problems.filter(p => p.roundId === r.id && p.status === 'accepted').length;
                                 return (
                                     <div 
-                                        key={q.id}
-                                        onClick={() => setComposerSelectedQuotaId(q.id)}
+                                        key={r.id}
+                                        onClick={() => setComposerSelectedRoundId(r.id)}
                                         className="bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group"
                                     >
                                         <div className="flex justify-between items-start mb-4">
                                             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                                                 <FolderOpen className="w-5 h-5" />
                                             </div>
-                                            {activeQuotaId === q.id && (
-                                                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Active</span>
-                                            )}
                                         </div>
-                                        <h3 className="font-bold text-slate-900 text-lg mb-1">{q.name}</h3>
-                                        <p className="text-sm text-slate-500 mb-4 line-clamp-2 min-h-[40px]">{q.instructions || 'No description.'}</p>
+                                        <h3 className="font-bold text-slate-900 text-lg mb-1">{r.name}</h3>
+                                        <p className="text-sm text-slate-500 mb-4 line-clamp-2 min-h-[40px]">{r.description || 'No description.'}</p>
                                         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wide">
-                                            <LayoutList className="w-3 h-3" /> {qProbCount} Problems
+                                            <LayoutList className="w-3 h-3" /> {rProbCount} Problems
                                         </div>
                                     </div>
                                 );
@@ -1432,11 +1411,11 @@ export default function App() {
                 <>
                 <header className="flex justify-between items-center mb-6 shrink-0 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                    <div className="flex items-center gap-4">
-                      <Button variant="ghost" onClick={() => setComposerSelectedQuotaId(null)} className="h-10 w-10 p-0 rounded-full border border-slate-200">
+                      <Button variant="ghost" onClick={() => setComposerSelectedRoundId(null)} className="h-10 w-10 p-0 rounded-full border border-slate-200">
                           <RotateCcw className="w-4 h-4" />
                       </Button>
                       <div>
-                          <h1 className="text-2xl font-bold text-slate-900">{composerSelectedQuota?.name}</h1>
+                          <h1 className="text-2xl font-bold text-slate-900">{composerSelectedRound?.name}</h1>
                           <p className="text-slate-500 text-xs mt-0.5">Editing Round Layout</p>
                       </div>
                    </div>
@@ -1890,7 +1869,7 @@ export default function App() {
                     <ProblemCard 
                       key={p.id} 
                       problem={p} 
-                      quotaName={quotas.find(q => q.id === p.quotaId)?.name}
+                      roundName={rounds.find(r => r.id === p.roundId)?.name}
                       showAuthor={p.authorId === currentUser.id} // ONLY show if it is MY problem. Admin sees blind.
                       currentUserId={currentUser.id}
                       currentUserRole={currentUser.role}

@@ -3,6 +3,13 @@ export interface ProblemValidation {
   rejectionReason?: string;
 }
 
+export interface Round {
+  id: string;
+  name: string;
+  description: string;
+  createdAt?: number;
+}
+
 export interface Quota {
   id: string;
   name: string;
@@ -28,7 +35,8 @@ export interface Problem {
   id: string;
   authorId: string;
   authorName: string; // Stored for admin, hidden in UI
-  quotaId: string;    // Crucial for tracking which round this belongs to
+  quotaId: string;    // Crucial for tracking which submission cycle this belongs to
+  roundId?: string;   // The specific contest round this problem is assigned to
   title: string;
   statement: string;
   solution?: string; // New: Full LaTeX solution

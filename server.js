@@ -61,10 +61,18 @@ const initDB = async () => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS rounds (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS problems (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         author_id UUID REFERENCES users(id),
         quota_id UUID REFERENCES quotas(id),
+        round_id UUID REFERENCES rounds(id),
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
         solution TEXT,
@@ -106,6 +114,7 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS solution TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS answer_key TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS round_id UUID REFERENCES rounds(id);
       
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
@@ -419,6 +428,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
       quotaId: row.quota_id, // Ensure we send this
+      roundId: row.round_id, // New round assignment
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
       status: row.status || 'pending',
@@ -459,7 +469,7 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { title, statement, difficulty, topics, imageData, solution, answerKey, version } = req.body;
+  const { title, statement, difficulty, topics, imageData, solution, answerKey, version, roundId, status } = req.body;
   const userId = req.user.id;
   const userRole = req.user.role;
 
@@ -473,20 +483,45 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
 
-    // 2. Update with Optimistic Locking
-    const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
+    // 2. Build Query - supporting simple updates or Director round assignment
+    let query = `UPDATE problems SET `;
+    const values = [];
+    let idx = 1;
+
+    // Logic: If roundId/status are passed (Director assignment), update those. Else update content.
+    if (roundId !== undefined || status !== undefined) {
+         if (roundId !== undefined) {
+             query += `round_id = $${idx++}, `;
+             values.push(roundId);
+         }
+         if (status !== undefined) {
+             query += `status = $${idx++}, `;
+             values.push(status);
+         }
+    } else {
+        // Content update
+        query += `title = $${idx++}, statement = $${idx++}, difficulty = $${idx++}, topics = $${idx++}, image_data = $${idx++}, solution = $${idx++}, answer_key = $${idx++}, version = version + 1 `;
+        values.push(title, statement, (difficulty && !isNaN(difficulty)) ? difficulty : 0, topics, imageData, solution, answerKey);
+    }
     
-    // We update only if the version matches. If rows affected is 0, it means the version changed (or deleted).
-    const result = await pool.query(
-      `UPDATE problems 
-       SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5, solution = $6, answer_key = $7, version = version + 1 
-       WHERE id = $8 AND version = $9 
-       RETURNING *`,
-      [title, statement, diffVal, topics, imageData, solution, answerKey, id, version]
-    );
+    // Trim comma
+    if (query.endsWith(', ')) query = query.slice(0, -2);
+
+    query += ` WHERE id = $${idx++}`;
+    values.push(id);
+    
+    // If updating content, check version
+    if (version !== undefined && (roundId === undefined && status === undefined)) {
+        query += ` AND version = $${idx++}`;
+        values.push(version);
+    }
+
+    query += ` RETURNING *`;
+
+    const result = await pool.query(query, values);
 
     if (result.rows.length === 0) {
-        return res.status(409).json({ error: 'Conflict: This problem has been modified by someone else. Please refresh.' });
+        return res.status(409).json({ error: 'Conflict: Problem modified or not found.' });
     }
 
     res.json({ success: true, problem: result.rows[0] });
@@ -513,7 +548,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
         const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
         let match;
         
-        // Helper to extract solution/answer from a block
+        // Helper to extract metadata
         const extractMetadata = (content) => {
             let cleanContent = content;
             let solution = "";
@@ -536,8 +571,6 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
 
         while ((match = blockRegex.exec(text)) !== null) {
             const raw = match[1];
-            // Try to find a title in brackets if exists: \begin{problem}[Title]
-            // Not implemented in simple regex, default title
             const { statement, solution, answer } = extractMetadata(raw);
             
             problems.push({
@@ -553,7 +586,6 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
         // Strategy 2: If no blocks, look for \item
         if (problems.length === 0) {
             const items = text.split(/\\item\s/);
-            // Skip first empty split if text starts with \item
             if (items.length > 1) {
                 items.shift(); // remove preamble
                 items.forEach((item, idx) => {
@@ -609,11 +641,11 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   try {
       await client.query('BEGIN');
       
-      // For each problem ID in the list, update its order_index and set status to accepted
+      // For each problem ID in the list, update its order_index
       for (let i = 0; i < problems.length; i++) {
           await client.query(
-              'UPDATE problems SET order_index = $1, status = $2 WHERE id = $3',
-              [i, 'accepted', problems[i]]
+              'UPDATE problems SET order_index = $1 WHERE id = $2',
+              [i, problems[i]]
           );
       }
       
@@ -629,7 +661,6 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
-  // Guests cannot vote
   if (req.user.role === 'guest') return res.sendStatus(403);
 
   const client = await pool.connect();
@@ -637,21 +668,16 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
     const { id } = req.params;
     const userId = req.user.id;
-    // Do not use req.user.power from token as it may be stale.
-    // Fetch latest voting power.
     const userRes = await client.query('SELECT voting_power FROM users WHERE id = $1', [userId]);
     const currentPower = userRes.rows.length > 0 ? (userRes.rows[0].voting_power || 1) : 1;
 
-    // Check existing vote
     const check = await client.query('SELECT vote_value FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
     
     if (check.rows.length > 0) {
-      // Vote exists: Remove it. Subtract the stored vote_value.
       const previousValue = check.rows[0].vote_value;
       await client.query('DELETE FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
       await client.query('UPDATE problems SET score = score - $1 WHERE id = $2', [previousValue, id]);
     } else {
-      // New vote: Add it. Add the current power.
       await client.query('INSERT INTO votes (user_id, problem_id, vote_value) VALUES ($1, $2, $3)', [userId, id, currentPower]);
       await client.query('UPDATE problems SET score = score + $1 WHERE id = $2', [currentPower, id]);
     }
@@ -709,7 +735,7 @@ app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
     res.json({
       id: result.rows[0].id,
       userId: req.user.id,
-      userName: req.user.name, // Will be filled by client for immediate display
+      userName: req.user.name,
       text,
       createdAt: new Date(result.rows[0].created_at).getTime()
     });
@@ -719,7 +745,6 @@ app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
   }
 });
 
-
 // --- Admin: Reset All Votes ---
 app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
@@ -727,9 +752,7 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
-      // Delete all votes
       await client.query('TRUNCATE TABLE votes');
-      // Reset all scores to 0
       await client.query('UPDATE problems SET score = 0');
       await client.query('COMMIT');
       res.json({ success: true });
@@ -745,13 +768,12 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
 // --- Routes: Quotas ---
 
 app.get('/api/quotas', authenticateToken, async (req, res) => {
-  // Update query to fetch vote_target
   const result = await pool.query('SELECT id, name, target_count as target, vote_target, instructions, due_date FROM quotas');
   const quotas = result.rows.map(q => ({
       id: q.id,
       name: q.name,
       target: q.target,
-      voteTarget: q.vote_target || 3, // Default fallback
+      voteTarget: q.vote_target || 3,
       instructions: q.instructions,
       dueDate: q.due_date ? new Date(q.due_date).getTime() : null
   }));
@@ -809,6 +831,41 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
   }
+});
+
+// --- Routes: Rounds ---
+
+app.get('/api/rounds', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM rounds ORDER BY created_at DESC');
+        res.json(result.rows.map(r => ({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime()
+        })));
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({error: "Fetch rounds failed"});
+    }
+});
+
+app.post('/api/rounds', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+    const { name, description } = req.body;
+    try {
+        const result = await pool.query('INSERT INTO rounds (name, description) VALUES ($1, $2) RETURNING *', [name, description]);
+        const r = result.rows[0];
+        res.json({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime()
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({error: "Create round failed"});
+    }
 });
 
 // All other GET requests not handled before will return the React app
