@@ -492,17 +492,23 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
     const { id } = req.params;
     const userId = req.user.id;
-    const power = req.user.power; // This assumes JWT has up-to-date power
+    // Do not use req.user.power from token as it may be stale.
+    // Fetch latest voting power.
+    const userRes = await client.query('SELECT voting_power FROM users WHERE id = $1', [userId]);
+    const currentPower = userRes.rows.length > 0 ? (userRes.rows[0].voting_power || 1) : 1;
 
     // Check existing vote
-    const check = await client.query('SELECT * FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
+    const check = await client.query('SELECT vote_value FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
     
     if (check.rows.length > 0) {
+      // Vote exists: Remove it. Subtract the stored vote_value.
+      const previousValue = check.rows[0].vote_value;
       await client.query('DELETE FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
-      await client.query('UPDATE problems SET score = score - $1 WHERE id = $2', [power, id]);
+      await client.query('UPDATE problems SET score = score - $1 WHERE id = $2', [previousValue, id]);
     } else {
-      await client.query('INSERT INTO votes (user_id, problem_id, vote_value) VALUES ($1, $2, $3)', [userId, id, power]);
-      await client.query('UPDATE problems SET score = score + $1 WHERE id = $2', [power, id]);
+      // New vote: Add it. Add the current power.
+      await client.query('INSERT INTO votes (user_id, problem_id, vote_value) VALUES ($1, $2, $3)', [userId, id, currentPower]);
+      await client.query('UPDATE problems SET score = score + $1 WHERE id = $2', [currentPower, id]);
     }
 
     await client.query('COMMIT');
