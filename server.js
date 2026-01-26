@@ -501,7 +501,15 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     } else {
         // Content update
         query += `title = $${idx++}, statement = $${idx++}, difficulty = $${idx++}, topics = $${idx++}, image_data = $${idx++}, solution = $${idx++}, answer_key = $${idx++}, version = version + 1 `;
-        values.push(title, statement, (difficulty && !isNaN(difficulty)) ? difficulty : 0, topics, imageData, solution, answerKey);
+        values.push(
+            title, 
+            statement, 
+            (difficulty !== undefined && difficulty !== null && !isNaN(difficulty)) ? difficulty : 0, 
+            topics || [], 
+            imageData ?? null, // Ensure null if undefined
+            solution ?? null, 
+            answerKey ?? null
+        );
     }
     
     // Trim comma
@@ -527,7 +535,7 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     res.json({ success: true, problem: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Update failed' });
+    res.status(500).json({ error: 'Update failed', details: err.message });
   }
 });
 

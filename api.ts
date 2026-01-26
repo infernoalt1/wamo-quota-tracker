@@ -148,7 +148,9 @@ export const api = {
         if (res.status === 409) {
             throw new Error('CONFLICT: This problem has been edited by someone else. Please refresh and try again.');
         }
-        throw new Error('Update problem failed');
+        // Try to get error message from server
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Update problem failed');
     }
   },
   
