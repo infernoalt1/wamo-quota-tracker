@@ -14,17 +14,7 @@ export interface Quota {
 
 export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
 
-// Removed 'shortlisted'
-export type ProblemStatus = 'pending' | 'accepted';
-
-export interface Comment {
-  id: string;
-  problemId: string;
-  userId: string;
-  userName: string;
-  text: string;
-  createdAt: number;
-}
+export type ProblemStatus = 'pending' | 'shortlisted' | 'accepted';
 
 export interface Problem {
   id: string;
@@ -33,8 +23,10 @@ export interface Problem {
   quotaId: string;    // Crucial for tracking which round this belongs to
   title: string;
   statement: string;
-  solution?: string; // Solution Outline
-  answerKey?: string; // Short answer for grading
+  solution?: string; // New: Full LaTeX solution
+  answerKey?: string; // New: Short answer for grading
+  estimatedTime?: number; // New: In minutes
+  points?: number; // New: Point value
   imageData?: string; // Base64 image data
   difficulty: number;
   topics: Topic[];
@@ -42,8 +34,8 @@ export interface Problem {
   score: number;
   votedBy: string[]; // User IDs who have voted
   status: ProblemStatus;
-  orderIndex: number; // For ordering in the final round
-  version: number; // Optimistic concurrency control
+  orderIndex: number; // New: For ordering in the final round
+  version: number; // New: Optimistic concurrency control
 }
 
 export interface User {

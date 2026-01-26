@@ -1,6 +1,6 @@
 import React from 'react';
 import { Problem, ProblemStatus } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, Star, AlertCircle, Image as ImageIcon, MessageSquare } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, Bookmark, Star, AlertCircle, ChevronDown, Image as ImageIcon } from 'lucide-react';
 import { MathText } from './MathText';
 
 interface ProblemCardProps {
@@ -11,7 +11,6 @@ interface ProblemCardProps {
   onUpvote: (problemId: string) => void;
   onEdit: (problem: Problem) => void;
   onStatusChange?: (problemId: string, status: ProblemStatus) => void;
-  onClick?: (problem: Problem) => void;
   votingPower: number;
 }
 
@@ -23,7 +22,6 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   onUpvote,
   onEdit,
   onStatusChange,
-  onClick,
   votingPower
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
@@ -49,20 +47,21 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
         </span>
       );
     }
-    return null;
+    if (status === 'shortlisted') {
+      return (
+        <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full text-xs font-bold border border-yellow-200">
+           <Star className="w-3 h-3" /> Shortlisted
+        </span>
+      );
+    }
+    return null; // Pending status doesn't need a loud badge
   };
 
   return (
-    <div 
-        onClick={() => onClick && onClick(problem)}
-        className={`group bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-200 ring-1 ring-green-100' : 'border-slate-200'} ${onClick ? 'cursor-pointer' : ''}`}
-    >
+    <div className={`group bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-200 ring-1 ring-green-100' : 'border-slate-200'}`}>
       
       {/* Vote Section */}
-      <div 
-        className="flex flex-row md:flex-col items-center justify-between md:justify-center p-4 md:p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[90px] gap-2 bg-slate-50/50"
-        onClick={(e) => e.stopPropagation()} 
-      >
+      <div className="flex flex-row md:flex-col items-center justify-between md:justify-center p-6 border-b md:border-b-0 md:border-r border-slate-100 min-w-[90px] gap-2 bg-slate-50/50">
          <button 
             onClick={() => onUpvote(problem.id)}
             disabled={currentUserRole === 'guest'}
@@ -78,20 +77,21 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
          <span className={`font-bold text-xl ${score > 0 ? 'text-indigo-900' : 'text-slate-400'}`}>
             {score}
          </span>
+         <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider hidden md:block">Votes</span>
       </div>
 
-      <div className="p-6 flex-1">
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex flex-col gap-1 flex-1">
+      <div className="p-6 md:p-8 flex-1">
+        <div className="flex justify-between items-start mb-6">
+          <div className="flex flex-col gap-2 flex-1">
             <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3 flex-wrap">
-                    <h3 className="text-lg font-bold text-slate-900 leading-tight">
+                    <h3 className="text-xl font-bold text-slate-900 leading-tight">
                         <MathText text={problem.title} />
                     </h3>
                     <StatusBadge />
                 </div>
                 
-                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-1">
                     {/* Admin Status Controls */}
                     {isAdmin && onStatusChange && (
                         <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1 mr-2 gap-1">
@@ -101,6 +101,13 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                                 title="Set Pending"
                              >
                                 <AlertCircle className="w-4 h-4" />
+                             </button>
+                             <button 
+                                onClick={() => onStatusChange(problem.id, 'shortlisted')} 
+                                className={`p-1.5 rounded transition-all ${status === 'shortlisted' ? 'bg-yellow-100 text-yellow-600 shadow-sm' : 'text-slate-400 hover:text-yellow-500'}`}
+                                title="Shortlist"
+                             >
+                                <Star className="w-4 h-4" />
                              </button>
                              <button 
                                 onClick={() => onStatusChange(problem.id, 'accepted')} 
@@ -124,14 +131,14 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                 </div>
             </div>
             
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 mt-1">
                {showAuthor ? (
                   <span className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
-                    {problem.authorName}
+                    By {problem.authorName}
                   </span>
                ) : (
                   <span className="font-medium italic flex items-center gap-1 text-slate-400">
-                    Blind Review
+                    <MoreHorizontal className="w-3 h-3" /> Blind Review
                   </span>
                )}
                <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-slate-600">
@@ -147,9 +154,9 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
         </div>
         
         {/* Topics */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-6">
             {problem.topics && problem.topics.map(t => (
-                <span key={t} className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${topicColors[t] || 'bg-gray-100 text-gray-700'}`}>
+                <span key={t} className={`text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wide ${topicColors[t] || 'bg-gray-100 text-gray-700'}`}>
                     {t}
                 </span>
             ))}
@@ -157,13 +164,17 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
 
         <MathText 
            text={problem.statement} 
-           className="text-slate-700 font-serif border-l-2 border-slate-200 pl-4 py-1 leading-relaxed text-base line-clamp-3 group-hover:line-clamp-none transition-all" 
+           className="bg-slate-50 p-6 rounded-xl font-serif text-slate-800 border border-slate-100 whitespace-pre-wrap leading-relaxed shadow-sm text-lg" 
         />
         
-        <div className="mt-4 flex items-center gap-4 text-xs text-slate-400">
-            {problem.imageData && <div className="flex items-center gap-1"><ImageIcon className="w-3 h-3" /> Image</div>}
-            <div className="flex items-center gap-1"><MessageSquare className="w-3 h-3" /> Discuss</div>
-        </div>
+        {problem.imageData && (
+           <div className="mt-4 rounded-xl overflow-hidden border border-slate-200">
+               <img src={problem.imageData} alt="Problem attachment" className="max-h-96 w-auto mx-auto object-contain" />
+               <div className="bg-slate-50 text-xs text-center text-slate-400 py-1 border-t border-slate-100 flex items-center justify-center gap-1">
+                  <ImageIcon className="w-3 h-3" /> Attachment
+               </div>
+           </div>
+        )}
       </div>
     </div>
   );
