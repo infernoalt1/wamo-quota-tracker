@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Problem, User, Quota, Topic, ProblemStatus } from './types';
+import { Problem, User, Quota, Topic, ProblemStatus, Comment } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
@@ -40,7 +40,12 @@ import {
   LayoutList,
   ArrowRight,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  FileText,
+  GripVertical,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -88,15 +93,23 @@ export default function App() {
 
   // --- Form State (Submit/Edit) ---
   const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
+  const [editingProblemVersion, setEditingProblemVersion] = useState<number>(0);
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
+  const [solution, setSolution] = useState('');
+  const [answerKey, setAnswerKey] = useState('');
+  const [estimatedTime, setEstimatedTime] = useState<number>(5);
+  const [points, setPoints] = useState<number>(5);
   const [difficulty, setDifficulty] = useState<string>('3.0');
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Bulk Import State
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [parsedProblems, setParsedProblems] = useState<any[]>([]);
   
   // Admin Editing State
   const [editingQuotaId, setEditingQuotaId] = useState<string | null>(null);
@@ -127,7 +140,15 @@ export default function App() {
   const [poolIds, setPoolIds] = useState<string[]>([]);
 
   // Composer State
+  const [composerSourceQuota, setComposerSourceQuota] = useState<string>('All');
   const [composerFilterTopic, setComposerFilterTopic] = useState<string>('All');
+  const [composerMinDiff, setComposerMinDiff] = useState<number>(0);
+  const [composerMaxDiff, setComposerMaxDiff] = useState<number>(50);
+  const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
+  
+  // Composer DnD State
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+
 
   // --- Initial Load ---
   useEffect(() => {
@@ -220,7 +241,6 @@ export default function App() {
   }, [currentUser]);
 
   // Update Users submitted & voted count locally based on ACTIVE QUOTA
-  // This logic runs client side to keep UI snappy
   useEffect(() => {
     if (currentUser?.role === 'guest') return;
 
@@ -426,8 +446,6 @@ export default function App() {
   const saveUser = async (userId: string) => {
     if (!editUserForm.name?.trim()) return;
     try {
-      // Handle custom target for Active Quota
-      // We read it from the editing form state or keep existing
       const currentTargets = users.find(u => u.id === userId)?.customTargets || {};
       
       await api.updateUser({ 
@@ -475,19 +493,28 @@ export default function App() {
   const resetForm = () => {
     setTitle('');
     setStatement('');
+    setSolution('');
+    setAnswerKey('');
+    setEstimatedTime(5);
+    setPoints(5);
     setDifficulty('3.0');
     setSelectedTopics([]);
     setImageData(null);
     setIsVerified(false);
     setEditingProblemId(null);
+    setEditingProblemVersion(0);
     setSubmissionError(null);
-    setAiAnalysis(null);
   };
 
   const handleStartEdit = (prob: Problem) => {
       setEditingProblemId(prob.id);
+      setEditingProblemVersion(prob.version);
       setTitle(prob.title);
       setStatement(prob.statement);
+      setSolution(prob.solution || '');
+      setAnswerKey(prob.answerKey || '');
+      setEstimatedTime(prob.estimatedTime || 5);
+      setPoints(prob.points || 5);
       setDifficulty(prob.difficulty.toString());
       setSelectedTopics(prob.topics || []);
       setImageData(prob.imageData || null);
@@ -532,10 +559,15 @@ export default function App() {
       const payload = {
           title,
           statement,
+          solution,
+          answerKey,
+          estimatedTime,
+          points,
           difficulty: parseFloat(difficulty),
           topics: selectedTopics,
           quotaId: activeQuotaId,
-          imageData: imageData || undefined
+          imageData: imageData || undefined,
+          version: editingProblemVersion // Pass version for check
       };
 
       if (editingProblemId) {
@@ -563,6 +595,41 @@ export default function App() {
       setIsSubmitting(false);
     }
   };
+
+  // -- Bulk Import --
+  const handleBulkParse = async () => {
+      if (!bulkText) return;
+      try {
+          const parsed = await api.parseBulkLatex(bulkText, selectedTopics, parseFloat(difficulty));
+          setParsedProblems(parsed);
+      } catch (e) {
+          alert("Parsing failed. Please check format.");
+      }
+  };
+
+  const handleBulkCommit = async () => {
+      setIsSubmitting(true);
+      let successCount = 0;
+      for (const p of parsedProblems) {
+          try {
+              await api.submitProblem({
+                  ...p,
+                  quotaId: activeQuotaId,
+                  authorId: currentUser?.id,
+                  authorName: currentUser?.name
+              });
+              successCount++;
+          } catch(e) { console.error(e); }
+      }
+      setIsSubmitting(false);
+      alert(`Imported ${successCount} problems successfully.`);
+      setBulkText('');
+      setParsedProblems([]);
+      setShowBulkImport(false);
+      refreshData();
+      setView('dashboard');
+  };
+
 
   const handleToggleVote = async (problemId: string) => {
     if (!currentUser || currentUser.role === 'guest') return;
@@ -600,7 +667,6 @@ export default function App() {
   const handleStatusChange = async (problemId: string, status: ProblemStatus) => {
      try {
         await api.updateProblemStatus(problemId, status);
-        // Optimistic update
         const updated = problems.map(p => p.id === problemId ? { ...p, status } : p);
         setProblems(updated);
      } catch(e) {
@@ -612,7 +678,7 @@ export default function App() {
   const handleAddToRound = async (problem: Problem) => {
       // Add to end of accepted list
       const accepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted');
-      // Optimistic
+      
       const updatedProblems = problems.map(p => {
           if (p.id === problem.id) {
               return { ...p, status: 'accepted', orderIndex: accepted.length } as Problem;
@@ -621,7 +687,6 @@ export default function App() {
       });
       setProblems(updatedProblems);
       
-      // We will just batch reorder everything to be safe and save to DB
       const newRoundIds = [...accepted.map(p => p.id), problem.id];
       try {
           await api.reorderRound(newRoundIds);
@@ -632,41 +697,75 @@ export default function App() {
   };
 
   const handleRemoveFromRound = async (problem: Problem) => {
-      // Optimistic
+      // Sets back to pending
       const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) return { ...p, status: 'shortlisted' } as Problem;
+          if (p.id === problem.id) return { ...p, status: 'pending' } as Problem;
           return p;
       });
       setProblems(updatedProblems);
 
-      // We only need to update status of this one, but reordering others might be good.
-      // For simplicity, just update status. The gaps in order_index don't break sorting.
       try {
-          await api.updateProblemStatus(problem.id, 'shortlisted');
+          await api.updateProblemStatus(problem.id, 'pending');
       } catch(e) {
           refreshData();
       }
   };
 
-  const handleReorder = async (index: number, direction: 'up' | 'down') => {
+  // Drag and Drop Logic
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+      setDraggedItemIndex(index);
+      e.dataTransfer.effectAllowed = 'move';
+      // Fallback for drag image visibility
+      const el = e.currentTarget as HTMLElement;
+      el.style.opacity = '0.5';
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+      setDraggedItemIndex(null);
+      const el = e.currentTarget as HTMLElement;
+      el.style.opacity = '1';
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      
+      if (draggedItemIndex === null || draggedItemIndex === index) return;
+
+      // Reorder locally in composerAccepted array logic (needs to affect state)
+      // This is tricky because composerAccepted is derived. We need to update `problems` state orderIndex.
       const accepted = problems
         .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
+        
+      const newOrder = [...accepted];
+      const draggedItem = newOrder[draggedItemIndex];
+      newOrder.splice(draggedItemIndex, 1);
+      newOrder.splice(index, 0, draggedItem);
       
-      if (direction === 'up' && index > 0) {
-          const temp = accepted[index];
-          accepted[index] = accepted[index-1];
-          accepted[index-1] = temp;
-      } else if (direction === 'down' && index < accepted.length - 1) {
-          const temp = accepted[index];
-          accepted[index] = accepted[index+1];
-          accepted[index+1] = temp;
-      } else {
-          return;
-      }
+      // Update problems state with new indices
+      // Optimization: Debounce this or just do it? React is fast enough usually.
+      // To avoid flicker we need to be careful.
+      // Let's just update `draggedItemIndex` to `index` logically in a separate state if we want smooth animation, 
+      // but simpler is to just commit on Drop.
+      // For standard HTML5 DnD list reordering, it's often better to update only on Drop or use a library.
+      // I will update on Drop to keep it stable.
+  };
 
-      // Optimistic update of state
-      const newOrderIds = accepted.map(p => p.id);
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+      e.preventDefault();
+      if (draggedItemIndex === null) return;
+      
+      const accepted = problems
+        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+        .sort((a,b) => a.orderIndex - b.orderIndex);
+        
+      const newOrder = [...accepted];
+      const [movedItem] = newOrder.splice(draggedItemIndex, 1);
+      newOrder.splice(dropIndex, 0, movedItem);
+      
+      // Optimistic update
+      const newOrderIds = newOrder.map(p => p.id);
       const updatedProblems = problems.map(p => {
          const newIndex = newOrderIds.indexOf(p.id);
          if (newIndex !== -1) {
@@ -675,8 +774,8 @@ export default function App() {
          return p;
       });
       setProblems(updatedProblems);
+      setDraggedItemIndex(null);
 
-      // Save
       try {
           await api.reorderRound(newOrderIds);
       } catch(e) {
@@ -763,11 +862,6 @@ export default function App() {
                       className="w-full p-3 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
                     >
                       <span className="font-semibold text-gray-700 group-hover:text-indigo-700">{user.name}</span>
-                      <div className="flex gap-2">
-                        {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Admin</span>}
-                        {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Director</span>}
-                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-indigo-400" />
-                      </div>
                     </button>
                   ))}
                </div>
@@ -837,9 +931,26 @@ export default function App() {
     .sort((a,b) => a.orderIndex - b.orderIndex);
   
   const composerCandidates = problems
-    .filter(p => p.quotaId === activeQuotaId && (p.status === 'shortlisted' || p.status === 'pending'))
-    .filter(p => composerFilterTopic === 'All' || p.topics.includes(composerFilterTopic as Topic))
-    .sort((a, b) => b.score - a.score);
+    .filter(p => {
+        // Source Filter
+        if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
+        // Topic Filter
+        if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
+        // Diff Filter
+        if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
+        // Exclude already accepted in CURRENT round (to avoid dupes, though logic allows moving between rounds)
+        // If viewing All quotas, we might see problems accepted in OTHER rounds. That is fine, we can "steal" them.
+        // But we shouldn't see problems already accepted in THIS round.
+        if (p.quotaId === activeQuotaId && p.status === 'accepted') return false;
+        
+        return true;
+    })
+    .sort((a, b) => {
+        if (composerSort === 'votes') return b.score - a.score;
+        if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
+        if (composerSort === 'newest') return b.createdAt - a.createdAt;
+        return 0;
+    });
 
   // Composer Stats
   const composerAvgDiff = composerAccepted.length > 0 
@@ -851,6 +962,93 @@ export default function App() {
   composerAccepted.forEach(p => {
       p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
   });
+
+  // Helper for Composer Item
+  const ComposerItem = ({ problem, isAccepted, index }: { problem: Problem, isAccepted: boolean, index?: number }) => {
+      const [expanded, setExpanded] = useState(false);
+      
+      return (
+        <div 
+          className={`bg-white border rounded-xl transition-all shadow-sm ${isAccepted ? 'border-indigo-100 hover:border-indigo-300' : 'border-slate-200 hover:border-slate-300'}`}
+          draggable={isAccepted}
+          onDragStart={isAccepted && index !== undefined ? (e) => handleDragStart(e, index) : undefined}
+          onDragEnd={isAccepted ? handleDragEnd : undefined}
+          onDragOver={isAccepted && index !== undefined ? (e) => handleDragOver(e, index) : undefined}
+          onDrop={isAccepted && index !== undefined ? (e) => handleDrop(e, index) : undefined}
+        >
+            <div className="p-3 flex items-start gap-3">
+                {isAccepted && (
+                    <div className="mt-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500">
+                        <GripVertical className="w-4 h-4" />
+                    </div>
+                )}
+                {isAccepted && (
+                    <div className="font-mono font-bold text-indigo-400 text-sm mt-1 w-5">{index! + 1}.</div>
+                )}
+                
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+                    <div className="flex justify-between items-start">
+                        <h4 className="font-bold text-slate-900 text-sm leading-tight hover:text-indigo-600 transition-colors">
+                            <MathText text={problem.title} />
+                        </h4>
+                        <span className="ml-2 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded whitespace-nowrap">
+                            Diff: {problem.difficulty}
+                        </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                        <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
+                        {problem.score > 0 && (
+                            <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
+                                <ThumbsUp className="w-3 h-3"/> {problem.score}
+                            </span>
+                        )}
+                        <span className="flex items-center gap-0.5 text-slate-400">
+                             <MessageSquare className="w-3 h-3" /> {problem.commentCount}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                    <button 
+                       onClick={() => isAccepted ? handleRemoveFromRound(problem) : handleAddToRound(problem)}
+                       className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
+                           isAccepted 
+                           ? 'hover:bg-red-50 text-slate-300 hover:text-red-500' 
+                           : 'hover:bg-indigo-50 text-slate-300 hover:text-indigo-600 bg-slate-50'
+                       }`}
+                       title={isAccepted ? "Remove from Round" : "Add to Round"}
+                    >
+                        {isAccepted ? <X className="w-4 h-4"/> : <ArrowRight className="w-4 h-4"/>}
+                    </button>
+                    <button onClick={() => setExpanded(!expanded)} className="text-slate-300 hover:text-slate-500">
+                        {expanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
+                    </button>
+                </div>
+            </div>
+
+            {expanded && (
+                <div className="border-t border-slate-100 p-3 bg-slate-50/50 text-sm animate-in slide-in-from-top-1">
+                    <MathText text={problem.statement} className="text-slate-700 whitespace-pre-wrap font-serif mb-3" />
+                    {problem.imageData && (
+                        <img src={problem.imageData} alt="Problem attachment" className="max-h-48 w-auto mb-3 object-contain border border-slate-200 rounded bg-white" />
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                         <div className="bg-white p-2 rounded border border-slate-200">
+                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Solution</span>
+                             <div className="max-h-32 overflow-y-auto custom-scrollbar">
+                                <MathText text={problem.solution || 'None'} className="text-xs" />
+                             </div>
+                         </div>
+                         <div className="bg-white p-2 rounded border border-slate-200 h-fit">
+                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
+                             <div className="font-mono font-bold text-slate-800">{problem.answerKey || '-'}</div>
+                         </div>
+                    </div>
+                </div>
+            )}
+        </div>
+      );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
@@ -1028,7 +1226,7 @@ export default function App() {
                     </div>
 
                     {/* Decorative bg */}
-                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-100 transition-transform duration-500">
                         <ThumbsUp size={140} />
                     </div>
                 </div>
@@ -1072,12 +1270,12 @@ export default function App() {
 
         {/* VIEW: ROUND COMPOSER */}
         {view === 'composer' && isDirector && !isGuest && (
-          <div className="max-w-7xl mx-auto h-[calc(100vh-6rem)] flex flex-col">
+          <div className="max-w-[1600px] mx-auto h-[calc(100vh-6rem)] flex flex-col">
             <header className="flex justify-between items-center mb-6 shrink-0">
                <div>
                   <h1 className="text-3xl font-bold text-slate-900">Round Composer</h1>
                   <p className="text-slate-500 mt-1">
-                    Drag and drop isn't here yet, so click buttons to move problems.
+                    Drag and drop problems to organize the final round.
                   </p>
                </div>
                <div className="flex gap-3">
@@ -1087,53 +1285,54 @@ export default function App() {
                </div>
             </header>
 
-            <div className="flex-1 grid grid-cols-2 gap-8 min-h-0">
+            <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
                 {/* LEFT: CANDIDATE POOL */}
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                        <h2 className="font-bold text-slate-700 flex items-center gap-2">
-                           <LayoutList className="w-4 h-4"/> Candidates ({composerCandidates.length})
-                        </h2>
-                        <select 
-                            className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
-                            value={composerFilterTopic}
-                            onChange={e => setComposerFilterTopic(e.target.value)}
-                        >
-                            <option value="All">All Topics</option>
-                            {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
+                <div className="col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
+                        <div className="flex justify-between items-center">
+                            <h2 className="font-bold text-slate-700 flex items-center gap-2">
+                               <LayoutList className="w-4 h-4"/> Candidates
+                            </h2>
+                            <span className="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{composerCandidates.length}</span>
+                        </div>
+                        
+                        {/* Filters Grid */}
+                        <div className="grid grid-cols-2 gap-2">
+                             <select className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white" value={composerSourceQuota} onChange={e => setComposerSourceQuota(e.target.value)}>
+                                <option value="All">All Sources</option>
+                                {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                             </select>
+                             <select className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white" value={composerFilterTopic} onChange={e => setComposerFilterTopic(e.target.value)}>
+                                <option value="All">All Topics</option>
+                                {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                             </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Diff</span>
+                            <input type="number" className="w-12 text-xs p-1 border rounded" value={composerMinDiff} onChange={e => setComposerMinDiff(Number(e.target.value))} />
+                            <span className="text-slate-300">-</span>
+                            <input type="number" className="w-12 text-xs p-1 border rounded" value={composerMaxDiff} onChange={e => setComposerMaxDiff(Number(e.target.value))} />
+                            <div className="flex-1"></div>
+                            <select className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white" value={composerSort} onChange={e => setComposerSort(e.target.value as any)}>
+                                <option value="votes">Sort: Votes</option>
+                                <option value="difficulty">Sort: Difficulty</option>
+                                <option value="newest">Sort: Newest</option>
+                            </select>
+                        </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/30">
                         {composerCandidates.length === 0 ? (
-                           <div className="text-center py-10 text-slate-400 italic text-sm">No shortlisted problems found.</div>
+                           <div className="text-center py-10 text-slate-400 italic text-sm">No matching problems found.</div>
                         ) : (
                            composerCandidates.map(p => (
-                               <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-3 hover:border-indigo-300 transition-all group flex gap-3">
-                                   <div className="flex-1 min-w-0">
-                                       <div className="flex justify-between items-start">
-                                           <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
-                                           <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{p.difficulty}</span>
-                                       </div>
-                                       <div className="text-xs text-slate-500 mt-1 flex gap-2">
-                                           <span>{p.topics[0]}</span>
-                                           <span>•</span>
-                                           <span>Score: {p.score}</span>
-                                       </div>
-                                   </div>
-                                   <button 
-                                      onClick={() => handleAddToRound(p)}
-                                      className="w-8 flex items-center justify-center bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-100 transition-colors"
-                                   >
-                                       <ArrowRight className="w-4 h-4"/>
-                                   </button>
-                               </div>
+                               <ComposerItem key={p.id} problem={p} isAccepted={false} />
                            ))
                         )}
                     </div>
                 </div>
 
                 {/* RIGHT: FINAL ROUND */}
-                <div className="bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
+                <div className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
                     <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
                         <div className="flex justify-between items-center">
                             <h2 className="font-bold text-indigo-900 flex items-center gap-2">
@@ -1163,40 +1362,7 @@ export default function App() {
                             </div>
                          ) : (
                             composerAccepted.map((p, idx) => (
-                                <div key={p.id} className="bg-white border border-indigo-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                                    <div className="font-mono font-bold text-indigo-300 text-lg w-6 text-center">{idx + 1}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
-                                        <div className="text-xs text-slate-500 flex gap-2">
-                                            <span className="bg-slate-100 px-1 rounded">{p.difficulty}</span>
-                                            <span className="truncate">{p.topics.join(', ')}</span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex flex-col gap-1">
-                                        <button 
-                                            onClick={() => handleReorder(idx, 'up')}
-                                            disabled={idx === 0}
-                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
-                                        >
-                                            <ArrowUp className="w-3 h-3"/>
-                                        </button>
-                                        <button 
-                                            onClick={() => handleReorder(idx, 'down')}
-                                            disabled={idx === composerAccepted.length - 1}
-                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
-                                        >
-                                            <ArrowDown className="w-3 h-3"/>
-                                        </button>
-                                    </div>
-
-                                    <button 
-                                       onClick={() => handleRemoveFromRound(p)}
-                                       className="w-8 h-8 flex items-center justify-center hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-colors ml-1"
-                                    >
-                                        <X className="w-4 h-4"/>
-                                    </button>
-                                </div>
+                                <ComposerItem key={p.id} problem={p} isAccepted={true} index={idx} />
                             ))
                          )}
                     </div>
@@ -1205,27 +1371,89 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW: SUBMIT / EDIT */}
+        {/* VIEW: SUBMIT / EDIT / BULK */}
         {view === 'submit' && (
           <div className="max-w-4xl mx-auto">
-            <header className="mb-10">
-              {!isGuest && (
-                  <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
-                     ← Back to Dashboard
-                  </Button>
-              )}
-              <h1 className="text-3xl font-bold text-slate-900">
-                  {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
-              </h1>
-              {isGuest ? (
-                  <div className="mt-2 bg-amber-50 text-amber-900 p-3 rounded-xl border border-amber-200 text-sm">
-                      <strong>Guest Mode:</strong> You are submitting a proposal. If approved, it will be added to the pool.
-                  </div>
-              ) : (
-                  <p className="text-slate-500 mt-2">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
-              )}
+            <header className="mb-10 flex justify-between items-start">
+               <div>
+                  {!isGuest && (
+                      <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
+                        ← Back to Dashboard
+                      </Button>
+                  )}
+                  <h1 className="text-3xl font-bold text-slate-900">
+                      {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
+                  </h1>
+               </div>
+               {!editingProblemId && !isGuest && (
+                   <Button variant="secondary" onClick={() => setShowBulkImport(true)} className="flex items-center gap-2">
+                       <FileText className="w-4 h-4"/> Bulk Import
+                   </Button>
+               )}
             </header>
-            
+
+            {/* Bulk Import Modal */}
+            {showBulkImport ? (
+               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
+                   <div className="flex justify-between items-center">
+                       <h2 className="text-xl font-bold text-slate-900">Bulk Import from LaTeX</h2>
+                       <button onClick={() => setShowBulkImport(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+                   </div>
+                   
+                   {parsedProblems.length === 0 ? (
+                       <>
+                           <textarea
+                               value={bulkText}
+                               onChange={e => setBulkText(e.target.value)}
+                               placeholder={`Paste LaTeX here. Format example:\n\n\\begin{problem}\nProblem text...\n\\end{problem}\n\n\\begin{solution}\nSolution text...\n\\end{solution}\n\n\\answer{42}`}
+                               className="w-full h-64 p-4 border border-slate-200 rounded-xl font-mono text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none"
+                           />
+                           <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Topic</label>
+                                    <select 
+                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                        onChange={e => setSelectedTopics([e.target.value as Topic])}
+                                    >
+                                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Difficulty</label>
+                                    <input 
+                                        type="number" 
+                                        value={difficulty} 
+                                        onChange={e => setDifficulty(e.target.value)}
+                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                    />
+                                </div>
+                           </div>
+                           <div className="flex justify-end gap-3">
+                               <Button variant="ghost" onClick={() => setShowBulkImport(false)}>Cancel</Button>
+                               <Button onClick={handleBulkParse} disabled={!bulkText}>Parse LaTeX</Button>
+                           </div>
+                       </>
+                   ) : (
+                       <div className="space-y-4">
+                           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-indigo-700 text-sm">
+                               <strong>Found {parsedProblems.length} problems!</strong> Review them below before importing.
+                           </div>
+                           <div className="max-h-96 overflow-y-auto space-y-3 custom-scrollbar border border-slate-100 rounded-xl p-2">
+                               {parsedProblems.map((p, idx) => (
+                                   <div key={idx} className="bg-slate-50 p-3 rounded-lg text-xs">
+                                       <strong>{idx + 1}.</strong> {p.statement.substring(0, 100)}...
+                                       <div className="mt-1 text-slate-500">Ans: {p.answerKey || 'None'}</div>
+                                   </div>
+                               ))}
+                           </div>
+                           <div className="flex justify-end gap-3">
+                               <Button variant="ghost" onClick={() => setParsedProblems([])}>Back</Button>
+                               <Button onClick={handleBulkCommit} isLoading={isSubmitting}>Import All</Button>
+                           </div>
+                       </div>
+                   )}
+               </div>
+            ) : (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-10 space-y-10">
                 {/* Title */}
@@ -1255,14 +1483,6 @@ export default function App() {
                                 className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
                             />
                         </div>
-                        <a 
-                            href="https://artofproblemsolving.com/wiki/index.php/AoPS_Wiki:Competition_ratings" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1"
-                        >
-                            <ExternalLink className="w-3 h-3" /> AoPS Rating Guide (Tenths place only)
-                        </a>
                     </div>
                     <div className="space-y-3">
                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
@@ -1282,6 +1502,18 @@ export default function App() {
                     </div>
                 </div>
 
+                {/* Logistics */}
+                <div className="grid md:grid-cols-2 gap-8">
+                     <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Est. Time (Min)</label>
+                        <input type="number" value={estimatedTime} onChange={e => setEstimatedTime(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Points</label>
+                        <input type="number" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                     </div>
+                </div>
+
                 {/* Statement */}
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">
@@ -1290,7 +1522,7 @@ export default function App() {
                   <textarea 
                     value={statement}
                     onChange={(e) => setStatement(e.target.value)}
-                    rows={8}
+                    rows={6}
                     placeholder="Let $ABC$ be a triangle where..."
                     className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-lg leading-relaxed mb-4"
                   />
@@ -1316,8 +1548,21 @@ export default function App() {
                           </div>
                       )}
                   </div>
+                </div>
 
-                  {/* Preview */}
+                {/* Solution & Answer */}
+                <div className="grid md:grid-cols-2 gap-8">
+                     <div className="space-y-3">
+                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Full Solution (LaTeX)</label>
+                         <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif" placeholder="Proof or derivation..."/>
+                     </div>
+                     <div className="space-y-3">
+                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Answer Key (Short)</label>
+                         <input type="text" value={answerKey} onChange={e => setAnswerKey(e.target.value)} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 42"/>
+                     </div>
+                </div>
+
+                {/* Preview */}
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mt-4">
                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-3">Live Preview</span>
                      <MathText 
@@ -1333,7 +1578,6 @@ export default function App() {
                         </div>
                      )}
                   </div>
-                </div>
 
                 {/* Verification / Disclaimer */}
                 <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 flex items-start gap-4 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
@@ -1378,6 +1622,7 @@ export default function App() {
                 </Button>
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -1429,7 +1674,6 @@ export default function App() {
                 >
                     <option value="All">All Statuses</option>
                     <option value="pending">Pending</option>
-                    <option value="shortlisted">Shortlisted</option>
                     <option value="accepted">Accepted</option>
                 </select>
 

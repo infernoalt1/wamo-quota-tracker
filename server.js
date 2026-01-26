@@ -5,7 +5,6 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from "@google/genai";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -21,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increased limit for images
+app.use(express.json({ limit: '50mb' })); // Increased limit for bulk uploads
 
 // Serve static files from the React build directory (dist)
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -32,16 +31,12 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// AI Initialization
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 // --- DB Initialization & Seeding ---
 const initDB = async () => {
   try {
     const client = await pool.connect();
     
     // Create Tables if they don't exist
-    // Note: We use a named constraint for role check to easily drop/modify it later
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -72,12 +67,17 @@ const initDB = async () => {
         quota_id UUID REFERENCES quotas(id),
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
+        solution TEXT,
+        answer_key TEXT,
+        estimated_time INTEGER DEFAULT 0,
+        points INTEGER DEFAULT 0,
         image_data TEXT,
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
         status TEXT DEFAULT 'pending',
         order_index INTEGER DEFAULT 0,
+        version INTEGER DEFAULT 1,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -88,6 +88,14 @@ const initDB = async () => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, problem_id)
       );
+
+      CREATE TABLE IF NOT EXISTS comments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        problem_id UUID REFERENCES problems(id),
+        user_id UUID REFERENCES users(id),
+        text TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     
     // --- MIGRATION: Ensure new columns exist for old databases ---
@@ -97,6 +105,12 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS image_data TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS solution TEXT;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS answer_key TEXT;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS estimated_time INTEGER DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
+      
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
 
@@ -159,12 +173,6 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-
-// --- Routes: AI Analysis ---
-app.post('/api/ai/analyze', authenticateToken, async (req, res) => {
-  // Removed AI button logic from UI, but keeping endpoint inactive or basic if triggered.
-  res.json({ text: "AI Analysis is disabled." });
-});
 
 // --- Routes: Auth ---
 
@@ -376,7 +384,9 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
         }
 
         await client.query('DELETE FROM votes WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM comments WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM votes WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
+        await client.query('DELETE FROM comments WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
         await client.query('DELETE FROM problems WHERE author_id = $1', [userId]);
         await client.query('DELETE FROM users WHERE id = $1', [userId]);
         await client.query('COMMIT');
@@ -401,7 +411,8 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.*, u.name as author_name, 
-      (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by
+      (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
+      (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       ORDER BY p.score DESC
@@ -418,7 +429,13 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       orderIndex: row.order_index || 0,
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || [],
-      imageData: row.image_data
+      imageData: row.image_data,
+      solution: row.solution,
+      answerKey: row.answer_key,
+      estimatedTime: row.estimated_time,
+      points: row.points,
+      version: row.version,
+      commentCount: parseInt(row.comment_count || '0')
     }));
 
     res.json(problems);
@@ -430,13 +447,13 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
-    const { title, statement, quotaId, difficulty, topics, imageData } = req.body;
+    const { title, statement, quotaId, difficulty, topics, imageData, solution, answerKey, points, estimatedTime } = req.body;
     
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
     const result = await pool.query(
-      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData]
+      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, points, estimated_time, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1) RETURNING *',
+      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData, solution, answerKey, points || 0, estimatedTime || 0]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -448,7 +465,7 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { title, statement, difficulty, topics, imageData } = req.body;
+  const { title, statement, difficulty, topics, imageData, solution, answerKey, points, estimatedTime, version } = req.body;
   const userId = req.user.id;
   const userRole = req.user.role;
 
@@ -462,19 +479,114 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
 
-    // 2. Update
+    // 2. Update with Optimistic Locking
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
+    // We update only if the version matches. If rows affected is 0, it means the version changed (or deleted).
     const result = await pool.query(
-      'UPDATE problems SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5 WHERE id = $6 RETURNING *',
-      [title, statement, diffVal, topics, imageData, id]
+      `UPDATE problems 
+       SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5, solution = $6, answer_key = $7, points = $8, estimated_time = $9, version = version + 1 
+       WHERE id = $10 AND version = $11 
+       RETURNING *`,
+      [title, statement, diffVal, topics, imageData, solution, answerKey, points, estimatedTime, id, version]
     );
+
+    if (result.rows.length === 0) {
+        return res.status(409).json({ error: 'Conflict: This problem has been modified by someone else. Please refresh.' });
+    }
 
     res.json({ success: true, problem: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
   }
+});
+
+// New Route: Bulk Import Parsing (Server-side to keep regex heavy lifting off client if needed, or consistency)
+app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
+    try {
+        const { text, defaultTopics, defaultDifficulty } = req.body;
+        if (!text) return res.status(400).json({ error: "No text provided" });
+
+        // Simple Regex Parsing for standard LaTeX problem lists
+        // Supports \begin{problem} ... \end{problem} OR \item style if it looks like a list
+        // This is a heuristic parser.
+        
+        const problems = [];
+        let currentProblem = null;
+        
+        // Strategy 1: Look for explicit blocks
+        const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
+        let match;
+        
+        // Helper to extract solution/answer from a block
+        const extractMetadata = (content) => {
+            let cleanContent = content;
+            let solution = "";
+            let answer = "";
+            
+            const solMatch = content.match(/\\begin\{solution\}([\s\S]*?)\\end\{solution\}/);
+            if (solMatch) {
+                solution = solMatch[1].trim();
+                cleanContent = cleanContent.replace(solMatch[0], '');
+            }
+            
+            const ansMatch = content.match(/\\answer\{(.*?)\}/);
+            if (ansMatch) {
+                answer = ansMatch[1].trim();
+                cleanContent = cleanContent.replace(ansMatch[0], '');
+            }
+            
+            return { statement: cleanContent.trim(), solution, answer };
+        };
+
+        while ((match = blockRegex.exec(text)) !== null) {
+            const raw = match[1];
+            // Try to find a title in brackets if exists: \begin{problem}[Title]
+            // Not implemented in simple regex, default title
+            const { statement, solution, answer } = extractMetadata(raw);
+            
+            problems.push({
+                title: `Imported Problem ${problems.length + 1}`,
+                statement: statement,
+                solution: solution,
+                answerKey: answer,
+                topics: defaultTopics || [],
+                difficulty: defaultDifficulty || 3,
+                estimatedTime: 5,
+                points: 5
+            });
+        }
+
+        // Strategy 2: If no blocks, look for \item
+        if (problems.length === 0) {
+            const items = text.split(/\\item\s/);
+            // Skip first empty split if text starts with \item
+            if (items.length > 1) {
+                items.shift(); // remove preamble
+                items.forEach((item, idx) => {
+                    const { statement, solution, answer } = extractMetadata(item);
+                    if (statement.length > 5) {
+                         problems.push({
+                            title: `Imported Problem ${idx + 1}`,
+                            statement: statement,
+                            solution: solution,
+                            answerKey: answer,
+                            topics: defaultTopics || [],
+                            difficulty: defaultDifficulty || 3,
+                            estimatedTime: 5,
+                            points: 5
+                        });
+                    }
+                });
+            }
+        }
+
+        res.json({ problems });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Parsing failed" });
+    }
 });
 
 // New Route: Update Status (Admin Only)
@@ -484,7 +596,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['pending', 'shortlisted', 'accepted'].includes(status)) {
+  if (!['pending', 'accepted'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
 
@@ -564,6 +676,59 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
     client.release();
   }
 });
+
+// --- Comments Routes ---
+
+app.get('/api/problems/:id/comments', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT c.id, c.text, c.created_at, u.id as user_id, u.name as user_name 
+       FROM comments c 
+       JOIN users u ON c.user_id = u.id 
+       WHERE c.problem_id = $1 
+       ORDER BY c.created_at ASC`,
+      [id]
+    );
+    const comments = result.rows.map(r => ({
+      id: r.id,
+      text: r.text,
+      createdAt: new Date(r.created_at).getTime(),
+      userId: r.user_id,
+      userName: r.user_name
+    }));
+    res.json(comments);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to fetch comments" });
+  }
+});
+
+app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.sendStatus(403);
+  try {
+    const { id } = req.params;
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({error: "Empty comment"});
+    
+    const result = await pool.query(
+      'INSERT INTO comments (problem_id, user_id, text) VALUES ($1, $2, $3) RETURNING id, created_at',
+      [id, req.user.id, text]
+    );
+    
+    res.json({
+      id: result.rows[0].id,
+      userId: req.user.id,
+      userName: req.user.name, // Will be filled by client for immediate display
+      text,
+      createdAt: new Date(result.rows[0].created_at).getTime()
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to post comment" });
+  }
+});
+
 
 // --- Admin: Reset All Votes ---
 app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {

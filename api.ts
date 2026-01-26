@@ -1,4 +1,4 @@
-import { Problem, User, Quota, ProblemStatus } from './types';
+import { Problem, User, Quota, ProblemStatus, Topic, Comment } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -144,7 +144,12 @@ export const api = {
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify(problem)
     });
-    if (!res.ok) throw new Error('Update problem failed');
+    if (!res.ok) {
+        if (res.status === 409) {
+            throw new Error('CONFLICT: This problem has been edited by someone else. Please refresh and try again.');
+        }
+        throw new Error('Update problem failed');
+    }
   },
   
   updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
@@ -169,10 +174,6 @@ export const api = {
     });
     if (!res.ok) throw new Error('Reorder failed');
   },
-  
-  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
-    return "AI Analysis is currently disabled.";
-  },
 
   toggleVote: async (problemId: string): Promise<void> => {
     if (USE_MOCK_BACKEND) return mockApi.toggleVote(problemId);
@@ -192,6 +193,37 @@ export const api = {
       headers: getAuthHeader()
     });
     if (!res.ok) throw new Error('Reset failed');
+  },
+  
+  // New: Bulk Parsing
+  parseBulkLatex: async (text: string, defaultTopics: Topic[], defaultDifficulty: number): Promise<any[]> => {
+      const res = await fetch(`${API_BASE_URL}/api/problems/bulk-parse`, {
+          method: 'POST',
+          headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, defaultTopics, defaultDifficulty })
+      });
+      if (!res.ok) throw new Error("Parsing failed");
+      const data = await res.json();
+      return data.problems;
+  },
+
+  // Comments
+  getComments: async (problemId: string): Promise<Comment[]> => {
+    if (USE_MOCK_BACKEND) return [];
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/comments`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error('Failed to fetch comments');
+    return res.json();
+  },
+
+  postComment: async (problemId: string, text: string): Promise<Comment> => {
+    if (USE_MOCK_BACKEND) throw new Error("Mock not impl");
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/comments`, {
+        method: 'POST',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+    });
+    if (!res.ok) throw new Error('Post failed');
+    return res.json();
   },
 
   // Quotas
@@ -225,7 +257,7 @@ export const api = {
     if (!res.ok) throw new Error('Update failed');
   },
 
-  // Helpers (Deprecating direct calls in favor of methods above, but keeping for compatibility if any leftover)
+  // Helpers
   _updateMockUser: (user: User) => { if(USE_MOCK_BACKEND) mockApi.updateUser(user) },
   _addMockQuota: (quota: Quota) => { if(USE_MOCK_BACKEND) mockApi.addQuota(quota) },
   _addMockUser: (user: User) => { if(USE_MOCK_BACKEND) mockApi.addUser(user) },
@@ -238,7 +270,6 @@ function getAuthHeader() {
 }
 
 // --- MOCK IMPLEMENTATION (LOCAL STORAGE) ---
-// (Kept for fallback, but unused in production with USE_MOCK_BACKEND = false)
 const DEFAULT_USERS: User[] = [];
 const DEFAULT_QUOTAS: Quota[] = [];
 const mockApi = {
