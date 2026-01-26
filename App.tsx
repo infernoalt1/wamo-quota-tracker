@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
@@ -164,9 +164,12 @@ export default function App() {
   const [composerMinDiff, setComposerMinDiff] = useState<number>(0);
   const [composerMaxDiff, setComposerMaxDiff] = useState<number>(50);
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
+  const [composerSearchText, setComposerSearchText] = useState('');
   
-  // Composer New Round UI
+  // Composer New Round UI / Editing Round
   const [isCreatingRound, setIsCreatingRound] = useState(false);
+  const [isEditingRound, setIsEditingRound] = useState(false);
+  const [editRoundForm, setEditRoundForm] = useState<Partial<Round>>({});
 
 
   // --- Initial Load ---
@@ -400,6 +403,33 @@ export default function App() {
     } catch(e) {
         console.error("Failed to create round", e);
     }
+  };
+
+  const editRound = async () => {
+      if (!composerSelectedRoundId || !editRoundForm.name) return;
+      try {
+          await api.updateRound({
+              id: composerSelectedRoundId,
+              name: editRoundForm.name,
+              description: editRoundForm.description || ''
+          });
+          refreshData(); // Updates the rounds list
+          setIsEditingRound(false);
+      } catch (e) {
+          console.error("Edit round failed", e);
+      }
+  };
+
+  const deleteRound = async () => {
+      if (!composerSelectedRoundId) return;
+      if (!window.confirm("Are you sure you want to delete this round? Problems will be unassigned, not deleted.")) return;
+      try {
+          await api.deleteRound(composerSelectedRoundId);
+          setComposerSelectedRoundId(null);
+          refreshData();
+      } catch (e) {
+          console.error("Delete round failed", e);
+      }
   };
 
   const startEditQuota = (q: Quota) => {
@@ -750,30 +780,37 @@ export default function App() {
 
       try {
           // Send null (or something that clears it)
-          // Since our update supports partials, we might need a specific way to clear.
-          // For now, let's assume sending empty string or explicit null works if backend supports.
-          // Or updateProblem to allow roundId: null.
           await api.updateProblem(problem.id, { status: 'pending', roundId: null as any });
       } catch(e) {
           refreshData();
       }
   };
 
-  const handleMoveProblem = async (index: number, direction: 'up' | 'down') => {
-      if (!composerSelectedRoundId) return;
+  // Drag and Drop Logic
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+      e.dataTransfer.setData('index', index.toString());
+      e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
+      e.preventDefault();
+      const sourceIndex = parseInt(e.dataTransfer.getData('index'));
       
+      if (isNaN(sourceIndex) || sourceIndex === targetIndex) return;
+      if (!composerSelectedRoundId) return;
+
       const accepted = problems
         .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
         
-      if (direction === 'up' && index === 0) return;
-      if (direction === 'down' && index === accepted.length - 1) return;
-      
       const newOrder = [...accepted];
-      const swapIndex = direction === 'up' ? index - 1 : index + 1;
-      
-      // Swap in array
-      [newOrder[index], newOrder[swapIndex]] = [newOrder[swapIndex], newOrder[index]];
+      const [movedItem] = newOrder.splice(sourceIndex, 1);
+      newOrder.splice(targetIndex, 0, movedItem);
       
       // Create Map for fast optimistic update
       const orderMap = new Map();
@@ -793,7 +830,7 @@ export default function App() {
       } catch(e) {
           refreshData();
       }
-  }
+  };
 
   const handleExportLatex = () => {
       // Basic LaTeX export
@@ -846,41 +883,42 @@ export default function App() {
   // --- Component Logic ---
   
   // Helper for Composer Item
-  const ComposerItem = ({ problem, isAccepted, index }: { problem: Problem, isAccepted: boolean, index?: number }) => {
+  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOver, onDrop }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOver?: any, onDrop?: any }) => {
       const [expanded, setExpanded] = useState(false);
       const [editMode, setEditMode] = useState(false);
       const [localStatement, setLocalStatement] = useState(problem.statement);
+      const [localSolution, setLocalSolution] = useState(problem.solution || '');
+      const [localAnswer, setLocalAnswer] = useState(problem.answerKey || '');
 
       const saveEdit = () => {
-          if (localStatement !== problem.statement) {
-              handleComposerUpdate(problem.id, { statement: localStatement });
+          const updates: any = {};
+          if (localStatement !== problem.statement) updates.statement = localStatement;
+          // Only update solution/answer if accepted (official round order)
+          if (isAccepted) {
+              if (localSolution !== problem.solution) updates.solution = localSolution;
+              if (localAnswer !== problem.answerKey) updates.answerKey = localAnswer;
+          }
+
+          if (Object.keys(updates).length > 0) {
+              handleComposerUpdate(problem.id, updates);
           }
           setEditMode(false);
       };
 
       return (
         <div 
+          draggable={isAccepted && !editMode}
+          onDragStart={isAccepted ? onDragStart : undefined}
+          onDragOver={isAccepted ? onDragOver : undefined}
+          onDrop={isAccepted ? onDrop : undefined}
           className={`bg-white border rounded-xl transition-all duration-200 shadow-sm ${
-              isAccepted ? 'border-indigo-100 hover:border-indigo-300' : 'border-slate-200 hover:border-slate-300'
+              isAccepted ? 'border-indigo-100 hover:border-indigo-300 cursor-move' : 'border-slate-200 hover:border-slate-300'
           }`}
         >
             <div className="p-3 flex items-start gap-3">
                 {isAccepted && (
-                   <div className="flex flex-col gap-1 mt-1">
-                      <button 
-                        onClick={() => handleMoveProblem(index!, 'up')}
-                        disabled={index === 0}
-                        className="text-slate-300 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-300"
-                      >
-                         <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button 
-                        onClick={() => handleMoveProblem(index!, 'down')}
-                        disabled={index === (composerAccepted.length - 1)}
-                        className="text-slate-300 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-300"
-                      >
-                         <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
+                   <div className="text-slate-300 mt-2 cursor-move flex items-center justify-center h-full">
+                      <GripVertical className="w-4 h-4" />
                    </div>
                 )}
                 {isAccepted && (
@@ -930,14 +968,37 @@ export default function App() {
             {(expanded || editMode) && (
                 <div className="border-t border-slate-100 p-3 bg-slate-50/50 text-sm animate-in slide-in-from-top-1">
                     {editMode ? (
-                        <div className="mb-3">
-                            <textarea 
-                                className="w-full p-2 border border-indigo-300 rounded-lg text-sm font-mono h-32 focus:ring-2 focus:ring-indigo-500 outline-none"
-                                value={localStatement}
-                                onChange={e => setLocalStatement(e.target.value)}
-                            />
+                        <div className="space-y-3 mb-2">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Statement</label>
+                                <textarea 
+                                    className="w-full p-2 border border-indigo-300 rounded-lg text-sm font-mono h-32 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={localStatement}
+                                    onChange={e => setLocalStatement(e.target.value)}
+                                />
+                            </div>
+                            {isAccepted && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Solution</label>
+                                        <textarea 
+                                            className="w-full p-2 border border-indigo-300 rounded-lg text-sm font-mono h-24 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            value={localSolution}
+                                            onChange={e => setLocalSolution(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Answer</label>
+                                        <input 
+                                            className="w-full p-2 border border-indigo-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            value={localAnswer}
+                                            onChange={e => setLocalAnswer(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex justify-end gap-2 mt-2">
-                                <Button size="sm" variant="ghost" onClick={() => { setEditMode(false); setLocalStatement(problem.statement); }}>Cancel</Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setEditMode(false); setLocalStatement(problem.statement); setLocalSolution(problem.solution || ''); setLocalAnswer(problem.answerKey || ''); }}>Cancel</Button>
                                 <Button size="sm" onClick={saveEdit}>Save</Button>
                             </div>
                         </div>
@@ -946,9 +1007,9 @@ export default function App() {
                             <MathText text={problem.statement} className="text-slate-700 whitespace-pre-wrap font-serif mb-3" />
                             {isAccepted && (
                                 <button 
-                                    onClick={() => { setEditMode(true); setLocalStatement(problem.statement); }}
+                                    onClick={() => { setEditMode(true); setLocalStatement(problem.statement); setLocalSolution(problem.solution || ''); setLocalAnswer(problem.answerKey || ''); }}
                                     className="absolute top-0 right-0 p-1 bg-white border border-slate-200 rounded shadow-sm opacity-0 group-hover/latex:opacity-100 transition-opacity text-slate-400 hover:text-indigo-600"
-                                    title="Edit LaTeX"
+                                    title="Edit Content"
                                 >
                                     <Pencil className="w-3 h-3" />
                                 </button>
@@ -959,18 +1020,21 @@ export default function App() {
                     {problem.imageData && (
                         <img src={problem.imageData} alt="Problem attachment" className="max-h-48 w-auto mb-3 object-contain border border-slate-200 rounded bg-white" />
                     )}
-                    <div className="grid grid-cols-2 gap-3">
-                         <div className="bg-white p-2 rounded border border-slate-200">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Solution Outline</span>
-                             <div className="max-h-32 overflow-y-auto custom-scrollbar">
-                                <MathText text={problem.solution || 'None'} className="text-xs" />
+                    
+                    {!editMode && (
+                        <div className="grid grid-cols-2 gap-3">
+                             <div className="bg-white p-2 rounded border border-slate-200">
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Solution Outline</span>
+                                 <div className="max-h-32 overflow-y-auto custom-scrollbar">
+                                    <MathText text={problem.solution || 'None'} className="text-xs" />
+                                 </div>
                              </div>
-                         </div>
-                         <div className="bg-white p-2 rounded border border-slate-200 h-fit">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
-                             <div className="font-mono font-bold text-slate-800">{problem.answerKey || '-'}</div>
-                         </div>
-                    </div>
+                             <div className="bg-white p-2 rounded border border-slate-200 h-fit">
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
+                                 <div className="font-mono font-bold text-slate-800">{problem.answerKey || '-'}</div>
+                             </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -1082,7 +1146,7 @@ export default function App() {
     .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
     .sort((a,b) => a.orderIndex - b.orderIndex);
   
-  // Problems NOT assigned to this round, filtered by source quota
+  // Problems NOT assigned to this round, filtered by source quota and search
   const composerCandidates = problems
     .filter(p => {
         // Exclude problems already in THIS round
@@ -1097,6 +1161,14 @@ export default function App() {
         // Diff Filter
         if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
         
+        // Search Text Filter
+        if (composerSearchText) {
+            const lowerSearch = composerSearchText.toLowerCase();
+            const inTitle = p.title.toLowerCase().includes(lowerSearch);
+            const inStatement = p.statement.toLowerCase().includes(lowerSearch);
+            if (!inTitle && !inStatement) return false;
+        }
+
         return true;
     })
     .sort((a, b) => {
@@ -1205,6 +1277,7 @@ export default function App() {
         {/* VIEW: DASHBOARD */}
         {view === 'dashboard' && !isGuest && (
           <div className="max-w-6xl mx-auto space-y-10">
+            {/* ... Dashboard Content ... */}
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
@@ -1364,7 +1437,7 @@ export default function App() {
                                    placeholder="Description..."
                                    value={newRoundDesc}
                                    onChange={e => setNewRoundDesc(e.target.value)}
-                                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm h-24 resize-none"
+                                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm h-32 resize-none"
                                />
                                <div className="flex gap-3 pt-2">
                                   <Button variant="ghost" onClick={() => setIsCreatingRound(false)} className="flex-1">Cancel</Button>
@@ -1410,16 +1483,41 @@ export default function App() {
                 // --- COMPOSER: EDITING VIEW ---
                 <>
                 <header className="flex justify-between items-center mb-6 shrink-0 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                   <div className="flex items-center gap-4">
-                      <Button variant="ghost" onClick={() => setComposerSelectedRoundId(null)} className="h-10 w-10 p-0 rounded-full border border-slate-200">
+                   <div className="flex items-center gap-4 flex-1">
+                      <Button variant="ghost" onClick={() => setComposerSelectedRoundId(null)} className="h-10 w-10 p-0 rounded-full border border-slate-200 shrink-0">
                           <RotateCcw className="w-4 h-4" />
                       </Button>
-                      <div>
-                          <h1 className="text-2xl font-bold text-slate-900">{composerSelectedRound?.name}</h1>
-                          <p className="text-slate-500 text-xs mt-0.5">Editing Round Layout</p>
-                      </div>
+                      
+                      {isEditingRound ? (
+                          <div className="flex-1 flex gap-2">
+                              <input 
+                                className="px-3 py-1 border border-indigo-300 rounded-lg font-bold text-lg text-slate-900" 
+                                value={editRoundForm.name} 
+                                onChange={e => setEditRoundForm({...editRoundForm, name: e.target.value})} 
+                                placeholder="Round Name"
+                              />
+                              <input 
+                                className="flex-1 px-3 py-1 border border-indigo-300 rounded-lg text-sm" 
+                                value={editRoundForm.description} 
+                                onChange={e => setEditRoundForm({...editRoundForm, description: e.target.value})} 
+                                placeholder="Description"
+                              />
+                              <Button size="sm" onClick={editRound}>Save</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setIsEditingRound(false)}>Cancel</Button>
+                          </div>
+                      ) : (
+                          <div className="flex-1 min-w-0 group/header relative">
+                              <h1 className="text-2xl font-bold text-slate-900 truncate">{composerSelectedRound?.name}</h1>
+                              <p className="text-slate-500 text-xs mt-0.5 truncate">{composerSelectedRound?.description || 'No description'}</p>
+                              
+                              <div className="absolute right-0 top-1 opacity-0 group-hover/header:opacity-100 transition-opacity flex gap-2 bg-white pl-4">
+                                  <button onClick={() => { setIsEditingRound(true); setEditRoundForm(composerSelectedRound || {}); }} className="text-slate-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
+                                  <button onClick={deleteRound} className="text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                              </div>
+                          </div>
+                      )}
                    </div>
-                   <div className="flex gap-3">
+                   <div className="flex gap-3 ml-4">
                       <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
                           <Download className="w-4 h-4" /> Export TeX
                       </Button>
@@ -1437,6 +1535,18 @@ export default function App() {
                                 <span className="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{composerCandidates.length}</span>
                             </div>
                             
+                            {/* Search */}
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                                <input 
+                                    type="text"
+                                    placeholder="Search problems..."
+                                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={composerSearchText}
+                                    onChange={e => setComposerSearchText(e.target.value)}
+                                />
+                            </div>
+
                             {/* Filters Grid */}
                             <div className="grid grid-cols-2 gap-2">
                                  <select className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white" value={composerSourceQuota} onChange={e => setComposerSourceQuota(e.target.value)}>
@@ -1472,7 +1582,7 @@ export default function App() {
                         </div>
                     </div>
     
-                    {/* RIGHT: FINAL ROUND */}
+                    {/* RIGHT: FINAL ROUND (Drag and Drop Area) */}
                     <div className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
                         <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
                             <div className="flex justify-between items-center">
@@ -1503,7 +1613,15 @@ export default function App() {
                                 </div>
                              ) : (
                                 composerAccepted.map((p, idx) => (
-                                    <ComposerItem key={p.id} problem={p} isAccepted={true} index={idx} />
+                                    <ComposerItem 
+                                        key={p.id} 
+                                        problem={p} 
+                                        isAccepted={true} 
+                                        index={idx}
+                                        onDragStart={(e: any) => handleDragStart(e, idx)}
+                                        onDragOver={handleDragOver}
+                                        onDrop={(e: any) => handleDrop(e, idx)}
+                                    />
                                 ))
                              )}
                         </div>
@@ -1515,6 +1633,7 @@ export default function App() {
         )}
 
         {/* VIEW: SUBMIT / EDIT / BULK */}
+        {/* ... (rest of the file remains unchanged, just ensuring closure) ... */}
         {view === 'submit' && (
           <div className="max-w-4xl mx-auto">
             <header className="mb-10 flex justify-between items-start">

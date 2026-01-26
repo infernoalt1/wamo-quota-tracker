@@ -278,6 +278,25 @@ export const api = {
     return res.json();
   },
 
+  updateRound: async (round: Partial<Round> & { id: string }): Promise<void> => {
+    if (USE_MOCK_BACKEND) return;
+    const res = await fetch(`${API_BASE_URL}/api/rounds/${round.id}`, {
+        method: 'PUT',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(round)
+    });
+    if (!res.ok) throw new Error("Update round failed");
+  },
+
+  deleteRound: async (id: string): Promise<void> => {
+    if (USE_MOCK_BACKEND) return;
+    const res = await fetch(`${API_BASE_URL}/api/rounds/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error("Delete round failed");
+  },
+
   // Helpers
   _updateMockUser: (user: User) => { if(USE_MOCK_BACKEND) mockApi.updateUser(user) },
   _addMockQuota: (quota: Quota) => { if(USE_MOCK_BACKEND) mockApi.addQuota(quota) },

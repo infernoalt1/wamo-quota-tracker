@@ -31,7 +31,8 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
   const status = problem.status || 'pending';
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Default to expanded as requested
+  const [isExpanded, setIsExpanded] = useState(true);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [newComment, setNewComment] = useState('');

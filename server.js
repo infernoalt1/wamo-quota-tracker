@@ -539,16 +539,12 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// New Route: Bulk Import Parsing (Server-side to keep regex heavy lifting off client if needed, or consistency)
+// New Route: Bulk Import Parsing
 app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
     try {
         const { text, defaultTopics, defaultDifficulty } = req.body;
         if (!text) return res.status(400).json({ error: "No text provided" });
 
-        // Simple Regex Parsing for standard LaTeX problem lists
-        // Supports \begin{problem} ... \end{problem} OR \item style if it looks like a list
-        // This is a heuristic parser.
-        
         const problems = [];
         let currentProblem = null;
         
@@ -873,6 +869,52 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).json({error: "Create round failed"});
+    }
+});
+
+// Update Round
+app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+    const { id } = req.params;
+    const { name, description } = req.body;
+    try {
+        const result = await pool.query(
+            'UPDATE rounds SET name = $1, description = $2 WHERE id = $3 RETURNING *',
+            [name, description, id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
+        const r = result.rows[0];
+        res.json({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime()
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({error: "Update round failed"});
+    }
+});
+
+// Delete Round
+app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+    const { id } = req.params;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        // Unassign problems first
+        await client.query('UPDATE problems SET round_id = NULL, status = \'pending\', order_index = 0 WHERE round_id = $1', [id]);
+        // Delete round
+        await client.query('DELETE FROM rounds WHERE id = $1', [id]);
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (e) {
+        await client.query('ROLLBACK');
+        console.error(e);
+        res.status(500).json({error: "Delete round failed"});
+    } finally {
+        client.release();
     }
 });
 
