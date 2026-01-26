@@ -6,7 +6,8 @@ export interface ProblemValidation {
 export interface Quota {
   id: string;
   name: string;
-  target: number;
+  target: number; // Submission target
+  voteTarget: number; // New: Upvote target
   instructions: string;
   dueDate: number | null; // Timestamp
 }
@@ -36,6 +37,7 @@ export interface User {
   password: string; // Stored locally for this app version
   role: 'admin' | 'director' | 'writer';
   submittedCount: number; // Dynamic count based on active quota
+  voteCount: number;      // Dynamic count of votes cast in active quota
   votingPower: number;
-  customTargets: Record<string, number>; // Map of quotaId -> target override
+  customTargets: Record<string, number>; // Map of quotaId -> submission target override
 }

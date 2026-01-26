@@ -32,7 +32,9 @@ import {
   Zap,
   Download,
   CheckCircle,
-  Crown
+  Crown,
+  ThumbsUp,
+  ChevronRight
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -45,10 +47,10 @@ interface NavItemProps {
 const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 border ${
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
       active
-        ? 'bg-white border-indigo-600 text-indigo-700 font-bold shadow-md'
-        : 'bg-white border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900 font-medium'
+        ? 'bg-indigo-50 text-indigo-700 font-bold'
+        : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900 font-medium'
     }`}
   >
     <div className={active ? 'text-indigo-600' : 'text-slate-400'}>{icon}</div>
@@ -105,6 +107,7 @@ export default function App() {
   // Quota Create New State
   const [newQuotaName, setNewQuotaName] = useState('');
   const [newQuotaTarget, setNewQuotaTarget] = useState(5);
+  const [newVoteTarget, setNewVoteTarget] = useState(3);
   const [newQuotaInstr, setNewQuotaInstr] = useState('');
 
   // Pool View State (Sorting/Filtering)
@@ -183,16 +186,19 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Update Users submitted count locally based on ACTIVE QUOTA
+  // Update Users submitted & voted count locally based on ACTIVE QUOTA
   // This logic runs client side to keep UI snappy
   useEffect(() => {
     if (problems.length >= 0 && users.length > 0) {
+      const activeProblems = problems.filter(p => p.quotaId === activeQuotaId);
+      
       const updatedUsers = users.map(u => ({
         ...u,
-        submittedCount: problems.filter(p => p.authorId === u.id && p.quotaId === activeQuotaId).length
+        submittedCount: activeProblems.filter(p => p.authorId === u.id).length,
+        voteCount: activeProblems.filter(p => p.votedBy?.includes(u.id)).length
       }));
       
-      const isDifferent = JSON.stringify(updatedUsers.map(u => u.submittedCount)) !== JSON.stringify(users.map(u => u.submittedCount));
+      const isDifferent = JSON.stringify(updatedUsers.map(u => ({s: u.submittedCount, v: u.voteCount}))) !== JSON.stringify(users.map(u => ({s: u.submittedCount, v: u.voteCount})));
       if (isDifferent) {
          setUsers(updatedUsers);
       }
@@ -245,7 +251,7 @@ export default function App() {
   }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax]); 
 
   // --- Helpers ---
-  const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, name: 'Default', instructions: '', dueDate: null };
+  const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
 
   // --- Actions ---
@@ -279,6 +285,7 @@ export default function App() {
         const newQuota = await api.createQuota({
           name: newQuotaName.trim(),
           target: newQuotaTarget,
+          voteTarget: newVoteTarget,
           instructions: newQuotaInstr.trim() || 'No specific instructions.',
           dueDate: null
         });
@@ -306,6 +313,7 @@ export default function App() {
         id: editingQuotaId,
         name: editQuotaForm.name || '',
         target: editQuotaForm.target || 5,
+        voteTarget: editQuotaForm.voteTarget || 3,
         instructions: editQuotaForm.instructions || '',
         dueDate: editQuotaForm.dueDate || null
       });
@@ -393,6 +401,18 @@ export default function App() {
          }
      });
   }
+
+  const handleResetVotes = async () => {
+    if (!window.confirm("WARNING: This will remove ALL votes from the database and set all problem scores to zero. This action cannot be undone. Are you sure?")) return;
+    try {
+        await api.resetVotes();
+        await refreshData();
+        alert("All votes have been reset.");
+    } catch(e) {
+        console.error("Failed to reset votes");
+        alert("Reset failed.");
+    }
+  };
 
   // -- Submission & Editing --
   
@@ -571,19 +591,19 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
-        <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl p-8 border border-slate-200">
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl p-8 border border-white/50 backdrop-blur-sm">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg transform -rotate-3">
-              <BookOpen size={32} />
+            <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg transform rotate-3">
+              <BookOpen size={32} strokeWidth={2.5} />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-1 text-center">WAMO Quota Tracker</h1>
-          <p className="text-gray-500 mb-6 text-center text-sm">Secure Math Contest Portal</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1 text-center tracking-tight">WAMO Tracker</h1>
+          <p className="text-gray-500 mb-8 text-center text-sm">Middle School Math Contest Portal</p>
           
           {!selectedLoginId ? (
-            <div className="space-y-2">
-               <div className="flex items-center justify-between mb-2">
+            <div className="space-y-3">
+               <div className="flex items-center justify-between px-1">
                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Select User</p>
                  {usersError && (
                      <button onClick={initApp} className="text-xs text-indigo-600 flex items-center gap-1 hover:underline">
@@ -592,15 +612,15 @@ export default function App() {
                  )}
                </div>
                
-               <div className="max-h-64 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {usersLoading && users.length === 0 && <p className="text-sm text-gray-400 italic p-2">Loading users...</p>}
+               <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                  {usersLoading && users.length === 0 && <div className="text-sm text-gray-400 italic p-4 text-center">Loading users...</div>}
                   
                   {usersError && users.length === 0 && (
-                      <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <div className="bg-red-50 text-red-600 text-sm p-4 rounded-xl flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 shrink-0" />
                           <div>
-                            <p className="font-semibold">Unable to load users</p>
-                            <p className="text-xs mt-1 text-red-500">Is the backend server running?</p>
+                            <p className="font-semibold">Connection Error</p>
+                            <p className="text-xs mt-1 text-red-500 opacity-90">Backend server is unreachable.</p>
                           </div>
                       </div>
                   )}
@@ -609,22 +629,31 @@ export default function App() {
                     <button
                       key={user.id}
                       onClick={() => setSelectedLoginId(user.id)}
-                      className="w-full p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
+                      className="w-full p-3.5 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
                     >
-                      <span className="font-medium text-gray-700 group-hover:text-indigo-700">{user.name}</span>
-                      {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Director</span>}
-                      {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Director</span>}
+                      <span className="font-semibold text-gray-700 group-hover:text-indigo-700">{user.name}</span>
+                      <div className="flex gap-2">
+                        {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Admin</span>}
+                        {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Director</span>}
+                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-indigo-400" />
+                      </div>
                     </button>
                   ))}
                </div>
             </div>
           ) : (
-            <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-900">
-                  Login as <span className="text-indigo-600 font-bold">{users.find(u => u.id === selectedLoginId)?.name}</span>
-                </p>
-                <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); setLoginError(''); }} className="text-xs text-gray-400 hover:text-gray-600">Change</button>
+            <div className="space-y-5 animate-in fade-in slide-in-from-right-8 duration-300">
+              <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">
+                        {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-400 font-semibold uppercase">Signing in as</p>
+                        <p className="text-sm font-bold text-gray-900 leading-none mt-0.5">{users.find(u => u.id === selectedLoginId)?.name}</p>
+                    </div>
+                </div>
+                <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); setLoginError(''); }} className="text-xs text-gray-400 hover:text-gray-600 font-medium">Change</button>
               </div>
               
               <div>
@@ -634,13 +663,13 @@ export default function App() {
                   value={loginPassword}
                   onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
                   onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-white text-gray-900 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-gray-400"
                   autoFocus
                 />
-                {loginError && <p className="text-red-500 text-xs mt-2 flex items-center gap-1"><ShieldAlert className="w-3 h-3"/> {loginError}</p>}
+                {loginError && <p className="text-red-500 text-xs mt-2 flex items-center gap-1 font-medium"><ShieldAlert className="w-3 h-3"/> {loginError}</p>}
               </div>
               
-              <Button onClick={handleLogin} className="w-full">Sign In</Button>
+              <Button onClick={handleLogin} className="w-full py-3 text-lg shadow-indigo-200">Sign In</Button>
             </div>
           )}
         </div>
@@ -650,24 +679,35 @@ export default function App() {
 
   const activeQuota = getActiveQuota();
   // Get override or default
-  const userTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
+  const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
+  // Vote target is currently global per quota
+  const voteTarget = activeQuota.voteTarget || 3;
+
   // Count only for active quota
-  const userProblemCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
-  const progressPercent = Math.min((userProblemCount / userTarget) * 100, 100);
+  const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
+  // Count votes
+  const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
+
+  const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
+  const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
+  
   const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans">
+    <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans">
       
       {/* Sidebar Navigation */}
-      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-sm">
-        <div className="p-6 border-b border-slate-100">
-          <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center gap-2">
-            <BookOpen className="w-7 h-7 text-indigo-600" /> WAMO Quota Tracker
+      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]">
+        <div className="p-6 border-b border-slate-50">
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2 tracking-tight">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+                <BookOpen className="w-4 h-4" strokeWidth={3} />
+            </div>
+            WAMO Tracker
           </h2>
         </div>
         
-        <nav className="flex-1 p-4 space-y-2">
+        <nav className="flex-1 p-4 space-y-1">
           <NavItem 
             icon={<LayoutDashboard className="w-5 h-5" />} 
             label="Dashboard" 
@@ -681,19 +721,19 @@ export default function App() {
             onClick={() => { resetForm(); setView('submit'); }} 
           />
           <NavItem 
-            icon={<BookOpen className="w-5 h-5" />} 
+            icon={<Layers className="w-5 h-5" />} 
             label="Problem Pool" 
             active={view === 'pool'} 
             onClick={() => setView('pool')} 
           />
           {isDirector && (
             <>
-              <div className="pt-4 pb-2 px-4">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Director Controls</p>
+              <div className="mt-8 mb-2 px-4">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Administration</p>
               </div>
               <NavItem 
                 icon={<Settings className="w-5 h-5" />} 
-                label="Contest Admin" 
+                label="Director Panel" 
                 active={view === 'admin'} 
                 onClick={() => setView('admin')} 
               />
@@ -701,82 +741,126 @@ export default function App() {
           )}
         </nav>
 
-        <div className="p-4 bg-white border-t border-slate-100">
-          <div className="flex items-center gap-3 mb-4 p-2 rounded-lg bg-white border border-slate-100 shadow-sm">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : 'bg-slate-500'}`}>
-              {currentUser.name.charAt(0)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 truncate">{currentUser.name}</p>
-              <p className="text-xs text-gray-500 capitalize flex items-center gap-1">
-                 {currentUser.role}
-                 <span className="text-indigo-300">•</span>
-                 Power: {currentUser.votingPower}
-              </p>
-            </div>
+        <div className="p-4 border-t border-slate-100">
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 mb-2">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : 'bg-slate-500'}`}>
+                {currentUser.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900 truncate">{currentUser.name}</p>
+                <p className="text-xs text-slate-500 capitalize flex items-center gap-1">
+                    {currentUser.role}
+                    <span className="text-slate-300">•</span>
+                    Power: {currentUser.votingPower}
+                </p>
+                </div>
+              </div>
+              <Button variant="ghost" onClick={handleLogout} className="w-full text-xs h-8 justify-center text-slate-500 hover:text-red-600 hover:bg-white shadow-sm border border-transparent hover:border-slate-200">
+                Log Out
+              </Button>
           </div>
-          <Button variant="ghost" onClick={handleLogout} className="w-full text-xs justify-start text-red-600 hover:text-red-700 hover:bg-red-50">
-            <LogOut className="w-4 h-4" /> Sign Out
-          </Button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 overflow-y-auto custom-scrollbar">
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar">
         
         {/* VIEW: DASHBOARD */}
         {view === 'dashboard' && (
           <div className="max-w-5xl mx-auto space-y-8">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-bold text-slate-900">Hello, {currentUser.name.split(' ')[0]} 👋</h1>
+                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
                 <p className="text-slate-500 mt-1">Here is the current round status.</p>
               </div>
             </header>
 
             {/* Active Round Info */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6">
-                <div className="flex justify-between items-start mb-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6 relative">
+                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                    <BookOpen size={120} />
+                </div>
+                <div className="flex justify-between items-start mb-6 relative z-10">
                    <div>
-                      <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1 block">Active Round</span>
+                      <div className="flex items-center gap-2 mb-2">
+                         <span className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase tracking-wider">Active Round</span>
+                         {activeQuota.dueDate && (
+                           <span className="px-2 py-1 rounded bg-orange-50 text-orange-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                               <Clock className="w-3 h-3"/> {getFormatDate(activeQuota.dueDate)}
+                           </span>
+                         )}
+                      </div>
                       <h2 className="text-2xl font-bold text-slate-900">{activeQuota.name}</h2>
                    </div>
-                   <div className="text-right">
-                       <div className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm">
-                          Quota: {userTarget}
-                       </div>
-                       {activeQuota.dueDate && (
-                           <p className="text-xs text-red-500 font-semibold mt-1 flex items-center justify-end gap-1">
-                               <Clock className="w-3 h-3"/> Due: {getFormatDate(activeQuota.dueDate)}
-                           </p>
-                       )}
-                   </div>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 text-slate-600 text-sm">
-                   <strong className="text-slate-900">Instructions:</strong> {activeQuota.instructions}
+                
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-slate-600 text-sm relative z-10">
+                   <strong className="text-slate-900 font-semibold block mb-1">Director's Note:</strong> {activeQuota.instructions}
                 </div>
             </div>
 
-            {/* Progress Card */}
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-32 bg-indigo-50 rounded-full mix-blend-multiply filter blur-3xl opacity-50 -translate-y-1/2 translate-x-1/2"></div>
-              
-              <div className="relative z-10">
-                <div className="flex justify-between items-end mb-4">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800">Your Contribution</h3>
-                    <p className="text-sm text-slate-500">For {activeQuota.name}</p>
-                  </div>
-                  <span className="text-2xl font-bold text-indigo-600">{userProblemCount} <span className="text-gray-400 text-lg font-normal">/ {userTarget}</span></span>
+            {/* Progress Cards Grid */}
+            <div className="grid md:grid-cols-2 gap-6">
+                {/* Writing Progress */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-48 relative overflow-hidden group hover:border-indigo-200 transition-colors">
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                                <Pencil className="w-4 h-4 text-indigo-500" /> Writing Quota
+                            </h3>
+                            {submissionCount >= submissionTarget ? 
+                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
+                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{submissionCount} / {submissionTarget}</span>
+                            }
+                        </div>
+                        <div className="text-3xl font-black text-slate-900 mt-2">
+                            {Math.round(subPercent)}%
+                        </div>
+                    </div>
+                    
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden relative z-10">
+                        <div 
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${submissionCount >= submissionTarget ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
+                            style={{ width: `${subPercent}%` }}
+                        ></div>
+                    </div>
+
+                    {/* Decorative bg */}
+                    <div className="absolute -bottom-4 -right-4 text-indigo-50 opacity-50 group-hover:scale-110 transition-transform duration-500">
+                        <Pencil size={100} />
+                    </div>
                 </div>
-                
-                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-4">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-1000 ease-out ${progressPercent >= 100 ? 'bg-gradient-to-r from-emerald-400 to-emerald-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`} 
-                    style={{ width: `${progressPercent}%` }}
-                  ></div>
+
+                {/* Voting Progress */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-48 relative overflow-hidden group hover:border-teal-200 transition-colors">
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                                <ThumbsUp className="w-4 h-4 text-teal-500" /> Voting Quota
+                            </h3>
+                            {userVoteCount >= voteTarget ? 
+                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
+                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{userVoteCount} / {voteTarget}</span>
+                            }
+                        </div>
+                        <div className="text-3xl font-black text-slate-900 mt-2">
+                            {Math.round(votePercent)}%
+                        </div>
+                    </div>
+                    
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden relative z-10">
+                        <div 
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${userVoteCount >= voteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
+                            style={{ width: `${votePercent}%` }}
+                        ></div>
+                    </div>
+
+                    {/* Decorative bg */}
+                    <div className="absolute -bottom-4 -right-4 text-teal-50 opacity-50 group-hover:scale-110 transition-transform duration-500">
+                        <ThumbsUp size={100} />
+                    </div>
                 </div>
-              </div>
             </div>
 
             <div>
@@ -806,7 +890,10 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                  <p className="text-slate-400 italic">No submissions for this round yet.</p>
+                  <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
+                      <p className="text-slate-400 italic">No submissions for this round yet.</p>
+                      <Button variant="secondary" onClick={() => { resetForm(); setView('submit'); }} className="mt-4 mx-auto">Start Writing</Button>
+                  </div>
               )}
             </div>
           </div>
@@ -1070,9 +1157,17 @@ export default function App() {
           <div className="max-w-5xl mx-auto">
              <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
-                <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
-                    <Download className="w-4 h-4" /> Export TeX
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
+                      <Download className="w-4 h-4" /> Export TeX
+                  </Button>
+                  {/* DANGER: Reset Votes Button (Admin Only) */}
+                  {currentUser.role === 'admin' && (
+                     <Button onClick={handleResetVotes} size="sm" variant="danger" className="gap-2">
+                         <ShieldAlert className="w-4 h-4" /> Reset All Votes
+                     </Button>
+                  )}
+                </div>
              </div>
              
              <div className="grid md:grid-cols-2 gap-8 mb-8">
@@ -1094,14 +1189,26 @@ export default function App() {
                                     placeholder="Name"
                                   />
                                   <div className="flex gap-2">
-                                    <input 
-                                      className="w-20 px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
-                                      type="number"
-                                      value={editQuotaForm.target} 
-                                      onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})}
-                                      placeholder="Qty"
-                                    />
-                                    <div className="flex-1">
+                                    <div className="flex flex-col gap-1 w-24">
+                                        <label className="text-[10px] uppercase font-bold text-slate-400">Prob Qty</label>
+                                        <input 
+                                        className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                        type="number"
+                                        value={editQuotaForm.target} 
+                                        onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-1 w-24">
+                                        <label className="text-[10px] uppercase font-bold text-slate-400">Vote Qty</label>
+                                        <input 
+                                        className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                        type="number"
+                                        value={editQuotaForm.voteTarget} 
+                                        onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})}
+                                        />
+                                    </div>
+                                    <div className="flex-1 flex flex-col gap-1">
+                                        <label className="text-[10px] uppercase font-bold text-slate-400">Due Date</label>
                                         <input 
                                           type="date"
                                           className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
@@ -1129,7 +1236,9 @@ export default function App() {
                                         {activeQuotaId === q.id && <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">Active</span>}
                                      </div>
                                      <div className="text-xs text-slate-500 mt-1 flex gap-2">
-                                         <span>Target: {q.target}</span>
+                                         <span>Write: {q.target}</span>
+                                         <span>•</span>
+                                         <span>Vote: {q.voteTarget || 3}</span>
                                          <span>•</span>
                                          <span className={q.dueDate ? 'text-indigo-600' : 'text-slate-400'}>
                                              {getFormatDate(q.dueDate)}
@@ -1228,21 +1337,21 @@ export default function App() {
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">User</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Password</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Role & Power</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Active Target</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Progress</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Write Override</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Progress (Write/Vote)</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Actions</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
                    {users.map(u => {
                      const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
-                     // Important: use the updated count from the useEffect hook
+                     const uVoteTarget = activeQuota.voteTarget || 3;
                      const uCount = u.submittedCount || 0;
-                     const isMet = uCount >= uTarget;
+                     const uVoteCount = u.voteCount || 0;
                      
-                     // Permission check for editing: If current user is director, cannot edit admin
+                     // Permission check
                      const canEditThisUser = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin');
-                     const canDeleteThisUser = canEditThisUser && u.role !== 'director'; // Directors shouldn't delete other directors unless Admin
+                     const canDeleteThisUser = canEditThisUser && u.role !== 'director';
 
                      if (editingUserId === u.id) {
                          // EDIT MODE ROW
@@ -1254,7 +1363,6 @@ export default function App() {
                                         value={editUserForm.name} 
                                         onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
                                     />
-                                    {/* Role Editing (Admin only) */}
                                     {currentUser.role === 'admin' && (
                                        <select 
                                          className="mt-1 w-full text-xs border border-indigo-200 rounded p-1 bg-white"
@@ -1268,7 +1376,6 @@ export default function App() {
                                     )}
                                 </td>
                                 <td className="px-6 py-4">
-                                    {/* Permission check: Sub-directors cannot edit passwords */}
                                     {currentUser.role === 'admin' ? (
                                         <div className="flex items-center gap-1">
                                             <Lock className="w-3 h-3 text-slate-400"/>
@@ -1344,15 +1451,28 @@ export default function App() {
                              </div>
                          </td>
                          <td className="px-6 py-4">
-                           <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-xs font-bold w-12 text-black">{uCount} / {uTarget}</span>
-                                <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                           <div className="flex flex-col gap-2 min-w-[120px]">
+                              {/* Writing Progress */}
+                              <div className="flex items-center gap-2 text-xs">
+                                <Pencil className="w-3 h-3 text-indigo-400" />
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                     <div 
-                                    className={`h-full rounded-full ${isMet ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
+                                    className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
                                     style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}
                                     ></div>
                                 </div>
+                                <span className={`font-mono font-bold ${uCount >= uTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uCount}/{uTarget}</span>
+                              </div>
+                              {/* Voting Progress */}
+                              <div className="flex items-center gap-2 text-xs">
+                                <ThumbsUp className="w-3 h-3 text-teal-400" />
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div 
+                                    className={`h-full rounded-full ${uVoteCount >= uVoteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
+                                    style={{ width: `${Math.min((uVoteCount / uVoteTarget) * 100, 100)}%` }}
+                                    ></div>
+                                </div>
+                                <span className={`font-mono font-bold ${uVoteCount >= uVoteTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uVoteCount}/{uVoteTarget}</span>
                               </div>
                            </div>
                          </td>

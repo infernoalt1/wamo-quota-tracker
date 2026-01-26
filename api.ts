@@ -166,6 +166,16 @@ export const api = {
     if (!res.ok) throw new Error('Vote failed');
   },
 
+  resetVotes: async (): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; 
+    
+    const res = await fetch(`${API_BASE_URL}/api/admin/reset-votes`, {
+      method: 'POST',
+      headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error('Reset failed');
+  },
+
   // Quotas
   getQuotas: async (): Promise<Quota[]> => {
     if (USE_MOCK_BACKEND) return mockApi.getQuotas();

@@ -59,6 +59,7 @@ const initDB = async () => {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
         target_count INTEGER NOT NULL DEFAULT 5,
+        vote_target INTEGER DEFAULT 3,
         instructions TEXT,
         due_date TIMESTAMP WITH TIME ZONE,
         is_active BOOLEAN DEFAULT FALSE,
@@ -92,10 +93,10 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS difficulty NUMERIC(3,1) DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
 
     // --- MIGRATION: Update Role Constraint to include 'director' ---
-    // We try to drop the old implicit constraint (often named users_role_check) and add the new one.
     try {
        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer'))`);
@@ -118,8 +119,8 @@ const initDB = async () => {
     const quotaCheck = await client.query("SELECT * FROM quotas");
     if (quotaCheck.rows.length === 0) {
        await client.query(
-         "INSERT INTO quotas (name, target_count, instructions, is_active) VALUES ($1, $2, $3, $4)",
-         ['General Submission', 5, 'Standard middle school math contest problems.', true]
+         "INSERT INTO quotas (name, target_count, vote_target, instructions, is_active) VALUES ($1, $2, $3, $4, $5)",
+         ['General Submission', 5, 3, 'Standard middle school math contest problems.', true]
        );
     }
     
@@ -330,6 +331,21 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     params.push(id);
     
     await pool.query(query, params);
+
+    // FIX: Propagate Voting Power Changes
+    if (votingPower !== undefined) {
+        await pool.query('UPDATE votes SET vote_value = $1 WHERE user_id = $2', [votingPower, id]);
+        await pool.query(`
+          UPDATE problems 
+          SET score = (
+            SELECT COALESCE(SUM(vote_value), 0) 
+            FROM votes 
+            WHERE votes.problem_id = problems.id
+          )
+          WHERE id IN (SELECT problem_id FROM votes WHERE user_id = $1)
+        `, [id]);
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -500,12 +516,39 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
   }
 });
 
+// --- Admin: Reset All Votes ---
+app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const client = await pool.connect();
+  try {
+      await client.query('BEGIN');
+      // Delete all votes
+      await client.query('TRUNCATE TABLE votes');
+      // Reset all scores to 0
+      await client.query('UPDATE problems SET score = 0');
+      await client.query('COMMIT');
+      res.json({ success: true });
+  } catch (e) {
+      await client.query('ROLLBACK');
+      console.error(e);
+      res.status(500).json({ error: 'Reset failed' });
+  } finally {
+      client.release();
+  }
+});
+
 // --- Routes: Quotas ---
 
 app.get('/api/quotas', authenticateToken, async (req, res) => {
-  const result = await pool.query('SELECT id, name, target_count as target, instructions, due_date FROM quotas');
+  // Update query to fetch vote_target
+  const result = await pool.query('SELECT id, name, target_count as target, vote_target, instructions, due_date FROM quotas');
   const quotas = result.rows.map(q => ({
-      ...q,
+      id: q.id,
+      name: q.name,
+      target: q.target,
+      voteTarget: q.vote_target || 3, // Default fallback
+      instructions: q.instructions,
       dueDate: q.due_date ? new Date(q.due_date).getTime() : null
   }));
   res.json(quotas);
@@ -514,19 +557,21 @@ app.get('/api/quotas', authenticateToken, async (req, res) => {
 app.post('/api/quotas', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
-  const { name, target, instructions, dueDate } = req.body;
+  const { name, target, voteTarget, instructions, dueDate } = req.body;
   
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const vt = voteTarget || 3;
     const result = await pool.query(
-      'INSERT INTO quotas (name, target_count, instructions, due_date) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, target, instructions, dateVal]
+      'INSERT INTO quotas (name, target_count, vote_target, instructions, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, target, vt, instructions, dateVal]
     );
     const row = result.rows[0];
     res.json({
         id: row.id,
         name: row.name,
         target: row.target_count,
+        voteTarget: row.vote_target,
         instructions: row.instructions,
         dueDate: row.due_date ? new Date(row.due_date).getTime() : null
     });
@@ -539,18 +584,20 @@ app.post('/api/quotas', authenticateToken, async (req, res) => {
 app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   const { id } = req.params;
-  const { name, target, instructions, dueDate } = req.body;
+  const { name, target, voteTarget, instructions, dueDate } = req.body;
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const vt = voteTarget || 3;
     const result = await pool.query(
-      'UPDATE quotas SET name = $1, target_count = $2, instructions = $3, due_date = $4 WHERE id = $5 RETURNING *',
-      [name, target, instructions, dateVal, id]
+      'UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5 WHERE id = $6 RETURNING *',
+      [name, target, vt, instructions, dateVal, id]
     );
     const row = result.rows[0];
     res.json({
         id: row.id,
         name: row.name,
         target: row.target_count,
+        voteTarget: row.vote_target,
         instructions: row.instructions,
         dueDate: row.due_date ? new Date(row.due_date).getTime() : null
     });
