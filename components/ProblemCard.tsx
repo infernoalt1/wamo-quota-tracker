@@ -209,7 +209,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
             <div className="border-t border-slate-100 p-6 md:p-8 bg-slate-50/30 animate-in slide-in-from-top-2 duration-200">
                  <div className="grid md:grid-cols-2 gap-8 mb-8">
                      <div>
-                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Solution</h4>
+                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Solution Outline</h4>
                          {problem.solution ? (
                              <MathText text={problem.solution} className="bg-white p-4 rounded-xl border border-slate-200 text-slate-800 text-sm whitespace-pre-wrap font-serif shadow-sm" />
                          ) : (
@@ -220,11 +220,6 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Answer Key</h4>
                          <div className="bg-white p-4 rounded-xl border border-slate-200 text-slate-900 font-bold font-mono shadow-sm">
                              {problem.answerKey || <span className="text-slate-400 font-normal italic">None</span>}
-                         </div>
-                         
-                         <div className="mt-6 flex gap-4 text-sm text-slate-600">
-                             <div><span className="font-bold text-slate-800">{problem.estimatedTime}</span> min</div>
-                             <div><span className="font-bold text-slate-800">{problem.points}</span> pts</div>
                          </div>
                      </div>
                  </div>

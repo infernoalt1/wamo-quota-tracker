@@ -45,7 +45,8 @@ import {
   GripVertical,
   ChevronDown,
   ChevronUp,
-  MessageSquare
+  MessageSquare,
+  BarChart2
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -70,6 +71,68 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
 );
 
 const TOPICS: Topic[] = ['Algebra', 'Geometry', 'Combinatorics', 'Number Theory'];
+
+const AOPS_SCALE_INFO = (
+    <div className="text-xs text-slate-500 space-y-2 mt-2 bg-slate-100 p-3 rounded-xl border border-slate-200">
+        <p className="font-bold text-slate-700">AoPS Competition Ratings Scale (Estimate)</p>
+        <p>1: Beginner/School Level (MOEMS, AMC 8 1-10)</p>
+        <p>1.5: Strong Beginner (AMC 8 11-20, Harder AMC 10 1-10)</p>
+        <p>2: Motivated Beginner (AMC 8 21-25, AMC 10 11-15, MATHCOUNTS Chapter)</p>
+        <p>2.5: Advanced Beginner (AMC 10 16-20, AIME 1-3)</p>
+        <p>3: Early Intermediate (MATHCOUNTS National, AMC 10 21-25, AIME 1-6)</p>
+        <p>4: Intermediate (AMC 12 21-25, AIME 4-10)</p>
+        <p>5: Difficult AIME (11-13), Simple Proofs (USAJMO 1/4)</p>
+        <p>6: High AIME (14-15), Intro Olympiad (USAJMO 2/5, Easy USAMO)</p>
+        <p>7: Tough Olympiad (Hard USAJMO, Easy/Med USAMO 1/2/4/5)</p>
+        <p>8: High Olympiad (Med/Hard USAMO 2/5)</p>
+        <p>9: Expert (USAMO 3/6)</p>
+        <p>9.5-10: World Class / Historically Hard</p>
+    </div>
+);
+
+// --- Simple Line Chart Component for Difficulty ---
+const DifficultyGraph = ({ problems }: { problems: Problem[] }) => {
+    if (problems.length === 0) return null;
+    const maxDiff = 10;
+    const height = 60;
+    const width = 100;
+    
+    // Create points string "x,y x,y"
+    // x normalized to 0-100, y normalized to 0-height (inverted since SVG 0 is top)
+    const points = problems.map((p, i) => {
+        const x = (i / (problems.length - 1 || 1)) * width;
+        const y = height - (Math.min(p.difficulty, maxDiff) / maxDiff) * height;
+        return `${x},${y}`;
+    }).join(' ');
+
+    return (
+        <div className="w-full h-24 bg-white rounded-lg border border-slate-200 p-2 relative overflow-hidden">
+            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                 {/* Grid lines */}
+                 <line x1="0" y1={height/2} x2={width} y2={height/2} stroke="#f1f5f9" strokeWidth="0.5" />
+                 
+                 {/* Area under curve */}
+                 <path d={`M0,${height} L0,${height} ${points} L${width},${height} Z`} fill="rgba(99, 102, 241, 0.1)" />
+                 
+                 {/* Line */}
+                 <polyline points={points} fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                 
+                 {/* Dots */}
+                 {problems.map((p, i) => {
+                     const x = (i / (problems.length - 1 || 1)) * width;
+                     const y = height - (Math.min(p.difficulty, maxDiff) / maxDiff) * height;
+                     return (
+                         <circle key={i} cx={x} cy={y} r="2" fill="#fff" stroke="#6366f1" strokeWidth="1" vectorEffect="non-scaling-stroke">
+                             <title>Problem {i+1}: {p.difficulty}</title>
+                         </circle>
+                     );
+                 })}
+            </svg>
+            <div className="absolute top-0 right-0 text-[9px] text-slate-400 bg-white/80 px-1 rounded">Max 10</div>
+            <div className="absolute bottom-0 left-0 text-[9px] text-slate-400 bg-white/80 px-1 rounded">Problem 1</div>
+        </div>
+    );
+};
 
 export default function App() {
   // --- Global State ---
@@ -98,9 +161,8 @@ export default function App() {
   const [statement, setStatement] = useState('');
   const [solution, setSolution] = useState('');
   const [answerKey, setAnswerKey] = useState('');
-  const [estimatedTime, setEstimatedTime] = useState<number>(5);
-  const [points, setPoints] = useState<number>(5);
   const [difficulty, setDifficulty] = useState<string>('3.0');
+  const [showRatingScale, setShowRatingScale] = useState(false);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
@@ -309,6 +371,13 @@ export default function App() {
       setPoolIds(filtered.map(p => p.id));
     }
   }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota]); 
+  
+  // Set Composer default filter when opening view
+  useEffect(() => {
+      if (view === 'composer') {
+          setComposerSourceQuota(activeQuotaId);
+      }
+  }, [view, activeQuotaId]);
 
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
@@ -495,8 +564,6 @@ export default function App() {
     setStatement('');
     setSolution('');
     setAnswerKey('');
-    setEstimatedTime(5);
-    setPoints(5);
     setDifficulty('3.0');
     setSelectedTopics([]);
     setImageData(null);
@@ -513,8 +580,6 @@ export default function App() {
       setStatement(prob.statement);
       setSolution(prob.solution || '');
       setAnswerKey(prob.answerKey || '');
-      setEstimatedTime(prob.estimatedTime || 5);
-      setPoints(prob.points || 5);
       setDifficulty(prob.difficulty.toString());
       setSelectedTopics(prob.topics || []);
       setImageData(prob.imageData || null);
@@ -561,8 +626,6 @@ export default function App() {
           statement,
           solution,
           answerKey,
-          estimatedTime,
-          points,
           difficulty: parseFloat(difficulty),
           topics: selectedTopics,
           quotaId: activeQuotaId,
@@ -673,6 +736,19 @@ export default function App() {
         console.error("Failed to update status");
      }
   };
+  
+  // Inline Update in Composer
+  const handleComposerUpdate = async (problemId: string, updates: Partial<Problem>) => {
+      // Optimistic
+      const updatedProblems = problems.map(p => p.id === problemId ? { ...p, ...updates } : p);
+      setProblems(updatedProblems);
+      try {
+          await api.updateProblem(problemId, updates);
+      } catch(e) {
+          console.error("Composer update failed");
+          refreshData(); // Revert
+      }
+  };
 
   // Composer Actions
   const handleAddToRound = async (problem: Problem) => {
@@ -715,41 +791,21 @@ export default function App() {
   const handleDragStart = (e: React.DragEvent, index: number) => {
       setDraggedItemIndex(index);
       e.dataTransfer.effectAllowed = 'move';
-      // Fallback for drag image visibility
-      const el = e.currentTarget as HTMLElement;
-      el.style.opacity = '0.5';
+      // Styling for drag ghost if needed
+  };
+  
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+       // Smoother visual reordering logic would go here (swapping in a temp state)
+       // For now we stick to drop based reorder to prevent state thrashing without a lib
   };
 
   const handleDragEnd = (e: React.DragEvent) => {
       setDraggedItemIndex(null);
-      const el = e.currentTarget as HTMLElement;
-      el.style.opacity = '1';
   };
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      
-      if (draggedItemIndex === null || draggedItemIndex === index) return;
-
-      // Reorder locally in composerAccepted array logic (needs to affect state)
-      // This is tricky because composerAccepted is derived. We need to update `problems` state orderIndex.
-      const accepted = problems
-        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
-        
-      const newOrder = [...accepted];
-      const draggedItem = newOrder[draggedItemIndex];
-      newOrder.splice(draggedItemIndex, 1);
-      newOrder.splice(index, 0, draggedItem);
-      
-      // Update problems state with new indices
-      // Optimization: Debounce this or just do it? React is fast enough usually.
-      // To avoid flicker we need to be careful.
-      // Let's just update `draggedItemIndex` to `index` logically in a separate state if we want smooth animation, 
-      // but simpler is to just commit on Drop.
-      // For standard HTML5 DnD list reordering, it's often better to update only on Drop or use a library.
-      // I will update on Drop to keep it stable.
   };
 
   const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
@@ -828,6 +884,130 @@ export default function App() {
   };
 
   // --- Component Logic ---
+  
+  // Helper for Composer Item
+  const ComposerItem = ({ problem, isAccepted, index }: { problem: Problem, isAccepted: boolean, index?: number }) => {
+      const [expanded, setExpanded] = useState(false);
+      const [editMode, setEditMode] = useState(false);
+      const [localStatement, setLocalStatement] = useState(problem.statement);
+
+      const saveEdit = () => {
+          if (localStatement !== problem.statement) {
+              handleComposerUpdate(problem.id, { statement: localStatement });
+          }
+          setEditMode(false);
+      };
+
+      return (
+        <div 
+          className={`bg-white border rounded-xl transition-all duration-200 shadow-sm ${
+              isAccepted ? 'border-indigo-100 hover:border-indigo-300' : 'border-slate-200 hover:border-slate-300'
+          } ${draggedItemIndex === index ? 'opacity-50 scale-95' : 'opacity-100'}`}
+          draggable={isAccepted}
+          onDragStart={isAccepted && index !== undefined ? (e) => handleDragStart(e, index) : undefined}
+          onDragEnd={isAccepted ? handleDragEnd : undefined}
+          onDragOver={isAccepted && index !== undefined ? (e) => handleDragOver(e, index) : undefined}
+          onDrop={isAccepted && index !== undefined ? (e) => handleDrop(e, index) : undefined}
+        >
+            <div className="p-3 flex items-start gap-3">
+                {isAccepted && (
+                    <div className="mt-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500">
+                        <GripVertical className="w-4 h-4" />
+                    </div>
+                )}
+                {isAccepted && (
+                    <div className="font-mono font-bold text-indigo-400 text-sm mt-1 w-5">{index! + 1}.</div>
+                )}
+                
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => !editMode && setExpanded(!expanded)}>
+                    <div className="flex justify-between items-start">
+                        <h4 className="font-bold text-slate-900 text-sm leading-tight hover:text-indigo-600 transition-colors">
+                            <MathText text={problem.title} />
+                        </h4>
+                        <span className="ml-2 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded whitespace-nowrap">
+                            Diff: {problem.difficulty}
+                        </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                        <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
+                        {problem.score > 0 && (
+                            <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
+                                <ThumbsUp className="w-3 h-3"/> {problem.score}
+                            </span>
+                        )}
+                        <span className="flex items-center gap-0.5 text-slate-400">
+                             <MessageSquare className="w-3 h-3" /> {problem.commentCount}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                    <button 
+                       onClick={() => isAccepted ? handleRemoveFromRound(problem) : handleAddToRound(problem)}
+                       className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
+                           isAccepted 
+                           ? 'hover:bg-red-50 text-slate-300 hover:text-red-500' 
+                           : 'hover:bg-indigo-50 text-slate-300 hover:text-indigo-600 bg-slate-50'
+                       }`}
+                       title={isAccepted ? "Remove from Round" : "Add to Round"}
+                    >
+                        {isAccepted ? <X className="w-4 h-4"/> : <ArrowRight className="w-4 h-4"/>}
+                    </button>
+                    <button onClick={() => setExpanded(!expanded)} className="text-slate-300 hover:text-slate-500">
+                        {expanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
+                    </button>
+                </div>
+            </div>
+
+            {(expanded || editMode) && (
+                <div className="border-t border-slate-100 p-3 bg-slate-50/50 text-sm animate-in slide-in-from-top-1">
+                    {editMode ? (
+                        <div className="mb-3">
+                            <textarea 
+                                className="w-full p-2 border border-indigo-300 rounded-lg text-sm font-mono h-32 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                value={localStatement}
+                                onChange={e => setLocalStatement(e.target.value)}
+                            />
+                            <div className="flex justify-end gap-2 mt-2">
+                                <Button size="sm" variant="ghost" onClick={() => { setEditMode(false); setLocalStatement(problem.statement); }}>Cancel</Button>
+                                <Button size="sm" onClick={saveEdit}>Save</Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="relative group/latex">
+                            <MathText text={problem.statement} className="text-slate-700 whitespace-pre-wrap font-serif mb-3" />
+                            {isAccepted && (
+                                <button 
+                                    onClick={() => { setEditMode(true); setLocalStatement(problem.statement); }}
+                                    className="absolute top-0 right-0 p-1 bg-white border border-slate-200 rounded shadow-sm opacity-0 group-hover/latex:opacity-100 transition-opacity text-slate-400 hover:text-indigo-600"
+                                    title="Edit LaTeX"
+                                >
+                                    <Pencil className="w-3 h-3" />
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    
+                    {problem.imageData && (
+                        <img src={problem.imageData} alt="Problem attachment" className="max-h-48 w-auto mb-3 object-contain border border-slate-200 rounded bg-white" />
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                         <div className="bg-white p-2 rounded border border-slate-200">
+                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Solution Outline</span>
+                             <div className="max-h-32 overflow-y-auto custom-scrollbar">
+                                <MathText text={problem.solution || 'None'} className="text-xs" />
+                             </div>
+                         </div>
+                         <div className="bg-white p-2 rounded border border-slate-200 h-fit">
+                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
+                             <div className="font-mono font-bold text-slate-800">{problem.answerKey || '-'}</div>
+                         </div>
+                    </div>
+                </div>
+            )}
+        </div>
+      );
+  };
 
   if (!currentUser) {
     return (
@@ -962,93 +1142,6 @@ export default function App() {
   composerAccepted.forEach(p => {
       p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
   });
-
-  // Helper for Composer Item
-  const ComposerItem = ({ problem, isAccepted, index }: { problem: Problem, isAccepted: boolean, index?: number }) => {
-      const [expanded, setExpanded] = useState(false);
-      
-      return (
-        <div 
-          className={`bg-white border rounded-xl transition-all shadow-sm ${isAccepted ? 'border-indigo-100 hover:border-indigo-300' : 'border-slate-200 hover:border-slate-300'}`}
-          draggable={isAccepted}
-          onDragStart={isAccepted && index !== undefined ? (e) => handleDragStart(e, index) : undefined}
-          onDragEnd={isAccepted ? handleDragEnd : undefined}
-          onDragOver={isAccepted && index !== undefined ? (e) => handleDragOver(e, index) : undefined}
-          onDrop={isAccepted && index !== undefined ? (e) => handleDrop(e, index) : undefined}
-        >
-            <div className="p-3 flex items-start gap-3">
-                {isAccepted && (
-                    <div className="mt-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500">
-                        <GripVertical className="w-4 h-4" />
-                    </div>
-                )}
-                {isAccepted && (
-                    <div className="font-mono font-bold text-indigo-400 text-sm mt-1 w-5">{index! + 1}.</div>
-                )}
-                
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-                    <div className="flex justify-between items-start">
-                        <h4 className="font-bold text-slate-900 text-sm leading-tight hover:text-indigo-600 transition-colors">
-                            <MathText text={problem.title} />
-                        </h4>
-                        <span className="ml-2 text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded whitespace-nowrap">
-                            Diff: {problem.difficulty}
-                        </span>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
-                        <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
-                        {problem.score > 0 && (
-                            <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
-                                <ThumbsUp className="w-3 h-3"/> {problem.score}
-                            </span>
-                        )}
-                        <span className="flex items-center gap-0.5 text-slate-400">
-                             <MessageSquare className="w-3 h-3" /> {problem.commentCount}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                    <button 
-                       onClick={() => isAccepted ? handleRemoveFromRound(problem) : handleAddToRound(problem)}
-                       className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
-                           isAccepted 
-                           ? 'hover:bg-red-50 text-slate-300 hover:text-red-500' 
-                           : 'hover:bg-indigo-50 text-slate-300 hover:text-indigo-600 bg-slate-50'
-                       }`}
-                       title={isAccepted ? "Remove from Round" : "Add to Round"}
-                    >
-                        {isAccepted ? <X className="w-4 h-4"/> : <ArrowRight className="w-4 h-4"/>}
-                    </button>
-                    <button onClick={() => setExpanded(!expanded)} className="text-slate-300 hover:text-slate-500">
-                        {expanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
-                    </button>
-                </div>
-            </div>
-
-            {expanded && (
-                <div className="border-t border-slate-100 p-3 bg-slate-50/50 text-sm animate-in slide-in-from-top-1">
-                    <MathText text={problem.statement} className="text-slate-700 whitespace-pre-wrap font-serif mb-3" />
-                    {problem.imageData && (
-                        <img src={problem.imageData} alt="Problem attachment" className="max-h-48 w-auto mb-3 object-contain border border-slate-200 rounded bg-white" />
-                    )}
-                    <div className="grid grid-cols-2 gap-3">
-                         <div className="bg-white p-2 rounded border border-slate-200">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Solution</span>
-                             <div className="max-h-32 overflow-y-auto custom-scrollbar">
-                                <MathText text={problem.solution || 'None'} className="text-xs" />
-                             </div>
-                         </div>
-                         <div className="bg-white p-2 rounded border border-slate-200 h-fit">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
-                             <div className="font-mono font-bold text-slate-800">{problem.answerKey || '-'}</div>
-                         </div>
-                    </div>
-                </div>
-            )}
-        </div>
-      );
-  };
 
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
@@ -1350,6 +1443,10 @@ export default function App() {
                                 <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-600'}>{t.substring(0,3)}: {c}</span>
                             ))}
                         </div>
+                        {/* Graph */}
+                        <div className="mt-1">
+                            <DifficultyGraph problems={composerAccepted} />
+                        </div>
                     </div>
                     
                     <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-50/30">
@@ -1477,12 +1574,16 @@ export default function App() {
                                 type="number" 
                                 step="0.1"
                                 min="0"
-                                max="50"
+                                max="10"
                                 value={difficulty}
                                 onChange={(e) => setDifficulty(e.target.value)}
                                 className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
                             />
                         </div>
+                        <button onClick={() => setShowRatingScale(!showRatingScale)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
+                            <Info className="w-3 h-3" /> View Rating Scale
+                        </button>
+                        {showRatingScale && AOPS_SCALE_INFO}
                     </div>
                     <div className="space-y-3">
                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
@@ -1500,18 +1601,6 @@ export default function App() {
                             ))}
                         </div>
                     </div>
-                </div>
-
-                {/* Logistics */}
-                <div className="grid md:grid-cols-2 gap-8">
-                     <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Est. Time (Min)</label>
-                        <input type="number" value={estimatedTime} onChange={e => setEstimatedTime(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                     </div>
-                     <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Points</label>
-                        <input type="number" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                     </div>
                 </div>
 
                 {/* Statement */}
@@ -1553,7 +1642,7 @@ export default function App() {
                 {/* Solution & Answer */}
                 <div className="grid md:grid-cols-2 gap-8">
                      <div className="space-y-3">
-                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Full Solution (LaTeX)</label>
+                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Solution Outline (LaTeX)</label>
                          <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif" placeholder="Proof or derivation..."/>
                      </div>
                      <div className="space-y-3">

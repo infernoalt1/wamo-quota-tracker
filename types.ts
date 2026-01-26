@@ -33,8 +33,6 @@ export interface Problem {
   statement: string;
   solution?: string; // New: Full LaTeX solution
   answerKey?: string; // New: Short answer for grading
-  estimatedTime?: number; // New: In minutes
-  points?: number; // New: Point value
   imageData?: string; // Base64 image data
   difficulty: number;
   topics: Topic[];

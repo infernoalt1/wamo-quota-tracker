@@ -69,8 +69,6 @@ const initDB = async () => {
         statement TEXT NOT NULL,
         solution TEXT,
         answer_key TEXT,
-        estimated_time INTEGER DEFAULT 0,
-        points INTEGER DEFAULT 0,
         image_data TEXT,
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
@@ -107,8 +105,6 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS solution TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS answer_key TEXT;
-      ALTER TABLE problems ADD COLUMN IF NOT EXISTS estimated_time INTEGER DEFAULT 0;
-      ALTER TABLE problems ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
       
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
@@ -432,8 +428,6 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       imageData: row.image_data,
       solution: row.solution,
       answerKey: row.answer_key,
-      estimatedTime: row.estimated_time,
-      points: row.points,
       version: row.version,
       commentCount: parseInt(row.comment_count || '0')
     }));
@@ -447,13 +441,13 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
-    const { title, statement, quotaId, difficulty, topics, imageData, solution, answerKey, points, estimatedTime } = req.body;
+    const { title, statement, quotaId, difficulty, topics, imageData, solution, answerKey } = req.body;
     
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
     const result = await pool.query(
-      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, points, estimated_time, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1) RETURNING *',
-      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData, solution, answerKey, points || 0, estimatedTime || 0]
+      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1) RETURNING *',
+      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData, solution, answerKey]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -465,7 +459,7 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { title, statement, difficulty, topics, imageData, solution, answerKey, points, estimatedTime, version } = req.body;
+  const { title, statement, difficulty, topics, imageData, solution, answerKey, version } = req.body;
   const userId = req.user.id;
   const userRole = req.user.role;
 
@@ -485,10 +479,10 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     // We update only if the version matches. If rows affected is 0, it means the version changed (or deleted).
     const result = await pool.query(
       `UPDATE problems 
-       SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5, solution = $6, answer_key = $7, points = $8, estimated_time = $9, version = version + 1 
-       WHERE id = $10 AND version = $11 
+       SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5, solution = $6, answer_key = $7, version = version + 1 
+       WHERE id = $8 AND version = $9 
        RETURNING *`,
-      [title, statement, diffVal, topics, imageData, solution, answerKey, points, estimatedTime, id, version]
+      [title, statement, diffVal, topics, imageData, solution, answerKey, id, version]
     );
 
     if (result.rows.length === 0) {
@@ -552,9 +546,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
                 solution: solution,
                 answerKey: answer,
                 topics: defaultTopics || [],
-                difficulty: defaultDifficulty || 3,
-                estimatedTime: 5,
-                points: 5
+                difficulty: defaultDifficulty || 3
             });
         }
 
@@ -573,9 +565,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
                             solution: solution,
                             answerKey: answer,
                             topics: defaultTopics || [],
-                            difficulty: defaultDifficulty || 3,
-                            estimatedTime: 5,
-                            points: 5
+                            difficulty: defaultDifficulty || 3
                         });
                     }
                 });
