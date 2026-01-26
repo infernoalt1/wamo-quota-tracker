@@ -88,7 +88,7 @@ export default function App() {
   const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
-  const [difficulty, setDifficulty] = useState<string>('3.0');
+  const [difficulty, setDifficulty] = useState<string>('');
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
@@ -697,7 +697,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Difficulty</label>
-                        <input type="number" step="0.1" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 outline-none text-sm focus:border-indigo-500" />
+                        <input type="number" step="0.1" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 outline-none text-sm focus:border-indigo-500" placeholder="0.0"/>
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Topics</label>
@@ -729,7 +729,7 @@ export default function App() {
                       {isVerified && <BadgeCheck className="w-3 h-3 text-white" />}
                    </div>
                    <span className="text-xs font-medium text-slate-700 select-none">
-                       {isGuest ? "I agree to usage rights." : "I verified this problem."}
+                       {isGuest ? "I grant WAMO full rights to use, reproduce, and distribute this submission, and agree not to share it outside the organization." : "I have verified that this problem is correct, solvable, and meets all submission standards."}
                    </span>
                 </div>
                 <div className="flex justify-end pt-2 border-t border-slate-100">
