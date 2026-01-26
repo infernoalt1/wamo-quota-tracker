@@ -23,19 +23,21 @@ export interface Problem {
   quotaId: string;    // Crucial for tracking which round this belongs to
   title: string;
   statement: string;
+  imageData?: string; // Base64 image data
   difficulty: number;
   topics: Topic[];
   createdAt: number;
   score: number;
   votedBy: string[]; // User IDs who have voted
   status: ProblemStatus;
+  orderIndex: number; // New: For ordering in the final round
 }
 
 export interface User {
   id: string;
   name: string;
   password: string; // Stored locally for this app version
-  role: 'admin' | 'director' | 'writer';
+  role: 'admin' | 'director' | 'writer' | 'guest';
   submittedCount: number; // Dynamic count based on active quota
   voteCount: number;      // Dynamic count of votes cast in active quota
   votingPower: number;

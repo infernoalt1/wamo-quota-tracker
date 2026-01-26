@@ -34,7 +34,13 @@ import {
   CheckCircle,
   Crown,
   ThumbsUp,
-  ChevronRight
+  ChevronRight,
+  User as UserIcon,
+  Image as ImageIcon,
+  LayoutList,
+  ArrowRight,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -49,7 +55,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
       active
-        ? 'bg-indigo-50 text-indigo-700 font-bold'
+        ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm'
         : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900 font-medium'
     }`}
   >
@@ -69,7 +75,7 @@ export default function App() {
 
   // --- Session State ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [view, setView] = useState<'dashboard' | 'pool' | 'submit' | 'admin'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'pool' | 'submit' | 'admin' | 'composer'>('dashboard');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   
@@ -86,6 +92,7 @@ export default function App() {
   const [statement, setStatement] = useState('');
   const [difficulty, setDifficulty] = useState<string>('3.0');
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
+  const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
@@ -114,9 +121,13 @@ export default function App() {
   const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
   const [poolFilterTopic, setPoolFilterTopic] = useState<string>('All');
   const [poolFilterStatus, setPoolFilterStatus] = useState<string>('All');
+  const [poolFilterQuota, setPoolFilterQuota] = useState<string>('All');
   const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<number>(0);
   const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<number>(10);
   const [poolIds, setPoolIds] = useState<string[]>([]);
+
+  // Composer State
+  const [composerFilterTopic, setComposerFilterTopic] = useState<string>('All');
 
   // --- Initial Load ---
   useEffect(() => {
@@ -144,10 +155,17 @@ export default function App() {
             const me = await api.getMe();
             setCurrentUser(me);
             
-            // Set active quota if saved
-            const savedQ = localStorage.getItem('probfair_active_quota_id');
-            if (savedQ) setActiveQuotaId(savedQ);
-
+            // If guest, only show submit view
+            if (me.role === 'guest') {
+                setView('submit');
+            } else {
+                // Set active quota if saved
+                const savedQ = localStorage.getItem('probfair_active_quota_id');
+                if (savedQ) {
+                   setActiveQuotaId(savedQ);
+                   setPoolFilterQuota(savedQ);
+                }
+            }
         } catch(e) {
             // Token invalid
             console.log("Session invalid or expired");
@@ -158,6 +176,19 @@ export default function App() {
 
   // --- Data Sync ---
   const refreshData = async () => {
+      // Guests don't sync heavy data
+      if (currentUser?.role === 'guest') {
+          try {
+             const q = await api.getQuotas();
+             setQuotas(q);
+             // Always default to active
+             if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
+                setActiveQuotaId(q[0].id);
+             }
+          } catch(e) {}
+          return;
+      }
+
       setIsLoadingData(true);
       try {
           const [u, p, q] = await Promise.all([
@@ -172,6 +203,8 @@ export default function App() {
           // Ensure active quota ID is valid
           if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
              setActiveQuotaId(q[0].id);
+             // Also update the filter if it was set to the invalid ID
+             if (poolFilterQuota === activeQuotaId) setPoolFilterQuota(q[0].id);
           }
       } catch (e) {
           console.error("Failed to refresh data", e);
@@ -189,6 +222,8 @@ export default function App() {
   // Update Users submitted & voted count locally based on ACTIVE QUOTA
   // This logic runs client side to keep UI snappy
   useEffect(() => {
+    if (currentUser?.role === 'guest') return;
+
     if (problems.length >= 0 && users.length > 0) {
       const activeProblems = problems.filter(p => p.quotaId === activeQuotaId);
       
@@ -209,6 +244,11 @@ export default function App() {
   useEffect(() => {
     if (view === 'pool') {
       let filtered = [...problems];
+
+      // Filter by Quota
+      if (poolFilterQuota !== 'All') {
+          filtered = filtered.filter(p => p.quotaId === poolFilterQuota);
+      }
 
       // Filter by Topic
       if (poolFilterTopic !== 'All') {
@@ -248,7 +288,7 @@ export default function App() {
 
       setPoolIds(filtered.map(p => p.id));
     }
-  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax]); 
+  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota]); 
 
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
@@ -261,11 +301,26 @@ export default function App() {
         setLoginError('');
         const { user } = await api.login(selectedLoginId, loginPassword);
         setCurrentUser(user);
-        setView('dashboard');
+        if (user.role === 'guest') {
+            setView('submit');
+        } else {
+            setView('dashboard');
+        }
         setLoginPassword('');
         setSelectedLoginId('');
     } catch (e) {
         setLoginError('Incorrect password or user');
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    try {
+        setLoginError('');
+        const { user } = await api.guestLogin();
+        setCurrentUser(user);
+        setView('submit');
+    } catch (e) {
+        setLoginError('Guest login failed.');
     }
   };
 
@@ -326,6 +381,7 @@ export default function App() {
 
   const switchQuota = (id: string) => {
     setActiveQuotaId(id);
+    setPoolFilterQuota(id); // Auto-filter pool to the new active quota for convenience
     localStorage.setItem('probfair_active_quota_id', id);
   };
 
@@ -421,6 +477,7 @@ export default function App() {
     setStatement('');
     setDifficulty('3.0');
     setSelectedTopics([]);
+    setImageData(null);
     setIsVerified(false);
     setEditingProblemId(null);
     setSubmissionError(null);
@@ -433,6 +490,7 @@ export default function App() {
       setStatement(prob.statement);
       setDifficulty(prob.difficulty.toString());
       setSelectedTopics(prob.topics || []);
+      setImageData(prob.imageData || null);
       setIsVerified(true); // Auto-verify on edit since it's already there
       setView('submit');
   };
@@ -445,23 +503,19 @@ export default function App() {
       }
   };
 
-  const handleAiAnalyze = async () => {
-     if (!statement) return;
-     setIsAnalyzing(true);
-     setAiAnalysis(null);
-     try {
-       const result = await api.analyzeProblem({
-         title: title || 'Untitled',
-         statement,
-         difficulty: parseFloat(difficulty)
-       });
-       setAiAnalysis(result);
-     } catch(e) {
-       console.error(e);
-       setAiAnalysis("Could not reach AI service. Please try again.");
-     } finally {
-       setIsAnalyzing(false);
-     }
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit check on client for UX
+          alert("File is too large. Please use an image under 2MB.");
+          return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageData(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmit = async () => {
@@ -480,7 +534,8 @@ export default function App() {
           statement,
           difficulty: parseFloat(difficulty),
           topics: selectedTopics,
-          quotaId: activeQuotaId
+          quotaId: activeQuotaId,
+          imageData: imageData || undefined
       };
 
       if (editingProblemId) {
@@ -493,9 +548,15 @@ export default function App() {
           });
       }
       
-      await refreshData();
-      resetForm();
-      setView('dashboard');
+      // If guest, do not refresh data or change view heavily
+      if (currentUser.role === 'guest') {
+          alert("Thank you! Your problem has been submitted for review.");
+          resetForm();
+      } else {
+          await refreshData();
+          resetForm();
+          setView('dashboard');
+      }
     } catch (e: any) {
       setSubmissionError(e.message || "System error during validation.");
     } finally {
@@ -504,7 +565,7 @@ export default function App() {
   };
 
   const handleToggleVote = async (problemId: string) => {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.role === 'guest') return;
     
     const oldProblems = [...problems];
     const updatedProblems = problems.map(p => {
@@ -547,9 +608,89 @@ export default function App() {
      }
   };
 
+  // Composer Actions
+  const handleAddToRound = async (problem: Problem) => {
+      // Add to end of accepted list
+      const accepted = problems.filter(p => p.quotaId === activeQuotaId && p.status === 'accepted');
+      // Optimistic
+      const updatedProblems = problems.map(p => {
+          if (p.id === problem.id) {
+              return { ...p, status: 'accepted', orderIndex: accepted.length } as Problem;
+          }
+          return p;
+      });
+      setProblems(updatedProblems);
+      
+      // We will just batch reorder everything to be safe and save to DB
+      const newRoundIds = [...accepted.map(p => p.id), problem.id];
+      try {
+          await api.reorderRound(newRoundIds);
+      } catch(e) {
+          console.error("Add to round failed");
+          refreshData(); // Revert on error
+      }
+  };
+
+  const handleRemoveFromRound = async (problem: Problem) => {
+      // Optimistic
+      const updatedProblems = problems.map(p => {
+          if (p.id === problem.id) return { ...p, status: 'shortlisted' } as Problem;
+          return p;
+      });
+      setProblems(updatedProblems);
+
+      // We only need to update status of this one, but reordering others might be good.
+      // For simplicity, just update status. The gaps in order_index don't break sorting.
+      try {
+          await api.updateProblemStatus(problem.id, 'shortlisted');
+      } catch(e) {
+          refreshData();
+      }
+  };
+
+  const handleReorder = async (index: number, direction: 'up' | 'down') => {
+      const accepted = problems
+        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+        .sort((a,b) => a.orderIndex - b.orderIndex);
+      
+      if (direction === 'up' && index > 0) {
+          const temp = accepted[index];
+          accepted[index] = accepted[index-1];
+          accepted[index-1] = temp;
+      } else if (direction === 'down' && index < accepted.length - 1) {
+          const temp = accepted[index];
+          accepted[index] = accepted[index+1];
+          accepted[index+1] = temp;
+      } else {
+          return;
+      }
+
+      // Optimistic update of state
+      const newOrderIds = accepted.map(p => p.id);
+      const updatedProblems = problems.map(p => {
+         const newIndex = newOrderIds.indexOf(p.id);
+         if (newIndex !== -1) {
+             return { ...p, orderIndex: newIndex };
+         }
+         return p;
+      });
+      setProblems(updatedProblems);
+
+      // Save
+      try {
+          await api.reorderRound(newOrderIds);
+      } catch(e) {
+          refreshData();
+      }
+  };
+
   const handleExportLatex = () => {
-      // Very basic LaTeX export
-      const activeProblems = problems.filter(p => p.quotaId === activeQuotaId);
+      // Basic LaTeX export
+      // Sort by orderIndex for the final document
+      const activeProblems = problems
+        .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+        .sort((a,b) => a.orderIndex - b.orderIndex);
+
       let tex = `\\documentclass{article}
 \\usepackage{amsmath}
 \\usepackage{amssymb}
@@ -561,7 +702,7 @@ export default function App() {
 \\begin{document}
 \\maketitle
 
-\\section*{Problems}
+\\section*{Contest Problems}
 \\begin{enumerate}
 `;
 
@@ -602,7 +743,7 @@ export default function App() {
           <p className="text-gray-500 mb-8 text-center text-sm">Middle School Math Contest Portal</p>
           
           {!selectedLoginId ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
                <div className="flex items-center justify-between px-1">
                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Select User</p>
                  {usersError && (
@@ -612,24 +753,14 @@ export default function App() {
                  )}
                </div>
                
-               <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+               <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                   {usersLoading && users.length === 0 && <div className="text-sm text-gray-400 italic p-4 text-center">Loading users...</div>}
                   
-                  {usersError && users.length === 0 && (
-                      <div className="bg-red-50 text-red-600 text-sm p-4 rounded-xl flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 shrink-0" />
-                          <div>
-                            <p className="font-semibold">Connection Error</p>
-                            <p className="text-xs mt-1 text-red-500 opacity-90">Backend server is unreachable.</p>
-                          </div>
-                      </div>
-                  )}
-
                   {users.map(user => (
                     <button
                       key={user.id}
                       onClick={() => setSelectedLoginId(user.id)}
-                      className="w-full p-3.5 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
+                      className="w-full p-3 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
                     >
                       <span className="font-semibold text-gray-700 group-hover:text-indigo-700">{user.name}</span>
                       <div className="flex gap-2">
@@ -639,6 +770,12 @@ export default function App() {
                       </div>
                     </button>
                   ))}
+               </div>
+
+               <div className="pt-2 border-t border-slate-100">
+                  <Button variant="secondary" onClick={handleGuestLogin} className="w-full text-sm py-2.5">
+                    Continue as Guest
+                  </Button>
                </div>
             </div>
           ) : (
@@ -685,52 +822,87 @@ export default function App() {
 
   // Count only for active quota
   const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
-  // Count votes
+  // Count votes (Strictly for active quota)
   const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
 
   const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
   const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
   
   const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
+  const isGuest = currentUser.role === 'guest';
+
+  // --- Composer Data ---
+  const composerAccepted = problems
+    .filter(p => p.quotaId === activeQuotaId && p.status === 'accepted')
+    .sort((a,b) => a.orderIndex - b.orderIndex);
+  
+  const composerCandidates = problems
+    .filter(p => p.quotaId === activeQuotaId && (p.status === 'shortlisted' || p.status === 'pending'))
+    .filter(p => composerFilterTopic === 'All' || p.topics.includes(composerFilterTopic as Topic))
+    .sort((a, b) => b.score - a.score);
+
+  // Composer Stats
+  const composerAvgDiff = composerAccepted.length > 0 
+      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
+      : '0.0';
+  
+  const composerTopicCounts: Record<string, number> = {};
+  TOPICS.forEach(t => composerTopicCounts[t] = 0);
+  composerAccepted.forEach(p => {
+      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
+  });
 
   return (
-    <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans">
+    <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
       
       {/* Sidebar Navigation */}
-      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]">
-        <div className="p-6 border-b border-slate-50">
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2 tracking-tight">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
-                <BookOpen className="w-4 h-4" strokeWidth={3} />
+      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-20 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.05)]">
+        <div className="p-8 border-b border-slate-50">
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
+            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-indigo-200 shadow-lg">
+                <BookOpen className="w-5 h-5" strokeWidth={3} />
             </div>
             WAMO Tracker
           </h2>
         </div>
         
-        <nav className="flex-1 p-4 space-y-1">
-          <NavItem 
-            icon={<LayoutDashboard className="w-5 h-5" />} 
-            label="Dashboard" 
-            active={view === 'dashboard'} 
-            onClick={() => setView('dashboard')} 
-          />
+        <nav className="flex-1 p-6 space-y-2">
+          {!isGuest && (
+              <NavItem 
+                icon={<LayoutDashboard className="w-5 h-5" />} 
+                label="Dashboard" 
+                active={view === 'dashboard'} 
+                onClick={() => setView('dashboard')} 
+              />
+          )}
+          
           <NavItem 
             icon={<PlusCircle className="w-5 h-5" />} 
-            label="Write Problem" 
+            label={isGuest ? "Propose Problem" : "Write Problem"} 
             active={view === 'submit'} 
             onClick={() => { resetForm(); setView('submit'); }} 
           />
-          <NavItem 
-            icon={<Layers className="w-5 h-5" />} 
-            label="Problem Pool" 
-            active={view === 'pool'} 
-            onClick={() => setView('pool')} 
-          />
-          {isDirector && (
+          
+          {!isGuest && (
+            <NavItem 
+                icon={<Layers className="w-5 h-5" />} 
+                label="Problem Pool" 
+                active={view === 'pool'} 
+                onClick={() => setView('pool')} 
+            />
+          )}
+
+          {isDirector && !isGuest && (
             <>
               <div className="mt-8 mb-2 px-4">
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Administration</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administration</p>
               </div>
+              <NavItem 
+                icon={<LayoutList className="w-5 h-5" />} 
+                label="Round Composer" 
+                active={view === 'composer'} 
+                onClick={() => setView('composer')} 
+              />
               <NavItem 
                 icon={<Settings className="w-5 h-5" />} 
                 label="Director Panel" 
@@ -741,22 +913,21 @@ export default function App() {
           )}
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 mb-2">
+        <div className="p-6 border-t border-slate-50">
+          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-2">
               <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : 'bg-slate-500'}`}>
-                {currentUser.name.charAt(0)}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : currentUser.role === 'guest' ? 'bg-amber-500' : 'bg-slate-500'}`}>
+                {isGuest ? <UserIcon className="w-5 h-5" /> : currentUser.name.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-900 truncate">{currentUser.name}</p>
                 <p className="text-xs text-slate-500 capitalize flex items-center gap-1">
                     {currentUser.role}
-                    <span className="text-slate-300">•</span>
-                    Power: {currentUser.votingPower}
+                    {!isGuest && <><span className="text-slate-300">•</span> Power: {currentUser.votingPower}</>}
                 </p>
                 </div>
               </div>
-              <Button variant="ghost" onClick={handleLogout} className="w-full text-xs h-8 justify-center text-slate-500 hover:text-red-600 hover:bg-white shadow-sm border border-transparent hover:border-slate-200">
+              <Button variant="ghost" onClick={handleLogout} className="w-full text-xs h-9 justify-center text-slate-500 hover:text-red-600 hover:bg-white shadow-sm border border-transparent hover:border-slate-200">
                 Log Out
               </Button>
           </div>
@@ -764,62 +935,62 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar">
+      <main className="flex-1 p-6 md:p-12 overflow-y-auto custom-scrollbar">
         
         {/* VIEW: DASHBOARD */}
-        {view === 'dashboard' && (
-          <div className="max-w-5xl mx-auto space-y-8">
+        {view === 'dashboard' && !isGuest && (
+          <div className="max-w-6xl mx-auto space-y-10">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
-                <p className="text-slate-500 mt-1">Here is the current round status.</p>
+                <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
+                <p className="text-lg text-slate-500 mt-2">Here is the current round status.</p>
               </div>
             </header>
 
             {/* Active Round Info */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6 relative">
-                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-                    <BookOpen size={120} />
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-8 relative">
+                <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-4">
+                    <BookOpen size={200} />
                 </div>
                 <div className="flex justify-between items-start mb-6 relative z-10">
                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                         <span className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase tracking-wider">Active Round</span>
+                      <div className="flex items-center gap-2 mb-3">
+                         <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider">Active Round</span>
                          {activeQuota.dueDate && (
-                           <span className="px-2 py-1 rounded bg-orange-50 text-orange-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                           <span className="px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
                                <Clock className="w-3 h-3"/> {getFormatDate(activeQuota.dueDate)}
                            </span>
                          )}
                       </div>
-                      <h2 className="text-2xl font-bold text-slate-900">{activeQuota.name}</h2>
+                      <h2 className="text-3xl font-bold text-slate-900">{activeQuota.name}</h2>
                    </div>
                 </div>
                 
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-slate-600 text-sm relative z-10">
-                   <strong className="text-slate-900 font-semibold block mb-1">Director's Note:</strong> {activeQuota.instructions}
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-slate-600 text-sm relative z-10 leading-relaxed">
+                   <strong className="text-slate-900 font-semibold block mb-1 text-base">Director's Note</strong> {activeQuota.instructions}
                 </div>
             </div>
 
             {/* Progress Cards Grid */}
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-2 gap-8">
                 {/* Writing Progress */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-48 relative overflow-hidden group hover:border-indigo-200 transition-colors">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-56 relative overflow-hidden group hover:border-indigo-200 transition-colors">
                     <div className="relative z-10">
-                        <div className="flex justify-between items-start mb-2">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                <Pencil className="w-4 h-4 text-indigo-500" /> Writing Quota
+                        <div className="flex justify-between items-start mb-4">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
+                                <Pencil className="w-5 h-5 text-indigo-500" /> Writing Quota
                             </h3>
                             {submissionCount >= submissionTarget ? 
-                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
-                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{submissionCount} / {submissionTarget}</span>
+                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
+                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-3 py-1 rounded-full">{submissionCount} / {submissionTarget}</span>
                             }
                         </div>
-                        <div className="text-3xl font-black text-slate-900 mt-2">
-                            {Math.round(subPercent)}%
+                        <div className="text-5xl font-black text-slate-900 mt-2 tracking-tighter">
+                            {Math.round(subPercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
                         </div>
                     </div>
                     
-                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden relative z-10">
+                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
                         <div 
                             className={`h-full rounded-full transition-all duration-1000 ease-out ${submissionCount >= submissionTarget ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
                             style={{ width: `${subPercent}%` }}
@@ -827,29 +998,29 @@ export default function App() {
                     </div>
 
                     {/* Decorative bg */}
-                    <div className="absolute -bottom-4 -right-4 text-indigo-50 opacity-50 group-hover:scale-110 transition-transform duration-500">
-                        <Pencil size={100} />
+                    <div className="absolute -bottom-6 -right-6 text-indigo-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
+                        <Pencil size={140} />
                     </div>
                 </div>
 
                 {/* Voting Progress */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-48 relative overflow-hidden group hover:border-teal-200 transition-colors">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-56 relative overflow-hidden group hover:border-teal-200 transition-colors">
                     <div className="relative z-10">
-                        <div className="flex justify-between items-start mb-2">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                <ThumbsUp className="w-4 h-4 text-teal-500" /> Voting Quota
+                        <div className="flex justify-between items-start mb-4">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
+                                <ThumbsUp className="w-5 h-5 text-teal-500" /> Voting Quota
                             </h3>
                             {userVoteCount >= voteTarget ? 
-                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
-                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-full">{userVoteCount} / {voteTarget}</span>
+                                <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Done</span> : 
+                                <span className="bg-slate-100 text-slate-500 text-xs font-bold px-3 py-1 rounded-full">{userVoteCount} / {voteTarget}</span>
                             }
                         </div>
-                        <div className="text-3xl font-black text-slate-900 mt-2">
-                            {Math.round(votePercent)}%
+                        <div className="text-5xl font-black text-slate-900 mt-2 tracking-tighter">
+                            {Math.round(votePercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
                         </div>
                     </div>
                     
-                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden relative z-10">
+                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
                         <div 
                             className={`h-full rounded-full transition-all duration-1000 ease-out ${userVoteCount >= voteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
                             style={{ width: `${votePercent}%` }}
@@ -857,15 +1028,15 @@ export default function App() {
                     </div>
 
                     {/* Decorative bg */}
-                    <div className="absolute -bottom-4 -right-4 text-teal-50 opacity-50 group-hover:scale-110 transition-transform duration-500">
-                        <ThumbsUp size={100} />
+                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
+                        <ThumbsUp size={140} />
                     </div>
                 </div>
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-slate-900">Your Submissions</h3>
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-bold text-slate-900">Your Submissions</h3>
                 <Button variant="ghost" onClick={() => { resetForm(); setView('submit'); }} className="text-sm">
                   <PlusCircle className="w-4 h-4" /> Add Problem
                 </Button>
@@ -874,7 +1045,7 @@ export default function App() {
               {isLoadingData && <p className="text-sm text-gray-400 mb-4">Refreshing data...</p>}
 
               {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length > 0 ? (
-                <div className="grid gap-6">
+                <div className="grid gap-8">
                   {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).map(p => (
                     <ProblemCard 
                         key={p.id} 
@@ -890,46 +1061,189 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                  <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
-                      <p className="text-slate-400 italic">No submissions for this round yet.</p>
-                      <Button variant="secondary" onClick={() => { resetForm(); setView('submit'); }} className="mt-4 mx-auto">Start Writing</Button>
+                  <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 border-dashed">
+                      <p className="text-slate-400 italic text-lg">No submissions for this round yet.</p>
+                      <Button variant="secondary" onClick={() => { resetForm(); setView('submit'); }} className="mt-6 mx-auto">Start Writing</Button>
                   </div>
               )}
             </div>
           </div>
         )}
 
+        {/* VIEW: ROUND COMPOSER */}
+        {view === 'composer' && isDirector && !isGuest && (
+          <div className="max-w-7xl mx-auto h-[calc(100vh-6rem)] flex flex-col">
+            <header className="flex justify-between items-center mb-6 shrink-0">
+               <div>
+                  <h1 className="text-3xl font-bold text-slate-900">Round Composer</h1>
+                  <p className="text-slate-500 mt-1">
+                    Drag and drop isn't here yet, so click buttons to move problems.
+                  </p>
+               </div>
+               <div className="flex gap-3">
+                  <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
+                      <Download className="w-4 h-4" /> Export TeX
+                  </Button>
+               </div>
+            </header>
+
+            <div className="flex-1 grid grid-cols-2 gap-8 min-h-0">
+                {/* LEFT: CANDIDATE POOL */}
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <h2 className="font-bold text-slate-700 flex items-center gap-2">
+                           <LayoutList className="w-4 h-4"/> Candidates ({composerCandidates.length})
+                        </h2>
+                        <select 
+                            className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                            value={composerFilterTopic}
+                            onChange={e => setComposerFilterTopic(e.target.value)}
+                        >
+                            <option value="All">All Topics</option>
+                            {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                        {composerCandidates.length === 0 ? (
+                           <div className="text-center py-10 text-slate-400 italic text-sm">No shortlisted problems found.</div>
+                        ) : (
+                           composerCandidates.map(p => (
+                               <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-3 hover:border-indigo-300 transition-all group flex gap-3">
+                                   <div className="flex-1 min-w-0">
+                                       <div className="flex justify-between items-start">
+                                           <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
+                                           <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{p.difficulty}</span>
+                                       </div>
+                                       <div className="text-xs text-slate-500 mt-1 flex gap-2">
+                                           <span>{p.topics[0]}</span>
+                                           <span>•</span>
+                                           <span>Score: {p.score}</span>
+                                       </div>
+                                   </div>
+                                   <button 
+                                      onClick={() => handleAddToRound(p)}
+                                      className="w-8 flex items-center justify-center bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-100 transition-colors"
+                                   >
+                                       <ArrowRight className="w-4 h-4"/>
+                                   </button>
+                               </div>
+                           ))
+                        )}
+                    </div>
+                </div>
+
+                {/* RIGHT: FINAL ROUND */}
+                <div className="bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
+                    <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                            <h2 className="font-bold text-indigo-900 flex items-center gap-2">
+                               <CheckCircle className="w-4 h-4"/> Official Round Order
+                            </h2>
+                            <span className="text-xs font-bold bg-white text-indigo-600 px-2 py-1 rounded-full border border-indigo-100">
+                                {composerAccepted.length} Problems
+                            </span>
+                        </div>
+                        {/* Stats Bar */}
+                        <div className="flex gap-4 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                            <span>Avg Diff: {composerAvgDiff}</span>
+                            <span className="text-slate-300">|</span>
+                            {Object.entries(composerTopicCounts).map(([t, c]) => (
+                                <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-600'}>{t.substring(0,3)}: {c}</span>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-50/30">
+                         {composerAccepted.length === 0 ? (
+                            <div className="text-center py-20">
+                                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
+                                    <Layers className="w-6 h-6" />
+                                </div>
+                                <p className="text-slate-400 italic text-sm">The round is empty.<br/>Add problems from the left.</p>
+                            </div>
+                         ) : (
+                            composerAccepted.map((p, idx) => (
+                                <div key={p.id} className="bg-white border border-indigo-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                                    <div className="font-mono font-bold text-indigo-300 text-lg w-6 text-center">{idx + 1}</div>
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-slate-900 truncate text-sm">{p.title}</h4>
+                                        <div className="text-xs text-slate-500 flex gap-2">
+                                            <span className="bg-slate-100 px-1 rounded">{p.difficulty}</span>
+                                            <span className="truncate">{p.topics.join(', ')}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex flex-col gap-1">
+                                        <button 
+                                            onClick={() => handleReorder(idx, 'up')}
+                                            disabled={idx === 0}
+                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
+                                        >
+                                            <ArrowUp className="w-3 h-3"/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleReorder(idx, 'down')}
+                                            disabled={idx === composerAccepted.length - 1}
+                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded disabled:opacity-30"
+                                        >
+                                            <ArrowDown className="w-3 h-3"/>
+                                        </button>
+                                    </div>
+
+                                    <button 
+                                       onClick={() => handleRemoveFromRound(p)}
+                                       className="w-8 h-8 flex items-center justify-center hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-colors ml-1"
+                                    >
+                                        <X className="w-4 h-4"/>
+                                    </button>
+                                </div>
+                            ))
+                         )}
+                    </div>
+                </div>
+            </div>
+          </div>
+        )}
+
         {/* VIEW: SUBMIT / EDIT */}
         {view === 'submit' && (
-          <div className="max-w-3xl mx-auto">
-            <header className="mb-8">
-              <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-4 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
-                 ← Back to Dashboard
-              </Button>
+          <div className="max-w-4xl mx-auto">
+            <header className="mb-10">
+              {!isGuest && (
+                  <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
+                     ← Back to Dashboard
+                  </Button>
+              )}
               <h1 className="text-3xl font-bold text-slate-900">
-                  {editingProblemId ? 'Edit Problem' : 'New Submission'}
+                  {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
               </h1>
-              <p className="text-slate-500">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
+              {isGuest ? (
+                  <div className="mt-2 bg-amber-50 text-amber-900 p-3 rounded-xl border border-amber-200 text-sm">
+                      <strong>Guest Mode:</strong> You are submitting a proposal. If approved, it will be added to the pool.
+                  </div>
+              ) : (
+                  <p className="text-slate-500 mt-2">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
+              )}
             </header>
             
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-8 space-y-8">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-10 space-y-10">
                 {/* Title */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Problem Title</label>
+                <div className="space-y-3">
+                  <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Problem Title</label>
                   <input 
                     type="text" 
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g. The Three Triangles"
-                    className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black placeholder:text-slate-400"
+                    className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black placeholder:text-slate-400 text-lg"
                   />
                 </div>
 
                 {/* Topics & Difficulty */}
-                <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Difficulty Rating</label>
+                <div className="grid md:grid-cols-2 gap-8">
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Difficulty Rating</label>
                         <div className="flex gap-2 items-center">
                             <input 
                                 type="number" 
@@ -938,7 +1252,7 @@ export default function App() {
                                 max="50"
                                 value={difficulty}
                                 onChange={(e) => setDifficulty(e.target.value)}
-                                className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black"
+                                className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
                             />
                         </div>
                         <a 
@@ -950,18 +1264,18 @@ export default function App() {
                             <ExternalLink className="w-3 h-3" /> AoPS Rating Guide (Tenths place only)
                         </a>
                     </div>
-                    <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Topics (Select at least 1)</label>
-                        <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
+                        <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                             {TOPICS.map(t => (
-                                <label key={t} className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition-colors">
+                                <label key={t} className="flex items-center gap-3 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
                                     <input 
                                         type="checkbox"
                                         checked={selectedTopics.includes(t)}
                                         onChange={() => handleTopicToggle(t)}
-                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                        className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
                                     />
-                                    <span className="text-sm text-slate-700">{t}</span>
+                                    <span className="text-base text-slate-700 font-medium">{t}</span>
                                 </label>
                             ))}
                         </div>
@@ -969,8 +1283,8 @@ export default function App() {
                 </div>
 
                 {/* Statement */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <div className="space-y-3">
+                  <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">
                     Problem Statement
                   </label>
                   <textarea 
@@ -978,45 +1292,62 @@ export default function App() {
                     onChange={(e) => setStatement(e.target.value)}
                     rows={8}
                     placeholder="Let $ABC$ be a triangle where..."
-                    className="w-full px-4 py-3 bg-white rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-base leading-relaxed mb-4"
+                    className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-lg leading-relaxed mb-4"
                   />
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                     <div className="flex justify-between items-center mb-2">
-                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Live Preview (LaTeX supported: $...$ or $$...$$)</span>
-                       <Button size="sm" variant="secondary" onClick={handleAiAnalyze} isLoading={isAnalyzing} className="text-xs py-1 h-7">
-                          ✨ Analyze with AI
-                       </Button>
-                     </div>
+                  
+                  {/* Image Upload */}
+                  <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 border-dashed">
+                      <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center border border-slate-200 text-slate-400 shrink-0">
+                          <ImageIcon className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1">
+                          <label className="block text-sm font-bold text-slate-700 cursor-pointer hover:text-indigo-600 transition-colors">
+                              <span>Upload Image (Optional)</span>
+                              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                          </label>
+                          <p className="text-xs text-slate-400">PNG, JPG up to 2MB</p>
+                      </div>
+                      {imageData && (
+                          <div className="relative w-16 h-16 bg-white rounded-lg border border-slate-200 overflow-hidden">
+                              <img src={imageData} alt="Preview" className="w-full h-full object-cover" />
+                              <button onClick={() => setImageData(null)} className="absolute inset-0 bg-black/50 text-white opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <X className="w-4 h-4" />
+                              </button>
+                          </div>
+                      )}
+                  </div>
+
+                  {/* Preview */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mt-4">
+                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-3">Live Preview</span>
                      <MathText 
                          text={statement || 'Type above to preview...'} 
-                         className="font-serif text-slate-800 text-base leading-relaxed whitespace-pre-wrap min-h-[40px]" 
+                         className="font-serif text-slate-800 text-lg leading-relaxed whitespace-pre-wrap min-h-[40px]" 
                      />
-                     
-                     {/* AI Feedback Box */}
-                     {aiAnalysis && (
-                         <div className="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm text-indigo-900 relative animate-in fade-in zoom-in-95">
-                             <h5 className="font-bold flex items-center gap-2 mb-1"><Zap className="w-4 h-4 text-indigo-600" /> AI Feedback</h5>
-                             <p className="whitespace-pre-wrap">{aiAnalysis}</p>
-                             <button onClick={() => setAiAnalysis(null)} className="absolute top-2 right-2 text-indigo-400 hover:text-indigo-700"><X className="w-4 h-4" /></button>
-                         </div>
-                     )}
                   </div>
                 </div>
 
-                {/* Anti-Cheat Pledge */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 flex items-start gap-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
-                   <div className={`mt-0.5 w-5 h-5 rounded border border-slate-400 flex items-center justify-center shrink-0 ${isVerified ? 'bg-indigo-600 border-indigo-600' : 'bg-white'}`}>
+                {/* Verification / Disclaimer */}
+                <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 flex items-start gap-4 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
+                   <div className={`mt-0.5 w-6 h-6 rounded-md border border-indigo-300 flex items-center justify-center shrink-0 transition-colors ${isVerified ? 'bg-indigo-600 border-indigo-600' : 'bg-white'}`}>
                       {isVerified && <BadgeCheck className="w-4 h-4 text-white" />}
                    </div>
                    <div className="select-none">
-                      <label className="font-bold text-slate-900 text-sm cursor-pointer">I certify that this is a valid problem.</label>
-                      <p className="text-xs text-slate-500 mt-1">To prevent quota spam, all submissions are monitored.</p>
+                      <label className="font-bold text-indigo-900 text-base cursor-pointer">
+                          {isGuest ? "Usage Rights Agreement" : "I certify that this is a valid problem."}
+                      </label>
+                      <p className="text-sm text-indigo-700/80 mt-1 leading-relaxed">
+                          {isGuest 
+                            ? "By submitting, I allow WAMO to use, edit, and distribute this problem in any official capacity. I confirm this is original work."
+                            : "To prevent quota spam, all submissions are monitored for quality and relevance."
+                          }
+                      </p>
                    </div>
                 </div>
 
                 {/* Error Message */}
                 {submissionError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
                     <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                     <div>
                       <h4 className="font-bold text-red-700 text-sm">Submission Rejected</h4>
@@ -1026,12 +1357,14 @@ export default function App() {
                 )}
               </div>
               
-              <div className="p-6 bg-white border-t border-slate-200 flex justify-end gap-3 items-center">
-                <Button variant="ghost" onClick={() => setView('dashboard')}>Cancel</Button>
+              <div className="p-8 bg-slate-50 border-t border-slate-200 flex justify-end gap-4 items-center">
+                {!isGuest && <Button variant="ghost" onClick={() => setView('dashboard')}>Cancel</Button>}
                 <Button 
                   onClick={handleSubmit} 
                   disabled={!title || !statement || !isVerified}
                   isLoading={isSubmitting}
+                  size="lg"
+                  className="px-8 shadow-indigo-200"
                 >
                   {editingProblemId ? 'Update Problem' : 'Submit Problem'}
                 </Button>
@@ -1041,9 +1374,9 @@ export default function App() {
         )}
 
         {/* VIEW: POOL (BLIND REVIEW) */}
-        {view === 'pool' && (
-          <div className="max-w-5xl mx-auto">
-            <header className="mb-8 flex flex-col md:flex-row justify-between md:items-center gap-4">
+        {view === 'pool' && !isGuest && (
+          <div className="max-w-6xl mx-auto">
+            <header className="mb-10 flex flex-col md:flex-row justify-between md:items-center gap-4">
                <div>
                   <h1 className="text-3xl font-bold text-slate-900">Problem Pool</h1>
                   <p className="text-slate-500 mt-2">
@@ -1053,14 +1386,26 @@ export default function App() {
             </header>
             
             {/* Filters Bar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row gap-4 items-center flex-wrap">
-                <div className="flex items-center gap-2 text-sm text-slate-500 font-semibold">
-                    <Filter className="w-4 h-4" /> Filters:
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm mb-8 flex flex-col md:flex-row gap-5 items-center flex-wrap">
+                <div className="flex items-center gap-2 text-sm text-slate-500 font-bold uppercase tracking-wider">
+                    <Filter className="w-4 h-4" /> Filters
                 </div>
+
+                {/* Quota Filter */}
+                <select 
+                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                    value={poolFilterQuota}
+                    onChange={(e) => setPoolFilterQuota(e.target.value)}
+                >
+                    <option value="All">All Rounds</option>
+                    {quotas.map(q => (
+                        <option key={q.id} value={q.id}>{q.name}</option>
+                    ))}
+                </select>
                 
                 {/* Topic Filter */}
                 <select 
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
                     value={poolFilterTopic}
                     onChange={(e) => setPoolFilterTopic(e.target.value)}
                 >
@@ -1070,7 +1415,7 @@ export default function App() {
 
                 {/* Status Filter */}
                 <select 
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
                     value={poolFilterStatus}
                     onChange={(e) => setPoolFilterStatus(e.target.value)}
                 >
@@ -1081,11 +1426,11 @@ export default function App() {
                 </select>
 
                 {/* Difficulty Filter */}
-                <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                <div className="flex items-center gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
                     <span className="text-xs font-bold text-slate-400 uppercase">Diff</span>
                     <input 
                         type="number" 
-                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500"
+                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500 font-bold text-slate-700"
                         value={poolFilterDiffMin}
                         onChange={e => setPoolFilterDiffMin(Number(e.target.value))}
                         placeholder="Min"
@@ -1093,7 +1438,7 @@ export default function App() {
                     <span className="text-slate-400">-</span>
                     <input 
                         type="number" 
-                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500"
+                        className="w-12 bg-transparent text-sm text-center outline-none border-b border-transparent focus:border-indigo-500 font-bold text-slate-700"
                         value={poolFilterDiffMax}
                         onChange={e => setPoolFilterDiffMax(Number(e.target.value))}
                         placeholder="Max"
@@ -1103,10 +1448,10 @@ export default function App() {
                 <div className="flex-1"></div>
 
                 {/* Sorting */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <ArrowUpDown className="w-4 h-4 text-slate-400" />
                     <select 
-                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
                         value={poolSort}
                         onChange={(e) => setPoolSort(e.target.value as any)}
                     >
@@ -1119,7 +1464,7 @@ export default function App() {
                 </div>
             </div>
 
-            <div className="grid gap-6">
+            <div className="grid gap-8">
               {poolIds.length === 0 ? (
                 <div className="text-center py-24 bg-white rounded-3xl border border-slate-200 shadow-sm">
                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -1153,11 +1498,11 @@ export default function App() {
         )}
 
         {/* VIEW: ADMIN PANEL */}
-        {view === 'admin' && isDirector && (
-          <div className="max-w-5xl mx-auto">
-             <div className="flex justify-between items-center mb-8">
+        {view === 'admin' && isDirector && !isGuest && (
+          <div className="max-w-6xl mx-auto">
+             <div className="flex justify-between items-center mb-10">
                 <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   <Button onClick={handleExportLatex} size="sm" variant="secondary" className="gap-2">
                       <Download className="w-4 h-4" /> Export TeX
                   </Button>
@@ -1172,27 +1517,27 @@ export default function App() {
              
              <div className="grid md:grid-cols-2 gap-8 mb-8">
                 {/* Quota Management */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-                   <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
+                   <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
                       <Layers className="w-5 h-5 text-indigo-600" /> Quota / Rounds
                    </h3>
                    
-                   <div className="flex-1 space-y-3 mb-6">
+                   <div className="flex-1 space-y-4 mb-8">
                       {quotas.map(q => (
-                         <div key={q.id} className={`p-4 rounded-xl border flex flex-col gap-2 ${activeQuotaId === q.id ? 'bg-white border-indigo-500 shadow-md' : 'bg-white border-slate-200'}`}>
+                         <div key={q.id} className={`p-5 rounded-2xl border flex flex-col gap-2 transition-all ${activeQuotaId === q.id ? 'bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500' : 'bg-slate-50 border-slate-200'}`}>
                             {editingQuotaId === q.id ? (
-                               <div className="space-y-2">
+                               <div className="space-y-3">
                                   <input 
-                                    className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                     value={editQuotaForm.name} 
                                     onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})}
                                     placeholder="Name"
                                   />
-                                  <div className="flex gap-2">
+                                  <div className="flex gap-3">
                                     <div className="flex flex-col gap-1 w-24">
                                         <label className="text-[10px] uppercase font-bold text-slate-400">Prob Qty</label>
                                         <input 
-                                        className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                         type="number"
                                         value={editQuotaForm.target} 
                                         onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})}
@@ -1201,7 +1546,7 @@ export default function App() {
                                     <div className="flex flex-col gap-1 w-24">
                                         <label className="text-[10px] uppercase font-bold text-slate-400">Vote Qty</label>
                                         <input 
-                                        className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                         type="number"
                                         value={editQuotaForm.voteTarget} 
                                         onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})}
@@ -1211,32 +1556,32 @@ export default function App() {
                                         <label className="text-[10px] uppercase font-bold text-slate-400">Due Date</label>
                                         <input 
                                           type="date"
-                                          className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                           value={editQuotaForm.dueDate ? new Date(editQuotaForm.dueDate).toISOString().split('T')[0] : ''}
                                           onChange={e => setEditQuotaForm({...editQuotaForm, dueDate: e.target.valueAsNumber})}
                                         />
                                     </div>
                                   </div>
                                   <input 
-                                      className="w-full px-2 py-1 border border-slate-300 rounded bg-white text-black text-sm" 
+                                      className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                       value={editQuotaForm.instructions} 
                                       onChange={e => setEditQuotaForm({...editQuotaForm, instructions: e.target.value})}
                                       placeholder="Instructions"
                                   />
                                   <div className="flex justify-end gap-2 mt-2">
-                                     <button onClick={cancelEditQuota} className="p-1 text-red-500 hover:bg-red-50 rounded"><X className="w-4 h-4" /></button>
-                                     <button onClick={saveQuota} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save className="w-4 h-4" /></button>
+                                     <button onClick={cancelEditQuota} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><X className="w-4 h-4" /></button>
+                                     <button onClick={saveQuota} className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"><Save className="w-4 h-4" /></button>
                                   </div>
                                </div>
                             ) : (
                                <div className="flex justify-between items-center">
                                   <div>
-                                     <div className="flex items-center gap-2">
-                                        <span className="font-bold text-slate-900">{q.name}</span>
-                                        {activeQuotaId === q.id && <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">Active</span>}
+                                     <div className="flex items-center gap-3">
+                                        <span className="font-bold text-slate-900 text-lg">{q.name}</span>
+                                        {activeQuotaId === q.id && <span className="text-[10px] bg-indigo-600 text-white px-2.5 py-0.5 rounded-full uppercase tracking-wider font-bold shadow-sm">Active</span>}
                                      </div>
-                                     <div className="text-xs text-slate-500 mt-1 flex gap-2">
-                                         <span>Write: {q.target}</span>
+                                     <div className="text-xs text-slate-500 mt-2 flex gap-3 font-medium">
+                                         <span>Target: {q.target}</span>
                                          <span>•</span>
                                          <span>Vote: {q.voteTarget || 3}</span>
                                          <span>•</span>
@@ -1245,8 +1590,8 @@ export default function App() {
                                          </span>
                                      </div>
                                   </div>
-                                  <div className="flex gap-1">
-                                     <button onClick={() => startEditQuota(q)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors">
+                                  <div className="flex gap-2">
+                                     <button onClick={() => startEditQuota(q)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors">
                                         <Pencil className="w-4 h-4" />
                                      </button>
                                      {activeQuotaId !== q.id && (
@@ -1259,16 +1604,16 @@ export default function App() {
                       ))}
                    </div>
 
-                   <div className="pt-4 border-t border-slate-100">
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Create New Round</p>
-                      <div className="space-y-3">
+                   <div className="pt-6 border-t border-slate-100">
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Create New Round</p>
+                      <div className="space-y-4">
                          <div className="flex gap-2">
                            <input 
                               type="text" 
                               placeholder="Round Name" 
                               value={newQuotaName} 
                               onChange={e => setNewQuotaName(e.target.value)}
-                              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
+                              className="flex-1 px-4 py-3 border border-slate-300 rounded-xl text-sm bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                            />
                          </div>
                          <Button onClick={addQuota} disabled={!newQuotaName.trim()} className="w-full">Create Round</Button>
@@ -1277,43 +1622,43 @@ export default function App() {
                 </div>
 
                 {/* Add User */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                   <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                   <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
                       <UserPlus className="w-5 h-5 text-indigo-600" /> Add New User
                    </h3>
-                   <div className="space-y-4">
+                   <div className="space-y-5">
                       <input 
                         type="text" 
                         value={newUserName}
                         onChange={(e) => setNewUserName(e.target.value)}
                         placeholder="Full Name"
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
                       <input 
                         type="text" 
                         value={newUserPassword}
                         onChange={(e) => setNewUserPassword(e.target.value)}
                         placeholder="Password"
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
                       
-                      <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
+                      <div className="flex gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-100">
                           <button 
                              onClick={() => setNewUserRole('writer')} 
-                             className={`flex-1 text-sm font-medium py-1.5 rounded-md transition-all ${newUserRole === 'writer' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                             className={`flex-1 text-sm font-medium py-2 rounded-lg transition-all ${newUserRole === 'writer' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
                           >
                              Writer
                           </button>
                           <button 
                              onClick={() => setNewUserRole('director')} 
-                             className={`flex-1 text-sm font-medium py-1.5 rounded-md transition-all ${newUserRole === 'director' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                             className={`flex-1 text-sm font-medium py-2 rounded-lg transition-all ${newUserRole === 'director' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
                           >
                              Director
                           </button>
                       </div>
 
                       <div className="flex justify-end pt-2">
-                         <Button onClick={addUser} disabled={!newUserName.trim() || !newUserPassword.trim()}>
+                         <Button onClick={addUser} disabled={!newUserName.trim() || !newUserPassword.trim()} className="w-full">
                            Create Account
                          </Button>
                       </div>
@@ -1322,8 +1667,8 @@ export default function App() {
              </div>
 
              {/* Writer Progress & Voting Power Table */}
-             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-               <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+               <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                   <div>
                     <h3 className="font-bold text-slate-900 flex items-center gap-2">
                         <TrendingUp className="w-5 h-5 text-indigo-600" /> User Management
@@ -1334,12 +1679,12 @@ export default function App() {
                <table className="w-full text-left">
                  <thead className="bg-white border-b border-slate-200">
                    <tr>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">User</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Password</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Role & Power</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Write Override</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Progress (Write/Vote)</th>
-                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Actions</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">User</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Password</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Role & Power</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Write Override</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Progress</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Actions</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
@@ -1356,16 +1701,16 @@ export default function App() {
                      if (editingUserId === u.id) {
                          // EDIT MODE ROW
                          return (
-                            <tr key={u.id} className="bg-white shadow-inner">
+                            <tr key={u.id} className="bg-slate-50 shadow-inner">
                                 <td className="px-6 py-4">
                                     <input 
-                                        className="w-full px-2 py-1 border border-indigo-200 rounded text-sm text-black" 
+                                        className="w-full px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
                                         value={editUserForm.name} 
                                         onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
                                     />
                                     {currentUser.role === 'admin' && (
                                        <select 
-                                         className="mt-1 w-full text-xs border border-indigo-200 rounded p-1 bg-white"
+                                         className="mt-2 w-full text-xs border border-indigo-300 rounded p-1 bg-white"
                                          value={editUserForm.role}
                                          onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
                                        >
@@ -1380,7 +1725,7 @@ export default function App() {
                                         <div className="flex items-center gap-1">
                                             <Lock className="w-3 h-3 text-slate-400"/>
                                             <input 
-                                                className="w-24 px-2 py-1 border border-indigo-200 rounded text-sm text-black" 
+                                                className="w-24 px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
                                                 placeholder="Reset Pass"
                                                 value={editUserForm.password}
                                                 onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
@@ -1397,7 +1742,7 @@ export default function App() {
                                         <Zap className="w-3 h-3 text-amber-500"/>
                                         <input 
                                             type="number"
-                                            className="w-12 px-1 py-1 border border-indigo-200 rounded text-sm text-black text-center"
+                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
                                             value={editUserForm.votingPower}
                                             onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value) || 0})}
                                         />
@@ -1408,7 +1753,7 @@ export default function App() {
                                         <Target className="w-3 h-3 text-indigo-500"/>
                                         <input 
                                             type="number"
-                                            className="w-12 px-1 py-1 border border-indigo-200 rounded text-sm text-black text-center"
+                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
                                             value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target}
                                             onChange={e => updateUserTarget(u.id, parseInt(e.target.value) || 0)}
                                         />
@@ -1419,8 +1764,8 @@ export default function App() {
                                 </td>
                                 <td className="px-6 py-4">
                                     <div className="flex gap-2">
-                                        <button onClick={() => saveUser(u.id)} className="p-1 text-green-600 bg-white border border-green-200 rounded hover:bg-green-50"><Save className="w-4 h-4"/></button>
-                                        <button onClick={() => setEditingUserId(null)} className="p-1 text-slate-500 bg-white border border-slate-200 rounded hover:bg-slate-50"><X className="w-4 h-4"/></button>
+                                        <button onClick={() => saveUser(u.id)} className="p-1.5 text-green-600 bg-white border border-green-200 rounded-lg hover:bg-green-50"><Save className="w-4 h-4"/></button>
+                                        <button onClick={() => setEditingUserId(null)} className="p-1.5 text-slate-500 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"><X className="w-4 h-4"/></button>
                                     </div>
                                 </td>
                             </tr>
@@ -1428,34 +1773,34 @@ export default function App() {
                      }
 
                      return (
-                       <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
-                         <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
+                       <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
+                         <td className="px-6 py-5 font-bold text-slate-800 flex items-center gap-2">
                            {u.name}
-                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
-                           {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 rounded uppercase">Director</span>}
+                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
+                           {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">Director</span>}
                          </td>
-                         <td className="px-6 py-4 text-sm font-mono text-black">
+                         <td className="px-6 py-5 text-sm font-mono text-slate-400">
                             {u.password || '********'}
                          </td>
-                         <td className="px-6 py-4 text-sm">
+                         <td className="px-6 py-5 text-sm">
                            <div className="flex items-center gap-1">
-                              <Zap className="w-3 h-3 text-amber-500" />
-                              <span className="font-bold text-slate-700">{u.votingPower}</span>
+                              <Zap className="w-4 h-4 text-amber-500" />
+                              <span className="font-bold text-slate-900">{u.votingPower}</span>
                            </div>
                          </td>
-                         <td className="px-6 py-4 text-sm">
+                         <td className="px-6 py-5 text-sm">
                              <div className="flex items-center gap-1">
-                                <span className="font-bold text-slate-700">
+                                <span className="font-bold text-slate-900 bg-slate-100 px-2 py-1 rounded-md min-w-[30px] text-center">
                                     {uTarget}
                                 </span>
                              </div>
                          </td>
-                         <td className="px-6 py-4">
-                           <div className="flex flex-col gap-2 min-w-[120px]">
+                         <td className="px-6 py-5">
+                           <div className="flex flex-col gap-3 min-w-[140px]">
                               {/* Writing Progress */}
-                              <div className="flex items-center gap-2 text-xs">
-                                <Pencil className="w-3 h-3 text-indigo-400" />
-                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="flex items-center gap-3 text-xs">
+                                <Pencil className="w-3.5 h-3.5 text-indigo-400" />
+                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                                     <div 
                                     className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
                                     style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}
@@ -1464,9 +1809,9 @@ export default function App() {
                                 <span className={`font-mono font-bold ${uCount >= uTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uCount}/{uTarget}</span>
                               </div>
                               {/* Voting Progress */}
-                              <div className="flex items-center gap-2 text-xs">
-                                <ThumbsUp className="w-3 h-3 text-teal-400" />
-                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="flex items-center gap-3 text-xs">
+                                <ThumbsUp className="w-3.5 h-3.5 text-teal-400" />
+                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                                     <div 
                                     className={`h-full rounded-full ${uVoteCount >= uVoteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
                                     style={{ width: `${Math.min((uVoteCount / uVoteTarget) * 100, 100)}%` }}
@@ -1476,15 +1821,15 @@ export default function App() {
                               </div>
                            </div>
                          </td>
-                         <td className="px-6 py-4">
+                         <td className="px-6 py-5">
                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 {canEditThisUser && (
-                                    <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded transition-colors" title="Edit User">
+                                    <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors" title="Edit User">
                                         <Pencil className="w-4 h-4" />
                                     </button>
                                 )}
                                 {canDeleteThisUser && (
-                                    <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors" title="Delete User">
+                                    <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title="Delete User">
                                         <Trash2 className="w-4 h-4" />
                                     </button>
                                 )}

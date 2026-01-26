@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increased limit for images
 
 // Serve static files from the React build directory (dist)
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -52,7 +52,7 @@ const initDB = async () => {
         voting_power INTEGER DEFAULT 1,
         custom_targets JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer'))
+        CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer', 'guest'))
       );
       
       CREATE TABLE IF NOT EXISTS quotas (
@@ -72,10 +72,12 @@ const initDB = async () => {
         quota_id UUID REFERENCES quotas(id),
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
+        image_data TEXT,
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
         status TEXT DEFAULT 'pending',
+        order_index INTEGER DEFAULT 0,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -93,13 +95,15 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS difficulty NUMERIC(3,1) DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS image_data TEXT;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
 
-    // --- MIGRATION: Update Role Constraint to include 'director' ---
+    // --- MIGRATION: Update Role Constraint to include 'director' and 'guest' ---
     try {
        await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-       await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer'))`);
+       await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer', 'guest'))`);
     } catch (e) {
        console.log("Constraint update warning (may already exist):", e.message);
     }
@@ -113,6 +117,17 @@ const initDB = async () => {
         ['Director', 'admin@probfair.org', hash, 'admin', 5]
       );
       console.log('--- Default Admin Account Created: admin@probfair.org / admin123 ---');
+    }
+
+    // Seed Guest if not exists
+    const guestCheck = await client.query("SELECT * FROM users WHERE role = 'guest'");
+    if (guestCheck.rows.length === 0) {
+      const hash = await bcrypt.hash('guest123', 10);
+      await client.query(
+        "INSERT INTO users (name, email, password_hash, role, voting_power) VALUES ($1, $2, $3, $4, $5)",
+        ['Guest Contributor', 'guest@probfair.org', hash, 'guest', 0]
+      );
+      console.log('--- Guest Account Created ---');
     }
 
     // Seed Initial Quota if not exists
@@ -147,39 +162,8 @@ const authenticateToken = (req, res, next) => {
 
 // --- Routes: AI Analysis ---
 app.post('/api/ai/analyze', authenticateToken, async (req, res) => {
-  try {
-    const { statement, title, difficulty } = req.body;
-    
-    if (!process.env.API_KEY) {
-       return res.json({ text: "AI Analysis is not configured (Missing API Key)." });
-    }
-
-    const prompt = `
-      Act as a strict Math Olympiad Editor. Analyze the following math problem proposed for a middle school contest.
-      
-      Title: ${title}
-      Proposed Difficulty (0-10): ${difficulty}
-      Problem Statement (LaTeX): 
-      ${statement}
-
-      Please provide a brief critique covering:
-      1. Clarity & Ambiguity Check (Is there only one answer? Is phrasing clear?)
-      2. Difficulty Assessment (Does it match the proposed rating?)
-      3. Suggestions for improvement.
-      
-      Keep the response concise (under 100 words).
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-    });
-    
-    res.json({ text: response.text });
-  } catch (err) {
-    console.error("AI Error:", err);
-    res.status(500).json({ error: "Failed to analyze problem" });
-  }
+  // Removed AI button logic from UI, but keeping endpoint inactive or basic if triggered.
+  res.json({ text: "AI Analysis is disabled." });
 });
 
 // --- Routes: Auth ---
@@ -200,6 +184,26 @@ app.get('/auth/me', authenticateToken, async (req, res) => {
   } catch(err) {
      console.error(err);
      res.sendStatus(500);
+  }
+});
+
+app.post('/auth/guest-login', async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM users WHERE role = 'guest' LIMIT 1");
+    const user = result.rows[0];
+    if (!user) return res.status(500).json({error: "Guest account not configured"});
+
+    const token = jwt.sign({ id: user.id, role: user.role, power: user.voting_power }, process.env.JWT_SECRET);
+    res.json({ accessToken: token, user: {
+       id: user.id,
+       name: user.name,
+       role: user.role,
+       votingPower: user.voting_power,
+       customTargets: user.custom_targets || {}
+    }});
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Login failed" });
   }
 });
 
@@ -273,7 +277,7 @@ app.post('/auth/login', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   // Made public to populate the Login "Select User" list
   try {
-    const result = await pool.query('SELECT id, name, role, voting_power, custom_targets FROM users ORDER BY name');
+    const result = await pool.query("SELECT id, name, role, voting_power, custom_targets FROM users WHERE role != 'guest' ORDER BY name");
     const users = result.rows.map(u => ({
         id: u.id,
         name: u.name,
@@ -389,6 +393,11 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // --- Routes: Problems ---
 
 app.get('/api/problems', authenticateToken, async (req, res) => {
+  // Guests should NOT see problems
+  if (req.user.role === 'guest') {
+    return res.json([]);
+  }
+
   try {
     const result = await pool.query(`
       SELECT p.*, u.name as author_name, 
@@ -406,8 +415,10 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
       status: row.status || 'pending',
+      orderIndex: row.order_index || 0,
       createdAt: new Date(row.created_at).getTime(),
-      votedBy: row.voted_by || []
+      votedBy: row.voted_by || [],
+      imageData: row.image_data
     }));
 
     res.json(problems);
@@ -419,13 +430,13 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
-    const { title, statement, quotaId, difficulty, topics } = req.body;
+    const { title, statement, quotaId, difficulty, topics, imageData } = req.body;
     
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
     const result = await pool.query(
-      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending']
+      'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -437,7 +448,7 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { title, statement, difficulty, topics } = req.body;
+  const { title, statement, difficulty, topics, imageData } = req.body;
   const userId = req.user.id;
   const userRole = req.user.role;
 
@@ -455,8 +466,8 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
     const result = await pool.query(
-      'UPDATE problems SET title = $1, statement = $2, difficulty = $3, topics = $4 WHERE id = $5 RETURNING *',
-      [title, statement, diffVal, topics, id]
+      'UPDATE problems SET title = $1, statement = $2, difficulty = $3, topics = $4, image_data = $5 WHERE id = $6 RETURNING *',
+      [title, statement, diffVal, topics, imageData, id]
     );
 
     res.json({ success: true, problem: result.rows[0] });
@@ -486,7 +497,39 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
+// New Route: Reorder Round (Admin Only) - Sets status to 'accepted' and updates order_index
+app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  
+  const { problems } = req.body; // Array of problem IDs in desired order
+  
+  const client = await pool.connect();
+  try {
+      await client.query('BEGIN');
+      
+      // For each problem ID in the list, update its order_index and set status to accepted
+      for (let i = 0; i < problems.length; i++) {
+          await client.query(
+              'UPDATE problems SET order_index = $1, status = $2 WHERE id = $3',
+              [i, 'accepted', problems[i]]
+          );
+      }
+      
+      await client.query('COMMIT');
+      res.json({ success: true });
+  } catch (e) {
+      await client.query('ROLLBACK');
+      console.error(e);
+      res.status(500).json({ error: 'Reorder failed' });
+  } finally {
+      client.release();
+  }
+});
+
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
+  // Guests cannot vote
+  if (req.user.role === 'guest') return res.sendStatus(403);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

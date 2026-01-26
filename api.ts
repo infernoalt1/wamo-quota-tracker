@@ -29,6 +29,21 @@ export const api = {
     return data;
   },
 
+  guestLogin: async (): Promise<{ user: User, token?: string }> => {
+    if (USE_MOCK_BACKEND) throw new Error("Guest login not mocked");
+    
+    const res = await fetch(`${API_BASE_URL}/auth/guest-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error('Guest login failed');
+    const data = await res.json();
+    if (data.accessToken) {
+        localStorage.setItem('token', data.accessToken);
+    }
+    return data;
+  },
+
   getMe: async (): Promise<User> => {
       if (USE_MOCK_BACKEND) {
           const id = localStorage.getItem('mock_user_id');
@@ -142,18 +157,21 @@ export const api = {
     });
     if (!res.ok) throw new Error('Status update failed');
   },
-  
-  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
-    if (USE_MOCK_BACKEND) return "AI Analysis Mock: Looks good.";
-    
-    const res = await fetch(`${API_BASE_URL}/api/ai/analyze`, {
+
+  // New: Reorder Round
+  reorderRound: async (problemIds: string[]): Promise<void> => {
+    if (USE_MOCK_BACKEND) return; 
+
+    const res = await fetch(`${API_BASE_URL}/api/rounds/reorder`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(problem)
+      body: JSON.stringify({ problems: problemIds })
     });
-    if (!res.ok) throw new Error('Analysis failed');
-    const data = await res.json();
-    return data.text;
+    if (!res.ok) throw new Error('Reorder failed');
+  },
+  
+  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
+    return "AI Analysis is currently disabled.";
   },
 
   toggleVote: async (problemId: string): Promise<void> => {
