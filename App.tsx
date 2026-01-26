@@ -40,8 +40,7 @@ import {
   LayoutList,
   ArrowRight,
   ArrowUp,
-  ArrowDown,
-  FileText
+  ArrowDown
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -89,23 +88,15 @@ export default function App() {
 
   // --- Form State (Submit/Edit) ---
   const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
-  const [editingProblemVersion, setEditingProblemVersion] = useState<number>(0);
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
-  const [solution, setSolution] = useState('');
-  const [answerKey, setAnswerKey] = useState('');
-  const [estimatedTime, setEstimatedTime] = useState<number>(5);
-  const [points, setPoints] = useState<number>(5);
   const [difficulty, setDifficulty] = useState<string>('3.0');
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  
-  // Bulk Import State
-  const [showBulkImport, setShowBulkImport] = useState(false);
-  const [bulkText, setBulkText] = useState('');
-  const [parsedProblems, setParsedProblems] = useState<any[]>([]);
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Admin Editing State
   const [editingQuotaId, setEditingQuotaId] = useState<string | null>(null);
@@ -484,28 +475,19 @@ export default function App() {
   const resetForm = () => {
     setTitle('');
     setStatement('');
-    setSolution('');
-    setAnswerKey('');
-    setEstimatedTime(5);
-    setPoints(5);
     setDifficulty('3.0');
     setSelectedTopics([]);
     setImageData(null);
     setIsVerified(false);
     setEditingProblemId(null);
-    setEditingProblemVersion(0);
     setSubmissionError(null);
+    setAiAnalysis(null);
   };
 
   const handleStartEdit = (prob: Problem) => {
       setEditingProblemId(prob.id);
-      setEditingProblemVersion(prob.version);
       setTitle(prob.title);
       setStatement(prob.statement);
-      setSolution(prob.solution || '');
-      setAnswerKey(prob.answerKey || '');
-      setEstimatedTime(prob.estimatedTime || 5);
-      setPoints(prob.points || 5);
       setDifficulty(prob.difficulty.toString());
       setSelectedTopics(prob.topics || []);
       setImageData(prob.imageData || null);
@@ -550,15 +532,10 @@ export default function App() {
       const payload = {
           title,
           statement,
-          solution,
-          answerKey,
-          estimatedTime,
-          points,
           difficulty: parseFloat(difficulty),
           topics: selectedTopics,
           quotaId: activeQuotaId,
-          imageData: imageData || undefined,
-          version: editingProblemVersion // Pass version for check
+          imageData: imageData || undefined
       };
 
       if (editingProblemId) {
@@ -586,41 +563,6 @@ export default function App() {
       setIsSubmitting(false);
     }
   };
-
-  // -- Bulk Import --
-  const handleBulkParse = async () => {
-      if (!bulkText) return;
-      try {
-          const parsed = await api.parseBulkLatex(bulkText, selectedTopics, parseFloat(difficulty));
-          setParsedProblems(parsed);
-      } catch (e) {
-          alert("Parsing failed. Please check format.");
-      }
-  };
-
-  const handleBulkCommit = async () => {
-      setIsSubmitting(true);
-      let successCount = 0;
-      for (const p of parsedProblems) {
-          try {
-              await api.submitProblem({
-                  ...p,
-                  quotaId: activeQuotaId,
-                  authorId: currentUser?.id,
-                  authorName: currentUser?.name
-              });
-              successCount++;
-          } catch(e) { console.error(e); }
-      }
-      setIsSubmitting(false);
-      alert(`Imported ${successCount} problems successfully.`);
-      setBulkText('');
-      setParsedProblems([]);
-      setShowBulkImport(false);
-      refreshData();
-      setView('dashboard');
-  };
-
 
   const handleToggleVote = async (problemId: string) => {
     if (!currentUser || currentUser.role === 'guest') return;
@@ -821,6 +763,11 @@ export default function App() {
                       className="w-full p-3 bg-gray-50 hover:bg-white hover:shadow-md border border-transparent hover:border-indigo-100 rounded-xl text-left transition-all duration-200 group flex items-center justify-between"
                     >
                       <span className="font-semibold text-gray-700 group-hover:text-indigo-700">{user.name}</span>
+                      <div className="flex gap-2">
+                        {user.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Admin</span>}
+                        {user.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shadow-sm">Director</span>}
+                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-indigo-400" />
+                      </div>
                     </button>
                   ))}
                </div>
@@ -1081,7 +1028,7 @@ export default function App() {
                     </div>
 
                     {/* Decorative bg */}
-                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-100 transition-transform duration-500">
+                    <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
                         <ThumbsUp size={140} />
                     </div>
                 </div>
@@ -1258,89 +1205,27 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW: SUBMIT / EDIT / BULK */}
+        {/* VIEW: SUBMIT / EDIT */}
         {view === 'submit' && (
           <div className="max-w-4xl mx-auto">
-            <header className="mb-10 flex justify-between items-start">
-               <div>
-                  {!isGuest && (
-                      <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
-                        ← Back to Dashboard
-                      </Button>
-                  )}
-                  <h1 className="text-3xl font-bold text-slate-900">
-                      {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
-                  </h1>
-               </div>
-               {!editingProblemId && !isGuest && (
-                   <Button variant="secondary" onClick={() => setShowBulkImport(true)} className="flex items-center gap-2">
-                       <FileText className="w-4 h-4"/> Bulk Import
-                   </Button>
-               )}
+            <header className="mb-10">
+              {!isGuest && (
+                  <Button variant="ghost" onClick={() => setView('dashboard')} className="mb-6 pl-0 hover:bg-transparent text-slate-500 hover:text-slate-900">
+                     ← Back to Dashboard
+                  </Button>
+              )}
+              <h1 className="text-3xl font-bold text-slate-900">
+                  {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
+              </h1>
+              {isGuest ? (
+                  <div className="mt-2 bg-amber-50 text-amber-900 p-3 rounded-xl border border-amber-200 text-sm">
+                      <strong>Guest Mode:</strong> You are submitting a proposal. If approved, it will be added to the pool.
+                  </div>
+              ) : (
+                  <p className="text-slate-500 mt-2">Contributing to: <span className="font-bold text-indigo-600">{activeQuota.name}</span></p>
+              )}
             </header>
-
-            {/* Bulk Import Modal */}
-            {showBulkImport ? (
-               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
-                   <div className="flex justify-between items-center">
-                       <h2 className="text-xl font-bold text-slate-900">Bulk Import from LaTeX</h2>
-                       <button onClick={() => setShowBulkImport(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
-                   </div>
-                   
-                   {parsedProblems.length === 0 ? (
-                       <>
-                           <textarea
-                               value={bulkText}
-                               onChange={e => setBulkText(e.target.value)}
-                               placeholder={`Paste LaTeX here. Format example:\n\n\\begin{problem}\nProblem text...\n\\end{problem}\n\n\\begin{solution}\nSolution text...\n\\end{solution}\n\n\\answer{42}`}
-                               className="w-full h-64 p-4 border border-slate-200 rounded-xl font-mono text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none"
-                           />
-                           <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Topic</label>
-                                    <select 
-                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
-                                        onChange={e => setSelectedTopics([e.target.value as Topic])}
-                                    >
-                                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Difficulty</label>
-                                    <input 
-                                        type="number" 
-                                        value={difficulty} 
-                                        onChange={e => setDifficulty(e.target.value)}
-                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
-                                    />
-                                </div>
-                           </div>
-                           <div className="flex justify-end gap-3">
-                               <Button variant="ghost" onClick={() => setShowBulkImport(false)}>Cancel</Button>
-                               <Button onClick={handleBulkParse} disabled={!bulkText}>Parse LaTeX</Button>
-                           </div>
-                       </>
-                   ) : (
-                       <div className="space-y-4">
-                           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-indigo-700 text-sm">
-                               <strong>Found {parsedProblems.length} problems!</strong> Review them below before importing.
-                           </div>
-                           <div className="max-h-96 overflow-y-auto space-y-3 custom-scrollbar border border-slate-100 rounded-xl p-2">
-                               {parsedProblems.map((p, idx) => (
-                                   <div key={idx} className="bg-slate-50 p-3 rounded-lg text-xs">
-                                       <strong>{idx + 1}.</strong> {p.statement.substring(0, 100)}...
-                                       <div className="mt-1 text-slate-500">Ans: {p.answerKey || 'None'}</div>
-                                   </div>
-                               ))}
-                           </div>
-                           <div className="flex justify-end gap-3">
-                               <Button variant="ghost" onClick={() => setParsedProblems([])}>Back</Button>
-                               <Button onClick={handleBulkCommit} isLoading={isSubmitting}>Import All</Button>
-                           </div>
-                       </div>
-                   )}
-               </div>
-            ) : (
+            
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-10 space-y-10">
                 {/* Title */}
@@ -1370,6 +1255,14 @@ export default function App() {
                                 className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
                             />
                         </div>
+                        <a 
+                            href="https://artofproblemsolving.com/wiki/index.php/AoPS_Wiki:Competition_ratings" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1"
+                        >
+                            <ExternalLink className="w-3 h-3" /> AoPS Rating Guide (Tenths place only)
+                        </a>
                     </div>
                     <div className="space-y-3">
                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
@@ -1389,18 +1282,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Logistics */}
-                <div className="grid md:grid-cols-2 gap-8">
-                     <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Est. Time (Min)</label>
-                        <input type="number" value={estimatedTime} onChange={e => setEstimatedTime(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                     </div>
-                     <div className="space-y-3">
-                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Points</label>
-                        <input type="number" value={points} onChange={e => setPoints(Number(e.target.value))} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                     </div>
-                </div>
-
                 {/* Statement */}
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">
@@ -1409,7 +1290,7 @@ export default function App() {
                   <textarea 
                     value={statement}
                     onChange={(e) => setStatement(e.target.value)}
-                    rows={6}
+                    rows={8}
                     placeholder="Let $ABC$ be a triangle where..."
                     className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-lg leading-relaxed mb-4"
                   />
@@ -1435,21 +1316,8 @@ export default function App() {
                           </div>
                       )}
                   </div>
-                </div>
 
-                {/* Solution & Answer */}
-                <div className="grid md:grid-cols-2 gap-8">
-                     <div className="space-y-3">
-                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Full Solution (LaTeX)</label>
-                         <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif" placeholder="Proof or derivation..."/>
-                     </div>
-                     <div className="space-y-3">
-                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Answer Key (Short)</label>
-                         <input type="text" value={answerKey} onChange={e => setAnswerKey(e.target.value)} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 42"/>
-                     </div>
-                </div>
-
-                {/* Preview */}
+                  {/* Preview */}
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mt-4">
                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-3">Live Preview</span>
                      <MathText 
@@ -1465,6 +1333,7 @@ export default function App() {
                         </div>
                      )}
                   </div>
+                </div>
 
                 {/* Verification / Disclaimer */}
                 <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 flex items-start gap-4 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
@@ -1509,7 +1378,6 @@ export default function App() {
                 </Button>
               </div>
             </div>
-            )}
           </div>
         )}
 

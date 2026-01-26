@@ -1,4 +1,4 @@
-import { Problem, User, Quota, ProblemStatus, Topic } from './types';
+import { Problem, User, Quota, ProblemStatus } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -144,12 +144,7 @@ export const api = {
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify(problem)
     });
-    if (!res.ok) {
-        if (res.status === 409) {
-            throw new Error('CONFLICT: This problem has been edited by someone else. Please refresh and try again.');
-        }
-        throw new Error('Update problem failed');
-    }
+    if (!res.ok) throw new Error('Update problem failed');
   },
   
   updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
@@ -174,6 +169,10 @@ export const api = {
     });
     if (!res.ok) throw new Error('Reorder failed');
   },
+  
+  analyzeProblem: async (problem: { title: string, statement: string, difficulty: number }): Promise<string> => {
+    return "AI Analysis is currently disabled.";
+  },
 
   toggleVote: async (problemId: string): Promise<void> => {
     if (USE_MOCK_BACKEND) return mockApi.toggleVote(problemId);
@@ -193,18 +192,6 @@ export const api = {
       headers: getAuthHeader()
     });
     if (!res.ok) throw new Error('Reset failed');
-  },
-  
-  // New: Bulk Parsing
-  parseBulkLatex: async (text: string, defaultTopics: Topic[], defaultDifficulty: number): Promise<any[]> => {
-      const res = await fetch(`${API_BASE_URL}/api/problems/bulk-parse`, {
-          method: 'POST',
-          headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, defaultTopics, defaultDifficulty })
-      });
-      if (!res.ok) throw new Error("Parsing failed");
-      const data = await res.json();
-      return data.problems;
   },
 
   // Quotas
