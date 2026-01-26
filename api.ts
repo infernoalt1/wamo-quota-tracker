@@ -1,4 +1,4 @@
-import { Problem, User, Quota, ProblemStatus, Topic } from './types';
+import { Problem, User, Quota, ProblemStatus, Topic, Comment } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -163,6 +163,25 @@ export const api = {
     if (!res.ok) throw new Error('Status update failed');
   },
 
+  // Comments
+  getComments: async (problemId: string): Promise<Comment[]> => {
+      if (USE_MOCK_BACKEND) return [];
+      const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/comments`, { headers: getAuthHeader() });
+      if (!res.ok) return [];
+      return res.json();
+  },
+
+  postComment: async (problemId: string, text: string): Promise<Comment> => {
+      if (USE_MOCK_BACKEND) return {} as Comment;
+      const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/comments`, {
+          method: 'POST',
+          headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+      });
+      if (!res.ok) throw new Error('Comment failed');
+      return res.json();
+  },
+
   // New: Reorder Round
   reorderRound: async (problemIds: string[]): Promise<void> => {
     if (USE_MOCK_BACKEND) return; 
@@ -195,18 +214,6 @@ export const api = {
     if (!res.ok) throw new Error('Reset failed');
   },
   
-  // New: Bulk Parsing
-  parseBulkLatex: async (text: string, defaultTopics: Topic[], defaultDifficulty: number): Promise<any[]> => {
-      const res = await fetch(`${API_BASE_URL}/api/problems/bulk-parse`, {
-          method: 'POST',
-          headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, defaultTopics, defaultDifficulty })
-      });
-      if (!res.ok) throw new Error("Parsing failed");
-      const data = await res.json();
-      return data.problems;
-  },
-
   // Quotas
   getQuotas: async (): Promise<Quota[]> => {
     if (USE_MOCK_BACKEND) return mockApi.getQuotas();
