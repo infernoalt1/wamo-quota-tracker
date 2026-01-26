@@ -432,10 +432,7 @@ export default function App() {
                   {users.map(user => (
                     <button key={user.id} onClick={() => setSelectedLoginId(user.id)} className="w-full p-2.5 hover:bg-slate-50 rounded-lg text-left text-sm flex items-center justify-between group transition-colors">
                       <span className="font-medium text-slate-700 group-hover:text-indigo-700">{user.name}</span>
-                      <div className="flex gap-1">
-                         {user.role === 'admin' && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">ADM</span>}
-                         {user.role === 'director' && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold">DIR</span>}
-                      </div>
+                      {/* Badge UI removed from here */}
                     </button>
                   ))}
                </div>
