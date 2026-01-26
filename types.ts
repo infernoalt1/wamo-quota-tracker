@@ -23,6 +23,10 @@ export interface Problem {
   quotaId: string;    // Crucial for tracking which round this belongs to
   title: string;
   statement: string;
+  solution?: string; // New: Full LaTeX solution
+  answerKey?: string; // New: Short answer for grading
+  estimatedTime?: number; // New: In minutes
+  points?: number; // New: Point value
   imageData?: string; // Base64 image data
   difficulty: number;
   topics: Topic[];
@@ -31,6 +35,7 @@ export interface Problem {
   votedBy: string[]; // User IDs who have voted
   status: ProblemStatus;
   orderIndex: number; // New: For ordering in the final round
+  version: number; // New: Optimistic concurrency control
 }
 
 export interface User {
