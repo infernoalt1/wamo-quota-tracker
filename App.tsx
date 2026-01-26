@@ -8,13 +8,12 @@ import {
   PlusCircle, 
   LayoutDashboard, 
   BookOpen, 
-  LogOut, 
   Settings,
   UserPlus,
   TrendingUp,
   Target,
   ShieldAlert,
-  BadgeCheck,
+  CheckCircle,
   Pencil,
   Save,
   X,
@@ -22,7 +21,6 @@ import {
   Lock,
   Clock,
   RotateCcw,
-  Info,
   Filter,
   ArrowUpDown,
   Search,
@@ -30,12 +28,13 @@ import {
   Layers,
   Zap,
   Download,
-  CheckCircle,
   Crown,
   ThumbsUp,
-  ChevronRight,
   User as UserIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Badge,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -85,7 +84,7 @@ export default function App() {
   const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
-  const [difficulty, setDifficulty] = useState<string>('3.0');
+  const [difficulty, setDifficulty] = useState<string>(''); // Empty by default
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
@@ -97,6 +96,7 @@ export default function App() {
   
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editUserForm, setEditUserForm] = useState<Partial<User> & { password?: string }>({});
+  const [showPasswords, setShowPasswords] = useState(false);
 
   
   // Admin Create New User State
@@ -111,7 +111,7 @@ export default function App() {
   const [newQuotaInstr, setNewQuotaInstr] = useState('');
 
   // Pool View State (Sorting/Filtering)
-  const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
+  const [poolSort, setPoolSort] = useState<'highest_vote' | 'lowest_vote' | 'hardest' | 'easiest' | 'newest'>('highest_vote');
   const [poolFilterTopic, setPoolFilterTopic] = useState<string>('All');
   const [poolFilterStatus, setPoolFilterStatus] = useState<string>('All');
   const [poolFilterQuota, setPoolFilterQuota] = useState<string>('All');
@@ -225,8 +225,8 @@ export default function App() {
           const scoreA = a.score || 0;
           const scoreB = b.score || 0;
           switch(poolSort) {
-              case 'highest': return scoreB - scoreA;
-              case 'lowest': return scoreA - scoreB;
+              case 'highest_vote': return scoreB - scoreA;
+              case 'lowest_vote': return scoreA - scoreB;
               case 'hardest': return b.difficulty - a.difficulty;
               case 'easiest': return a.difficulty - b.difficulty;
               case 'newest': return b.createdAt - a.createdAt;
@@ -272,7 +272,7 @@ export default function App() {
     setStatement('');
   };
 
-  // Actions... (keeping implementations mostly same, just condensing spacing in UI)
+  // Actions... 
   const addQuota = async () => {
     if (!newQuotaName.trim()) return;
     try {
@@ -311,9 +311,9 @@ export default function App() {
         const newUser = await api.createUser({
           name: newUserName.trim(),
           password: newUserPassword.trim(),
-          role: newUserRole,
+          role: currentUser?.role === 'director' ? 'writer' : newUserRole, // Director forced to create writers
           submittedCount: 0,
-          votingPower: newUserRole === 'director' ? 5 : 1,
+          votingPower: (currentUser?.role === 'director' ? 'writer' : newUserRole) === 'director' ? 5 : 1,
           customTargets: {}
         });
         setUsers([...users, newUser]);
@@ -326,7 +326,7 @@ export default function App() {
     try { await api.deleteUser(id); await refreshData(); } catch(e) { alert("Failed"); }
   }
 
-  const startEditUser = (user: User) => { setEditingUserId(user.id); setEditUserForm({ ...user, password: '' }); };
+  const startEditUser = (user: User) => { setEditingUserId(user.id); setEditUserForm({ ...user, password: user.password || '' }); };
   const saveUser = async (userId: string) => {
     if (!editUserForm.name?.trim()) return;
     try {
@@ -347,7 +347,7 @@ export default function App() {
   };
 
   const resetForm = () => {
-    setTitle(''); setStatement(''); setDifficulty('3.0'); setSelectedTopics([]); setImageData(null); setIsVerified(false);
+    setTitle(''); setStatement(''); setDifficulty(''); setSelectedTopics([]); setImageData(null); setIsVerified(false);
     setEditingProblemId(null); setSubmissionError(null);
   };
 
@@ -373,9 +373,13 @@ export default function App() {
   const handleSubmit = async () => {
     if (!currentUser || !title || !statement || !isVerified) return;
     if (selectedTopics.length === 0) { setSubmissionError("Select a topic."); return; }
+    
+    // Parse difficulty or default to 0
+    const diffNum = difficulty === '' ? 0 : parseFloat(difficulty);
+    
     setSubmissionError(null); setIsSubmitting(true);
     try {
-      const payload = { title, statement, difficulty: parseFloat(difficulty), topics: selectedTopics, quotaId: activeQuotaId, imageData: imageData || undefined };
+      const payload = { title, statement, difficulty: diffNum, topics: selectedTopics, quotaId: activeQuotaId, imageData: imageData || undefined };
       if (editingProblemId) await api.updateProblem(editingProblemId, payload);
       else await api.submitProblem({ ...payload, authorId: currentUser.id, authorName: currentUser.name });
       
@@ -428,7 +432,10 @@ export default function App() {
                   {users.map(user => (
                     <button key={user.id} onClick={() => setSelectedLoginId(user.id)} className="w-full p-2.5 hover:bg-slate-50 rounded-lg text-left text-sm flex items-center justify-between group transition-colors">
                       <span className="font-medium text-slate-700 group-hover:text-indigo-700">{user.name}</span>
-                      {user.role === 'admin' && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">ADM</span>}
+                      <div className="flex gap-1">
+                         {user.role === 'admin' && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">ADM</span>}
+                         {user.role === 'director' && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold">DIR</span>}
+                      </div>
                     </button>
                   ))}
                </div>
@@ -453,7 +460,7 @@ export default function App() {
                 value={loginPassword}
                 onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
                 onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 bg-white"
                 autoFocus
               />
               {loginError && <p className="text-red-500 text-xs">{loginError}</p>}
@@ -595,13 +602,16 @@ export default function App() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Title</label>
-                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Problem Title" />
+                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 bg-white" placeholder="Problem Title" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Difficulty</label>
-                        <input type="number" step="0.1" min="0" max="50" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        <input type="number" step="0.1" min="0" max="50" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} placeholder="0.0" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 bg-white" />
+                        <a href="https://artofproblemsolving.com/wiki/index.php/AoPS_Wiki:Competition_ratings" target="_blank" rel="noopener noreferrer" className="text-[10px] text-indigo-600 hover:underline mt-1 flex items-center gap-1">
+                            <ExternalLink className="w-3 h-3"/> AoPS Difficulty Ratings
+                        </a>
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Topics</label>
@@ -617,7 +627,7 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Statement (LaTeX supported)</label>
-                  <textarea value={statement} onChange={(e) => setStatement(e.target.value)} rows={6} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-serif" placeholder="Let $x$ be..." />
+                  <textarea value={statement} onChange={(e) => setStatement(e.target.value)} rows={6} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-serif text-slate-900 bg-white" placeholder="Let $x$ be..." />
                   
                   <div className="mt-3 flex items-center gap-3">
                       <label className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100 text-xs font-medium text-slate-600 transition-colors">
@@ -661,19 +671,31 @@ export default function App() {
         {/* POOL */}
         {view === 'pool' && !isGuest && (
           <div className="max-w-5xl mx-auto">
-            <header className="mb-6 flex justify-between items-end">
+            <header className="mb-6 flex flex-col md:flex-row justify-between md:items-end gap-4">
                <div>
                   <h1 className="text-2xl font-bold text-slate-900">Problem Pool</h1>
                   <p className="text-slate-500 text-xs mt-1">Blind review enabled</p>
                </div>
-               <div className="flex gap-2">
-                   <select className="text-xs border border-slate-200 rounded px-2 py-1" value={poolFilterTopic} onChange={e => setPoolFilterTopic(e.target.value)}>
+               <div className="flex gap-2 flex-wrap">
+                   <select className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-900" value={poolFilterQuota} onChange={e => setPoolFilterQuota(e.target.value)}>
+                       <option value="All">All Quotas</option>
+                       {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                   </select>
+                   <select className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-900" value={poolFilterStatus} onChange={e => setPoolFilterStatus(e.target.value)}>
+                       <option value="All">All Statuses</option>
+                       <option value="pending">Pending Only</option>
+                       <option value="accepted">Accepted Only</option>
+                   </select>
+                   <select className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-900" value={poolFilterTopic} onChange={e => setPoolFilterTopic(e.target.value)}>
                        <option value="All">All Topics</option>
                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                    </select>
-                   <select className="text-xs border border-slate-200 rounded px-2 py-1" value={poolSort} onChange={e => setPoolSort(e.target.value as any)}>
-                       <option value="highest">Sort: High Score</option>
-                       <option value="newest">Sort: Newest</option>
+                   <select className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-900" value={poolSort} onChange={e => setPoolSort(e.target.value as any)}>
+                       <option value="highest_vote">Votes: High to Low</option>
+                       <option value="lowest_vote">Votes: Low to High</option>
+                       <option value="hardest">Diff: Hard to Easy</option>
+                       <option value="easiest">Diff: Easy to Hard</option>
+                       <option value="newest">Newest First</option>
                    </select>
                </div>
             </header>
@@ -697,7 +719,7 @@ export default function App() {
 
         {/* ADMIN */}
         {view === 'admin' && isDirector && !isGuest && (
-          <div className="max-w-5xl mx-auto space-y-6">
+          <div className="max-w-6xl mx-auto space-y-6">
              <div className="flex justify-between items-center">
                 <h1 className="text-2xl font-bold text-slate-900">Admin</h1>
                 <div className="flex gap-2">
@@ -713,23 +735,37 @@ export default function App() {
                       {quotas.map(q => (
                          <div key={q.id} className={`p-3 rounded-lg border text-sm ${activeQuotaId === q.id ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 bg-slate-50'}`}>
                             {editingQuotaId === q.id ? (
-                               <div className="space-y-2">
-                                  <input className="w-full px-2 py-1 border rounded bg-white" value={editQuotaForm.name} onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})} />
+                               <div className="space-y-3">
+                                  <input className="w-full px-2 py-1 border rounded bg-white font-bold text-slate-900" value={editQuotaForm.name} onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})} placeholder="Round Name" />
                                   <div className="flex gap-2">
-                                      <input className="w-20 px-2 py-1 border rounded bg-white" type="number" placeholder="Target" value={editQuotaForm.target} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
-                                      <button onClick={saveQuota} className="text-green-600 font-bold px-2">Save</button>
-                                      <button onClick={cancelEditQuota} className="text-slate-400">Cancel</button>
+                                      <div className="flex-1">
+                                          <label className="text-[10px] text-slate-400 uppercase font-bold">Write Target</label>
+                                          <input className="w-full px-2 py-1 border rounded bg-white text-slate-900" type="number" value={editQuotaForm.target} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
+                                      </div>
+                                      <div className="flex-1">
+                                          <label className="text-[10px] text-slate-400 uppercase font-bold">Vote Target</label>
+                                          <input className="w-full px-2 py-1 border rounded bg-white text-slate-900" type="number" value={editQuotaForm.voteTarget} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                                      </div>
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-400 uppercase font-bold">Instructions</label>
+                                      <input className="w-full px-2 py-1 border rounded bg-white text-slate-900" value={editQuotaForm.instructions} onChange={e => setEditQuotaForm({...editQuotaForm, instructions: e.target.value})} />
+                                  </div>
+                                  <div className="flex justify-end gap-2 pt-1">
+                                      <button onClick={saveQuota} className="text-green-600 font-bold px-2 text-xs border border-green-200 rounded hover:bg-green-50">Save</button>
+                                      <button onClick={cancelEditQuota} className="text-slate-400 text-xs px-2">Cancel</button>
                                   </div>
                                </div>
                             ) : (
-                               <div className="flex justify-between items-center">
+                               <div className="flex justify-between items-start">
                                   <div>
                                      <div className="font-bold">{q.name}</div>
-                                     <div className="text-xs text-slate-500">Target: {q.target} • Vote: {q.voteTarget || 3}</div>
+                                     <div className="text-xs text-slate-500 mt-1">Write: {q.target} • Vote: {q.voteTarget || 3}</div>
+                                     <div className="text-xs text-slate-400 italic mt-0.5">{q.instructions || "No instructions."}</div>
                                   </div>
                                   <div className="flex gap-2">
                                      <button onClick={() => startEditQuota(q)} className="text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
-                                     {activeQuotaId !== q.id && <button onClick={() => switchQuota(q.id)} className="text-xs bg-white border px-2 py-0.5 rounded shadow-sm">Activate</button>}
+                                     {activeQuotaId !== q.id && <button onClick={() => switchQuota(q.id)} className="text-xs bg-white border px-2 py-0.5 rounded shadow-sm hover:bg-slate-50">Activate</button>}
                                   </div>
                                </div>
                             )}
@@ -737,7 +773,7 @@ export default function App() {
                       ))}
                    </div>
                    <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
-                       <input type="text" placeholder="New Round Name" value={newQuotaName} onChange={e => setNewQuotaName(e.target.value)} className="flex-1 px-3 py-1.5 border rounded-lg text-sm outline-none" />
+                       <input type="text" placeholder="New Round Name" value={newQuotaName} onChange={e => setNewQuotaName(e.target.value)} className="flex-1 px-3 py-1.5 border rounded-lg text-sm outline-none bg-white text-slate-900" />
                        <Button onClick={addQuota} size="sm">Add</Button>
                    </div>
                 </div>
@@ -745,68 +781,116 @@ export default function App() {
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                    <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><UserPlus className="w-4 h-4"/> Add User</h3>
                    <div className="space-y-3">
-                      <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Full Name" className="w-full px-3 py-2 border rounded-lg text-sm outline-none" />
-                      <input type="text" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="Password" className="w-full px-3 py-2 border rounded-lg text-sm outline-none" />
-                      <div className="flex gap-2 text-xs">
-                          <button onClick={() => setNewUserRole('writer')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'writer' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold' : 'border-slate-200'}`}>Writer</button>
-                          <button onClick={() => setNewUserRole('director')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'director' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold' : 'border-slate-200'}`}>Director</button>
-                      </div>
+                      <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Full Name" className="w-full px-3 py-2 border rounded-lg text-sm outline-none bg-white text-slate-900" />
+                      <input type="text" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="Password" className="w-full px-3 py-2 border rounded-lg text-sm outline-none bg-white text-slate-900" />
+                      {currentUser?.role === 'admin' ? (
+                          <div className="flex gap-2 text-xs">
+                              <button onClick={() => setNewUserRole('writer')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'writer' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold' : 'border-slate-200'}`}>Writer</button>
+                              <button onClick={() => setNewUserRole('director')} className={`flex-1 py-1.5 rounded border ${newUserRole === 'director' ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-bold' : 'border-slate-200'}`}>Director</button>
+                          </div>
+                      ) : (
+                          <div className="text-xs text-slate-500 italic text-center py-1 bg-slate-50 rounded">
+                              New accounts are created as Writers.
+                          </div>
+                      )}
                       <Button onClick={addUser} className="w-full" disabled={!newUserName || !newUserPassword}>Create Account</Button>
                    </div>
                 </div>
              </div>
 
              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-xs font-bold uppercase text-slate-500">Users</h3>
+                    <button onClick={() => setShowPasswords(!showPasswords)} className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                        {showPasswords ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        {showPasswords ? 'Hide Passwords' : 'Show Passwords'}
+                    </button>
+                </div>
                <table className="w-full text-left text-sm">
-                 <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                 <thead className="bg-white border-b border-slate-200 text-xs uppercase text-slate-500">
                    <tr>
-                     <th className="px-4 py-3 font-semibold">User</th>
-                     <th className="px-4 py-3 font-semibold">Power</th>
-                     <th className="px-4 py-3 font-semibold">Override</th>
-                     <th className="px-4 py-3 font-semibold">Progress</th>
-                     <th className="px-4 py-3 font-semibold w-16"></th>
+                     <th className="px-4 py-3 font-semibold min-w-[150px]">User</th>
+                     <th className="px-4 py-3 font-semibold w-32">Password</th>
+                     <th className="px-4 py-3 font-semibold w-28">Role</th>
+                     <th className="px-4 py-3 font-semibold w-20 text-center">Power</th>
+                     <th className="px-4 py-3 font-semibold w-32">Write</th>
+                     <th className="px-4 py-3 font-semibold w-32">Vote</th>
+                     <th className="px-4 py-3 font-semibold w-20"></th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
                    {users.map(u => {
                      const isEditing = editingUserId === u.id;
+                     const isTargetAdmin = u.role === 'admin';
+                     const canEdit = currentUser.role === 'admin' || (currentUser.role === 'director' && !isTargetAdmin);
+                     const canDelete = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role === 'writer'); // Directors can only delete writers
+
                      const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
+                     const vTarget = activeQuota.voteTarget || 3;
                      const uCount = u.submittedCount || 0;
+                     const vCount = u.voteCount || 0;
                      
                      if (isEditing) {
                          return (
                             <tr key={u.id} className="bg-slate-50">
-                                <td className="px-4 py-2"><input className="w-full border rounded px-1" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} /></td>
-                                <td className="px-4 py-2"><input type="number" className="w-12 border rounded px-1" value={editUserForm.votingPower} onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value)})} /></td>
-                                <td className="px-4 py-2"><input type="number" className="w-12 border rounded px-1" value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target} onChange={e => updateUserTarget(u.id, parseInt(e.target.value))} /></td>
-                                <td className="px-4 py-2 text-xs text-slate-400">Saving...</td>
-                                <td className="px-4 py-2 flex gap-2">
-                                    <button onClick={() => saveUser(u.id)} className="text-green-600"><Save className="w-4 h-4"/></button>
-                                    <button onClick={() => setEditingUserId(null)} className="text-slate-400"><X className="w-4 h-4"/></button>
+                                <td className="px-4 py-2"><input className="w-full border rounded px-1 bg-white text-slate-900" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} /></td>
+                                <td className="px-4 py-2"><input className="w-full border rounded px-1 bg-white text-slate-900" value={editUserForm.password} placeholder="Reset" onChange={e => setEditUserForm({...editUserForm, password: e.target.value})} disabled={currentUser.role === 'director'} title={currentUser.role === 'director' ? "Directors cannot change passwords" : ""} /></td>
+                                <td className="px-4 py-2">
+                                    {currentUser.role === 'admin' ? (
+                                        <select className="w-full border rounded px-1 text-xs py-1 bg-white text-slate-900" value={editUserForm.role} onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}>
+                                            <option value="writer">Writer</option>
+                                            <option value="director">Director</option>
+                                            <option value="admin">Admin</option>
+                                        </select>
+                                    ) : <span className="text-xs text-slate-400 capitalize">{u.role}</span>}
+                                </td>
+                                <td className="px-4 py-2"><input type="number" className="w-full border rounded px-1 text-center bg-white text-slate-900" value={editUserForm.votingPower} onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value)})} /></td>
+                                <td className="px-4 py-2">
+                                   <div className="flex items-center gap-1">
+                                      <span className="text-[10px] text-slate-400">T:</span>
+                                      <input type="number" className="w-full border rounded px-1 bg-white text-slate-900" value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target} onChange={e => updateUserTarget(u.id, parseInt(e.target.value))} />
+                                   </div>
+                                </td>
+                                <td className="px-4 py-2 text-xs text-slate-400 italic">Global</td>
+                                <td className="px-4 py-2 flex gap-2 justify-end">
+                                    <button onClick={() => saveUser(u.id)} className="text-green-600 hover:bg-green-100 p-1 rounded"><Save className="w-4 h-4"/></button>
+                                    <button onClick={() => setEditingUserId(null)} className="text-slate-400 hover:bg-slate-100 p-1 rounded"><X className="w-4 h-4"/></button>
                                 </td>
                             </tr>
                          )
                      }
                      return (
-                       <tr key={u.id} className="group hover:bg-slate-50">
-                         <td className="px-4 py-3 font-medium flex items-center gap-2">
-                           {u.name}
-                           {u.role === 'admin' && <Crown className="w-3 h-3 text-purple-500" />}
+                       <tr key={u.id} className="group hover:bg-slate-50 transition-colors">
+                         <td className="px-4 py-3 font-medium text-slate-900">{u.name}</td>
+                         <td className="px-4 py-3 font-mono text-xs text-slate-400">
+                            {showPasswords ? (u.password || (u.id.startsWith('u') && 'mock123')) : '••••••'}
                          </td>
-                         <td className="px-4 py-3">{u.votingPower}</td>
-                         <td className="px-4 py-3"><span className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-xs">{uTarget}</span></td>
                          <td className="px-4 py-3">
-                           <div className="flex items-center gap-2 text-xs">
-                                <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                             {u.role === 'admin' && <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"><Crown className="w-3 h-3"/> Admin</span>}
+                             {u.role === 'director' && <span className="inline-flex items-center gap-1 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"><Badge className="w-3 h-3"/> Director</span>}
+                             {u.role === 'writer' && <span className="text-slate-400 text-xs capitalize">Writer</span>}
+                         </td>
+                         <td className="px-4 py-3 text-center text-slate-600">{u.votingPower}</td>
+                         <td className="px-4 py-3">
+                           <div className="flex flex-col gap-1 w-full">
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden w-full">
                                     <div className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}></div>
                                 </div>
-                                <span>{uCount}/{uTarget}</span>
+                                <span className="text-[10px] text-slate-500 font-mono">{uCount}/{uTarget}</span>
                            </div>
                          </td>
                          <td className="px-4 py-3">
-                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => startEditUser(u)} className="text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
-                                {currentUser.role === 'admin' && u.role !== 'admin' && <button onClick={() => deleteUser(u.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>}
+                           <div className="flex flex-col gap-1 w-full">
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden w-full">
+                                    <div className={`h-full rounded-full ${vCount >= vTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} style={{ width: `${Math.min((vCount / vTarget) * 100, 100)}%` }}></div>
+                                </div>
+                                <span className="text-[10px] text-slate-500 font-mono">{vCount}/{vTarget}</span>
+                           </div>
+                         </td>
+                         <td className="px-4 py-3">
+                            <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                {canEdit && <button onClick={() => startEditUser(u)} className="text-slate-400 hover:text-indigo-600 p-1"><Pencil className="w-3.5 h-3.5" /></button>}
+                                {canDelete && u.role !== 'admin' && <button onClick={() => deleteUser(u.id)} className="text-slate-400 hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button>}
                             </div>
                          </td>
                        </tr>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Problem, ProblemStatus } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, Star, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle } from 'lucide-react';
 import { MathText } from './MathText';
 
 interface ProblemCardProps {
@@ -43,13 +43,6 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
       return (
         <span className="flex items-center gap-1 bg-green-50 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold border border-green-200 uppercase tracking-wide">
            <CheckCircle className="w-3 h-3" /> Accepted
-        </span>
-      );
-    }
-    if (status === 'shortlisted') {
-      return (
-        <span className="flex items-center gap-1 bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded text-[10px] font-bold border border-yellow-200 uppercase tracking-wide">
-           <Star className="w-3 h-3" /> Shortlist
         </span>
       );
     }
@@ -112,8 +105,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
           <div className="flex items-center gap-1 shrink-0">
               {isAdmin && onStatusChange && (
                   <div className="flex items-center bg-slate-50 border border-slate-200 rounded p-0.5 gap-0.5">
-                        <button onClick={() => onStatusChange(problem.id, 'pending')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'pending' ? 'text-slate-800' : 'text-slate-400'}`} title="Pending"><AlertCircle className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => onStatusChange(problem.id, 'shortlisted')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'shortlisted' ? 'text-yellow-600' : 'text-slate-400'}`} title="Shortlist"><Star className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => onStatusChange(problem.id, 'pending')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'pending' ? 'text-slate-800' : 'text-slate-400'}`} title="Mark Pending"><AlertCircle className="w-3.5 h-3.5" /></button>
                         <button onClick={() => onStatusChange(problem.id, 'accepted')} className={`p-1 rounded hover:bg-white hover:shadow-sm ${status === 'accepted' ? 'text-green-600' : 'text-slate-400'}`} title="Accept"><CheckCircle className="w-3.5 h-3.5" /></button>
                   </div>
               )}
@@ -135,18 +127,13 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
 
         <div className="bg-slate-50 p-4 rounded-lg border border-slate-100/50">
             <MathText text={problem.statement} className="text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-serif" />
-        </div>
-        
-        {problem.imageData && (
-           <div className="mt-3">
-               <div className="inline-flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg group-hover:border-indigo-200 transition-colors cursor-pointer" onClick={() => window.open(problem.imageData, '_blank')}>
-                  <ImageIcon className="w-4 h-4 text-slate-400" />
-                  <span className="text-xs text-slate-500 font-medium">Attached Image</span>
-                  <div className="h-4 w-[1px] bg-slate-200 mx-1"></div>
-                  <img src={problem.imageData} alt="Thumbnail" className="h-6 w-auto object-contain rounded-sm" />
+            
+            {problem.imageData && (
+               <div className="mt-4 pt-4 border-t border-slate-200">
+                   <img src={problem.imageData} alt="Problem Attachment" className="max-w-full h-auto rounded-md border border-slate-200 shadow-sm mx-auto sm:mx-0" />
                </div>
-           </div>
-        )}
+            )}
+        </div>
       </div>
     </div>
   );
