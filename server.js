@@ -469,7 +469,7 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { title, statement, difficulty, topics, imageData, solution, answerKey, version, roundId, status } = req.body;
+  const updates = req.body; // Expect partial updates
   const userId = req.user.id;
   const userRole = req.user.role;
 
@@ -483,45 +483,51 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
 
-    // 2. Build Query - supporting simple updates or Director round assignment
-    let query = `UPDATE problems SET `;
+    // 2. Dynamic Update Query Construction
+    const setClauses = [];
     const values = [];
     let idx = 1;
 
-    // Logic: If roundId/status are passed (Director assignment), update those. Else update content.
-    if (roundId !== undefined || status !== undefined) {
-         if (roundId !== undefined) {
-             query += `round_id = $${idx++}, `;
-             values.push(roundId);
-         }
-         if (status !== undefined) {
-             query += `status = $${idx++}, `;
-             values.push(status);
-         }
-    } else {
-        // Content update
-        query += `title = $${idx++}, statement = $${idx++}, difficulty = $${idx++}, topics = $${idx++}, image_data = $${idx++}, solution = $${idx++}, answer_key = $${idx++}, version = version + 1 `;
-        values.push(
-            title, 
-            statement, 
-            (difficulty !== undefined && difficulty !== null && !isNaN(difficulty)) ? difficulty : 0, 
-            topics || [], 
-            imageData ?? null, // Ensure null if undefined
-            solution ?? null, 
-            answerKey ?? null
-        );
-    }
+    // Whitelist allowed fields to prevent arbitrary column injection
+    const allowedFields = ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData', 'roundId', 'status', 'version'];
     
-    // Trim comma
-    if (query.endsWith(', ')) query = query.slice(0, -2);
+    // Mapping frontend camelCase to DB snake_case
+    const dbMapping = {
+        title: 'title',
+        statement: 'statement',
+        solution: 'solution',
+        answerKey: 'answer_key',
+        difficulty: 'difficulty',
+        topics: 'topics',
+        imageData: 'image_data',
+        roundId: 'round_id',
+        status: 'status'
+        // version is handled specially
+    };
 
-    query += ` WHERE id = $${idx++}`;
+    // Build SET clauses
+    for (const key of Object.keys(updates)) {
+        if (allowedFields.includes(key) && key !== 'version') {
+             const dbCol = dbMapping[key];
+             if (dbCol) {
+                 setClauses.push(`${dbCol} = $${idx++}`);
+                 values.push(updates[key] === undefined ? null : updates[key]);
+             }
+        }
+    }
+
+    if (setClauses.length === 0) return res.status(400).json({error: "No valid fields to update"});
+
+    // Handle Version Increment
+    setClauses.push(`version = version + 1`);
+
+    let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
     values.push(id);
-    
-    // If updating content, check version
-    if (version !== undefined && (roundId === undefined && status === undefined)) {
-        query += ` AND version = $${idx++}`;
-        values.push(version);
+
+    // Optimistic locking check (if version provided)
+    if (updates.version !== undefined) {
+         query += ` AND version = $${idx++}`;
+         values.push(updates.version);
     }
 
     query += ` RETURNING *`;
