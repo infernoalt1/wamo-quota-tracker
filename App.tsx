@@ -49,7 +49,8 @@ import {
   BarChart2,
   FolderOpen,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Copy
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -174,12 +175,15 @@ export default function App() {
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [editRoundForm, setEditRoundForm] = useState<Partial<Round>>({});
 
+  // Drag State
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
   // Export State
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportRoundName, setExportRoundName] = useState('');
   const [exportContestName, setExportContestName] = useState('Washington Math Tournament');
   const [exportDate, setExportDate] = useState('Oct 11th, 2025');
-  const [exportFormat, setExportFormat] = useState<'list' | 'speed_table'>('list');
 
 
   // --- Initial Load ---
@@ -749,13 +753,6 @@ export default function App() {
           const existing = problems.find(p => p.id === problemId);
           if (!existing) return;
           
-          const fullPayload = {
-              ...existing,
-              ...updates,
-              // API expects specific format or partial, logic handled in backend now 
-              // but passing keys explicitly helps
-          };
-          
           await api.updateProblem(problemId, updates);
       } catch(e) {
           console.error("Composer update failed");
@@ -827,8 +824,9 @@ export default function App() {
       }
   };
 
-  // Drag and Drop Logic
+  // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
+      setDraggingId(problemId);
       e.dataTransfer.setData('problemId', problemId);
       e.dataTransfer.setData('source', source);
       if (typeof index === 'number') e.dataTransfer.setData('index', index.toString());
@@ -839,9 +837,30 @@ export default function App() {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
   };
+  
+  const handleDragOverItem = (e: React.DragEvent, index: number) => {
+      e.preventDefault();
+      e.stopPropagation(); // Stop bubbling to container
+      
+      const rect = e.currentTarget.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const newIndex = e.clientY < midY ? index : index + 1;
+      
+      if (newIndex !== dragOverIndex) {
+          setDragOverIndex(newIndex);
+      }
+  };
+
+  // Container handler to allow dropping in empty space
+  const handleContainerDragOver = (e: React.DragEvent, listLength: number) => {
+      e.preventDefault();
+      if (e.target === e.currentTarget) {
+          setDragOverIndex(listLength);
+      }
+  };
 
   // Handle Drop on the "Official Round" List (Accepts Candidates & Reorders Accepted)
-  const handleDropOnRound = async (e: React.DragEvent, targetIndex?: number) => {
+  const handleDropOnRound = async (e: React.DragEvent) => {
       e.preventDefault();
       const problemId = e.dataTransfer.getData('problemId');
       const source = e.dataTransfer.getData('source');
@@ -849,38 +868,52 @@ export default function App() {
       
       if (!composerSelectedRoundId) return;
 
+      let targetIndex = dragOverIndex;
+      // Default to end if null (dropped on container background)
+      if (targetIndex === null) {
+          // Fallback to getting from the filtered accepted list length
+          const accepted = problems.filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted');
+          targetIndex = accepted.length;
+      }
+      
+      // Clear drag state
+      setDraggingId(null);
+      setDragOverIndex(null);
+
       // Case 1: Dragging from Candidate -> Accepted
       if (source === 'candidate') {
           const problem = problems.find(p => p.id === problemId);
           if (problem) {
-              // Pass targetIndex to insert at specific position
               handleAddToRound(problem, targetIndex); 
           }
       } 
       // Case 2: Reordering within Accepted
       else if (source === 'accepted') {
           const sourceIndex = parseInt(sourceIndexStr);
-          // If dropped on container (targetIndex undefined), assume append (no-op if already in list, unless we move to end)
+          if (isNaN(sourceIndex)) return;
+          
+          // Optimization: No op if same position
+          if (sourceIndex === targetIndex || sourceIndex === targetIndex - 1) return;
+
           const accepted = problems
             .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
             .sort((a,b) => a.orderIndex - b.orderIndex);
           
-          const validTargetIndex = targetIndex !== undefined ? targetIndex : accepted.length;
-
-          if (isNaN(sourceIndex) || sourceIndex === validTargetIndex) return;
+          // Adjusted Target Logic:
+          // If we move item from index 0 to 2 (after item 1).
+          // source=0, target=2.
+          // Because item 0 is removed, item 1 shifts to index 0. The gap after it becomes index 1.
+          // So real insertion index is target - 1.
+          const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
 
           const newOrder = [...accepted];
           const [movedItem] = newOrder.splice(sourceIndex, 1);
-          // Adjust target index if shifting down
-          const adjustedTarget = validTargetIndex > sourceIndex ? validTargetIndex - 1 : validTargetIndex;
-          
           newOrder.splice(adjustedTarget, 0, movedItem);
           
           // Create Map for fast optimistic update
           const orderMap = new Map();
           newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
 
-          // Optimistic
           const updatedProblems = problems.map(p => {
               if (orderMap.has(p.id)) {
                   return { ...p, orderIndex: orderMap.get(p.id) };
@@ -902,6 +935,8 @@ export default function App() {
       e.preventDefault();
       const problemId = e.dataTransfer.getData('problemId');
       const source = e.dataTransfer.getData('source');
+      setDraggingId(null);
+      setDragOverIndex(null);
 
       if (source === 'accepted') {
           const problem = problems.find(p => p.id === problemId);
@@ -918,7 +953,7 @@ export default function App() {
   };
 
   const handleExportLatex = () => {
-      // Basic LaTeX export
+      // WAMT LaTeX Export
       const targetRoundId = composerSelectedRoundId;
       if (!targetRoundId) return;
 
@@ -926,82 +961,64 @@ export default function App() {
         .filter(p => p.roundId === targetRoundId && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
 
-      let tex = `\\documentclass[11pt]{article}
+      let tex = `\\documentclass[12pt]{extarticle}
+\\usepackage{float}
+\\usepackage{lipsum}
+\\usepackage{extsizes}
+\\usepackage{graphicx} % Required for inserting images
 \\usepackage{amsmath}
-\\usepackage{amssymb}
-\\usepackage{enumitem}
-\\usepackage{geometry}
-\\usepackage{fancyhdr}
-\\usepackage{array}
 \\usepackage{longtable}
+\\usepackage{array}
+\\usepackage{amssymb}
+\\usepackage[a4paper, total={6.5in, 10in}]{geometry}
+\\pagenumbering{gobble}
+\\usepackage{tikz}
+\\usepackage{asymptote}
+\\usetikzlibrary{angles,quotes} 
 
-\\geometry{margin=1in}
-
-\\pagestyle{fancy}
-\\fancyhf{}
-\\rhead{${exportContestName} - ${exportDate}}
-\\lhead{${exportRoundName}}
-\\cfoot{\\thepage}
-
-\\title{${exportRoundName}}
-\\date{${exportDate}}
+% Table settings
+\\setlength{\\arrayrulewidth}{0.5mm}
+\\renewcommand{\\arraystretch}{1.75}
+\\hbadness=99999
 
 \\begin{document}
+% Logo and titles
+\\begin{minipage}{0.3\\textwidth}
+\\begin{figure}[H]
+\\end{figure}
+\\end{minipage}
+\\begin{minipage}{0.6\\textwidth}
+{\\small ${exportContestName} - ${exportDate}}\\hfill\\\\~\\\\
+\\begin{Huge}
+    ${exportRoundName}
+\\end{Huge}  
+\\end{minipage}\\\\~\\\\
 
-\\begin{center}
-    \\Large\\textbf{${exportContestName} - ${exportDate}} \\\\
-    \\vspace{0.2cm}
-    \\LARGE\\textbf{${exportRoundName}}
-\\end{center}
-
-\\vspace{0.5cm}
-\\hrule height 1pt
-\\vspace{0.5cm}
-
+% Problems
+\\begin{longtable}{>{\\raggedleft\\let\\newline\\\\\\arraybackslash\\hspace{0pt}}p{2em}|p{32em}}
 `;
 
-      if (exportFormat === 'speed_table') {
-        tex += `\\renewcommand{\\arraystretch}{2}
-\\begin{longtable}{|p{0.5cm}|p{15cm}|}
-\\hline
-`;
-        activeProblems.forEach((p, idx) => {
-            // Clean statement for LaTeX: replace $$ with \[ \] logic or leave if supported
-            // Simple replace of newlines with spaces or par breaks might be needed depending on formatting
-            const cleanStatement = p.statement.trim(); 
-            tex += `\\textbf{${idx + 1}} & ${cleanStatement} \\\\ \\hline \n`;
-        });
-        tex += `\\end{longtable}`;
-
-      } else {
-        tex += `\\begin{enumerate}\n`;
-        activeProblems.forEach(p => {
-             tex += `  \\item ${p.statement}\n\n  \\vspace{1cm}\n`;
-        });
-        tex += `\\end{enumerate}\n`;
-      }
-
-tex += `
-\\newpage
-\\section*{Answer Key}
-\\begin{enumerate}
-`;
-      activeProblems.forEach(p => {
-          tex += `  \\item ${p.answerKey || 'TBD'}\n`;
+      activeProblems.forEach((p, idx) => {
+          const cleanStatement = p.statement.trim(); 
+          tex += `    \\Large${idx + 1} & ${cleanStatement}`;
+          // Only add comments for answer key if it exists
+          if (p.answerKey) {
+             tex += `\n    %${p.answerKey}`;
+          }
+          tex += `\n    \\\\\\hline\n`;
       });
-tex += `\\end{enumerate}
+
+tex += `\\end{longtable}
 
 \\end{document}`;
 
-      const blob = new Blob([tex], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${exportRoundName.replace(/\s+/g, '_')}.tex`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setShowExportModal(false);
+      navigator.clipboard.writeText(tex).then(() => {
+          alert("Copied WAMT TeX template to clipboard!");
+          setShowExportModal(false);
+      }).catch(err => {
+          console.error("Failed to copy", err);
+          alert("Failed to copy to clipboard");
+      });
   };
 
   const toggleExpandAll = (expand: boolean) => {
@@ -1015,11 +1032,13 @@ tex += `\\end{enumerate}
   // --- Component Logic ---
   
   // Helper for Composer Item
-  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOver, onDrop, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOver?: any, onDrop?: any, expanded: boolean, onToggleExpand: () => void }) => {
+  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOverItem, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOverItem?: any, expanded: boolean, onToggleExpand: () => void }) => {
       const [editMode, setEditMode] = useState(false);
       const [localStatement, setLocalStatement] = useState(problem.statement);
       const [localSolution, setLocalSolution] = useState(problem.solution || '');
       const [localAnswer, setLocalAnswer] = useState(problem.answerKey || '');
+      
+      const isDragging = draggingId === problem.id;
 
       const saveEdit = () => {
           const updates: any = {};
@@ -1040,9 +1059,15 @@ tex += `\\end{enumerate}
         <div 
           draggable={!editMode}
           onDragStart={onDragStart}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
+          onDragOver={(e) => {
+              // Pass drag over event up for calculation if accepted item
+              if (isAccepted && !isDragging) {
+                  onDragOverItem && onDragOverItem(e, index);
+              }
+          }}
           className={`bg-white border rounded-xl transition-all duration-200 shadow-sm mb-3 ${
+              isDragging ? 'opacity-40 ring-2 ring-indigo-400 border-indigo-400 bg-indigo-50' : ''
+          } ${
               isAccepted ? 'border-indigo-100 hover:border-indigo-300 cursor-move' : 'border-slate-200 hover:border-slate-300 cursor-grab active:cursor-grabbing'
           }`}
         >
@@ -1579,7 +1604,7 @@ tex += `\\end{enumerate}
                                <div className="flex gap-3 pt-2">
                                   <Button variant="ghost" onClick={() => setIsCreatingRound(false)} className="flex-1">Cancel</Button>
                                   <Button onClick={addRound} disabled={!newRoundName.trim()} className="flex-1">Create & Edit</Button>
-                               </div>
+                                </div>
                            </div>
                         </div>
                     ) : (
@@ -1696,26 +1721,17 @@ tex += `\\end{enumerate}
                                     </div>
                                 </div>
                                 <div>
-                                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Layout Style</label>
-                                     <div className="flex gap-3">
-                                         <label className={`flex-1 p-3 border rounded-xl cursor-pointer transition-all ${exportFormat === 'list' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'hover:bg-slate-50'}`}>
-                                            <div className="flex items-center gap-2 font-bold mb-1">
-                                                <input type="radio" name="format" value="list" checked={exportFormat === 'list'} onChange={() => setExportFormat('list')} /> Standard List
-                                            </div>
-                                            <p className="text-xs opacity-70">Enumerated list with spacing.</p>
-                                         </label>
-                                         <label className={`flex-1 p-3 border rounded-xl cursor-pointer transition-all ${exportFormat === 'speed_table' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'hover:bg-slate-50'}`}>
-                                            <div className="flex items-center gap-2 font-bold mb-1">
-                                                <input type="radio" name="format" value="speed_table" checked={exportFormat === 'speed_table'} onChange={() => setExportFormat('speed_table')} /> Speed Table
-                                            </div>
-                                            <p className="text-xs opacity-70">Table format with borders (like PDF).</p>
-                                         </label>
+                                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Format</label>
+                                     <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-700 font-bold text-sm flex items-center gap-2">
+                                         <CheckCircle className="w-4 h-4" /> WAMT Template (Clipboard Copy)
                                      </div>
                                 </div>
                             </div>
                             <div className="flex justify-end gap-3 pt-2">
                                 <Button variant="ghost" onClick={() => setShowExportModal(false)}>Cancel</Button>
-                                <Button onClick={handleExportLatex}>Download .tex</Button>
+                                <Button onClick={handleExportLatex} className="gap-2">
+                                    <Copy className="w-4 h-4" /> Copy TeX
+                                </Button>
                             </div>
                         </div>
                     </div>
@@ -1792,7 +1808,7 @@ tex += `\\end{enumerate}
     
                     {/* RIGHT: FINAL ROUND (Drag and Drop Area) */}
                     <div 
-                        onDragOver={handleDragOver}
+                        onDragOver={(e) => handleContainerDragOver(e, composerAccepted.length)}
                         onDrop={(e: any) => handleDropOnRound(e)}
                         className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative transition-colors hover:bg-indigo-50/20"
                     >
@@ -1835,18 +1851,25 @@ tex += `\\end{enumerate}
                                 </div>
                              ) : (
                                 composerAccepted.map((p, idx) => (
-                                    <ComposerItem 
-                                        key={p.id} 
-                                        problem={p} 
-                                        isAccepted={true} 
-                                        index={idx}
-                                        onDragStart={(e: any) => handleDragStart(e, p.id, 'accepted', idx)}
-                                        onDragOver={handleDragOver}
-                                        onDrop={(e: any) => handleDropOnRound(e, idx)}
-                                        expanded={composerExpandedMap[p.id] ?? true}
-                                        onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
-                                    />
+                                    <React.Fragment key={p.id}>
+                                        {dragOverIndex === idx && (
+                                            <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm" />
+                                        )}
+                                        <ComposerItem 
+                                            problem={p} 
+                                            isAccepted={true} 
+                                            index={idx}
+                                            onDragStart={(e: any) => handleDragStart(e, p.id, 'accepted', idx)}
+                                            onDragOverItem={handleDragOverItem}
+                                            expanded={composerExpandedMap[p.id] ?? true}
+                                            onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
+                                        />
+                                    </React.Fragment>
                                 ))
+                             )}
+                             {/* Indicator at bottom if hovering end */}
+                             {dragOverIndex === composerAccepted.length && (
+                                 <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm" />
                              )}
                         </div>
                     </div>
