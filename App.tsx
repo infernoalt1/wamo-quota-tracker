@@ -749,6 +749,9 @@ export default function App() {
       // Get current problems in that round
       const accepted = problems.filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted');
       
+      // If already added, do nothing
+      if (problem.roundId === composerSelectedRoundId && problem.status === 'accepted') return;
+
       const updatedProblems = problems.map(p => {
           if (p.id === problem.id) {
               return { ...p, status: 'accepted', orderIndex: accepted.length, roundId: composerSelectedRoundId } as Problem;
@@ -787,8 +790,10 @@ export default function App() {
   };
 
   // Drag and Drop Logic
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-      e.dataTransfer.setData('index', index.toString());
+  const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
+      e.dataTransfer.setData('problemId', problemId);
+      e.dataTransfer.setData('source', source);
+      if (typeof index === 'number') e.dataTransfer.setData('index', index.toString());
       e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -797,38 +802,69 @@ export default function App() {
       e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
+  // Handle Drop on the "Official Round" List (Accepts Candidates & Reorders Accepted)
+  const handleDropOnRound = async (e: React.DragEvent, targetIndex?: number) => {
       e.preventDefault();
-      const sourceIndex = parseInt(e.dataTransfer.getData('index'));
+      const problemId = e.dataTransfer.getData('problemId');
+      const source = e.dataTransfer.getData('source');
+      const sourceIndexStr = e.dataTransfer.getData('index');
       
-      if (isNaN(sourceIndex) || sourceIndex === targetIndex) return;
       if (!composerSelectedRoundId) return;
 
-      const accepted = problems
-        .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
-        
-      const newOrder = [...accepted];
-      const [movedItem] = newOrder.splice(sourceIndex, 1);
-      newOrder.splice(targetIndex, 0, movedItem);
-      
-      // Create Map for fast optimistic update
-      const orderMap = new Map();
-      newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
-
-      // Optimistic
-      const updatedProblems = problems.map(p => {
-          if (orderMap.has(p.id)) {
-              return { ...p, orderIndex: orderMap.get(p.id) };
+      // Case 1: Dragging from Candidate -> Accepted
+      if (source === 'candidate') {
+          const problem = problems.find(p => p.id === problemId);
+          if (problem) {
+              handleAddToRound(problem);
+              // Note: Ideally we insert at targetIndex, but for now append is safer/simpler with current backend logic
+              // To improve: modify handleAddToRound to accept index or do a reorder call immediately after.
           }
-          return p;
-      });
-      setProblems(updatedProblems);
-      
-      try {
-          await api.reorderRound(newOrder.map(p => p.id));
-      } catch(e) {
-          refreshData();
+      } 
+      // Case 2: Reordering within Accepted
+      else if (source === 'accepted') {
+          const sourceIndex = parseInt(sourceIndexStr);
+          // If dropped on container (targetIndex undefined), assume append (no-op if already in list, unless we move to end)
+          // Ideally, we only reorder if dropped on specific item
+          if (isNaN(sourceIndex) || targetIndex === undefined || sourceIndex === targetIndex) return;
+
+          const accepted = problems
+            .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+            .sort((a,b) => a.orderIndex - b.orderIndex);
+            
+          const newOrder = [...accepted];
+          const [movedItem] = newOrder.splice(sourceIndex, 1);
+          newOrder.splice(targetIndex, 0, movedItem);
+          
+          // Create Map for fast optimistic update
+          const orderMap = new Map();
+          newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
+
+          // Optimistic
+          const updatedProblems = problems.map(p => {
+              if (orderMap.has(p.id)) {
+                  return { ...p, orderIndex: orderMap.get(p.id) };
+              }
+              return p;
+          });
+          setProblems(updatedProblems);
+          
+          try {
+              await api.reorderRound(newOrder.map(p => p.id));
+          } catch(e) {
+              refreshData();
+          }
+      }
+  };
+
+  // Handle Drop on the "Candidates" List (Removes from Round)
+  const handleDropOnCandidates = async (e: React.DragEvent) => {
+      e.preventDefault();
+      const problemId = e.dataTransfer.getData('problemId');
+      const source = e.dataTransfer.getData('source');
+
+      if (source === 'accepted') {
+          const problem = problems.find(p => p.id === problemId);
+          if (problem) handleRemoveFromRound(problem);
       }
   };
 
@@ -884,7 +920,7 @@ export default function App() {
   
   // Helper for Composer Item
   const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOver, onDrop }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOver?: any, onDrop?: any }) => {
-      const [expanded, setExpanded] = useState(false);
+      const [expanded, setExpanded] = useState(true); // Default Expanded in Composer
       const [editMode, setEditMode] = useState(false);
       const [localStatement, setLocalStatement] = useState(problem.statement);
       const [localSolution, setLocalSolution] = useState(problem.solution || '');
@@ -907,20 +943,25 @@ export default function App() {
 
       return (
         <div 
-          draggable={isAccepted && !editMode}
-          onDragStart={isAccepted ? onDragStart : undefined}
-          onDragOver={isAccepted ? onDragOver : undefined}
-          onDrop={isAccepted ? onDrop : undefined}
-          className={`bg-white border rounded-xl transition-all duration-200 shadow-sm ${
-              isAccepted ? 'border-indigo-100 hover:border-indigo-300 cursor-move' : 'border-slate-200 hover:border-slate-300'
+          draggable={!editMode}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          className={`bg-white border rounded-xl transition-all duration-200 shadow-sm mb-3 ${
+              isAccepted ? 'border-indigo-100 hover:border-indigo-300 cursor-move' : 'border-slate-200 hover:border-slate-300 cursor-grab active:cursor-grabbing'
           }`}
         >
             <div className="p-3 flex items-start gap-3">
-                {isAccepted && (
+                {isAccepted ? (
                    <div className="text-slate-300 mt-2 cursor-move flex items-center justify-center h-full">
                       <GripVertical className="w-4 h-4" />
                    </div>
+                ) : (
+                   <div className="text-slate-300 mt-2">
+                      <GripVertical className="w-4 h-4 opacity-50" />
+                   </div>
                 )}
+                
                 {isAccepted && (
                     <div className="font-mono font-bold text-indigo-400 text-sm mt-1 w-5 text-center">{index! + 1}.</div>
                 )}
@@ -1396,6 +1437,7 @@ export default function App() {
                         onEdit={handleStartEdit}
                         onStatusChange={handleStatusChange}
                         votingPower={currentUser.votingPower}
+                        defaultExpanded={false}
                     />
                   ))}
                 </div>
@@ -1526,7 +1568,11 @@ export default function App() {
     
                 <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
                     {/* LEFT: CANDIDATE POOL */}
-                    <div className="col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+                    <div 
+                        onDragOver={handleDragOver}
+                        onDrop={handleDropOnCandidates}
+                        className="col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden transition-colors hover:bg-slate-50/50"
+                    >
                         <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
                             <div className="flex justify-between items-center">
                                 <h2 className="font-bold text-slate-700 flex items-center gap-2">
@@ -1576,14 +1622,23 @@ export default function App() {
                                <div className="text-center py-10 text-slate-400 italic text-sm">No matching problems found.</div>
                             ) : (
                                composerCandidates.map(p => (
-                                   <ComposerItem key={p.id} problem={p} isAccepted={false} />
+                                   <ComposerItem 
+                                      key={p.id} 
+                                      problem={p} 
+                                      isAccepted={false} 
+                                      onDragStart={(e: any) => handleDragStart(e, p.id, 'candidate')}
+                                   />
                                ))
                             )}
                         </div>
                     </div>
     
                     {/* RIGHT: FINAL ROUND (Drag and Drop Area) */}
-                    <div className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative">
+                    <div 
+                        onDragOver={handleDragOver}
+                        onDrop={(e: any) => handleDropOnRound(e)}
+                        className="col-span-7 bg-white rounded-3xl border border-indigo-200 shadow-md flex flex-col overflow-hidden relative transition-colors hover:bg-indigo-50/20"
+                    >
                         <div className="p-4 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
                             <div className="flex justify-between items-center">
                                 <h2 className="font-bold text-indigo-900 flex items-center gap-2">
@@ -1605,11 +1660,11 @@ export default function App() {
                         
                         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-50/30">
                              {composerAccepted.length === 0 ? (
-                                <div className="text-center py-20">
+                                <div className="text-center py-20 pointer-events-none">
                                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
                                         <Layers className="w-6 h-6" />
                                     </div>
-                                    <p className="text-slate-400 italic text-sm">The round is empty.<br/>Add problems from the left.</p>
+                                    <p className="text-slate-400 italic text-sm">The round is empty.<br/>Drag problems from the left to add.</p>
                                 </div>
                              ) : (
                                 composerAccepted.map((p, idx) => (
@@ -1618,9 +1673,9 @@ export default function App() {
                                         problem={p} 
                                         isAccepted={true} 
                                         index={idx}
-                                        onDragStart={(e: any) => handleDragStart(e, idx)}
+                                        onDragStart={(e: any) => handleDragStart(e, p.id, 'accepted', idx)}
                                         onDragOver={handleDragOver}
-                                        onDrop={(e: any) => handleDrop(e, idx)}
+                                        onDrop={(e: any) => handleDropOnRound(e, idx)}
                                     />
                                 ))
                              )}
@@ -1996,6 +2051,7 @@ export default function App() {
                       onEdit={handleStartEdit}
                       onStatusChange={handleStatusChange}
                       votingPower={currentUser.votingPower}
+                      defaultExpanded={false}
                     />
                   );
                 })

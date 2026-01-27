@@ -15,6 +15,7 @@ interface ProblemCardProps {
   onEdit: (problem: Problem) => void;
   onStatusChange?: (problemId: string, status: ProblemStatus) => void;
   votingPower: number;
+  defaultExpanded?: boolean;
 }
 
 export const ProblemCard: React.FC<ProblemCardProps> = ({ 
@@ -26,13 +27,13 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   onUpvote,
   onEdit,
   onStatusChange,
-  votingPower
+  votingPower,
+  defaultExpanded = false
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
   const status = problem.status || 'pending';
-  // Default to expanded as requested
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [newComment, setNewComment] = useState('');
