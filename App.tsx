@@ -826,11 +826,27 @@ export default function App() {
 
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
-      setDraggingId(problemId);
+      // CRITICAL FIX: Defer the state update. 
+      // Setting state immediately causes a re-render which can destroy the DOM node being dragged
+      // before the browser captures the drag image, causing the drag to fail or require a second attempt.
+      const dragImage = e.currentTarget.cloneNode(true) as HTMLElement;
+      dragImage.style.opacity = '1';
+      // We can use default drag image, or set one. 
+      // Most important is not re-rendering the source element immediately synchronously.
+      
+      requestAnimationFrame(() => {
+        setDraggingId(problemId);
+      });
+
       e.dataTransfer.setData('problemId', problemId);
       e.dataTransfer.setData('source', source);
       if (typeof index === 'number') e.dataTransfer.setData('index', index.toString());
       e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+      setDraggingId(null);
+      setDragOverIndex(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -854,6 +870,7 @@ export default function App() {
   // Container handler to allow dropping in empty space
   const handleContainerDragOver = (e: React.DragEvent, listLength: number) => {
       e.preventDefault();
+      // Only set to end if we are strictly hovering the container background, not bubbling from children
       if (e.target === e.currentTarget) {
           setDragOverIndex(listLength);
       }
@@ -900,10 +917,6 @@ export default function App() {
             .sort((a,b) => a.orderIndex - b.orderIndex);
           
           // Adjusted Target Logic:
-          // If we move item from index 0 to 2 (after item 1).
-          // source=0, target=2.
-          // Because item 0 is removed, item 1 shifts to index 0. The gap after it becomes index 1.
-          // So real insertion index is target - 1.
           const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
 
           const newOrder = [...accepted];
@@ -1032,7 +1045,7 @@ tex += `\\end{longtable}
   // --- Component Logic ---
   
   // Helper for Composer Item
-  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOverItem, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOverItem?: any, expanded: boolean, onToggleExpand: () => void }) => {
+  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOverItem, onDragEnd, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOverItem?: any, onDragEnd: any, expanded: boolean, onToggleExpand: () => void }) => {
       const [editMode, setEditMode] = useState(false);
       const [localStatement, setLocalStatement] = useState(problem.statement);
       const [localSolution, setLocalSolution] = useState(problem.solution || '');
@@ -1059,13 +1072,14 @@ tex += `\\end{longtable}
         <div 
           draggable={!editMode}
           onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
           onDragOver={(e) => {
               // Pass drag over event up for calculation if accepted item
               if (isAccepted && !isDragging) {
                   onDragOverItem && onDragOverItem(e, index);
               }
           }}
-          className={`bg-white border rounded-xl transition-all duration-200 shadow-sm mb-3 ${
+          className={`bg-white border rounded-xl transition-all duration-200 shadow-sm ${
               isDragging ? 'opacity-40 ring-2 ring-indigo-400 border-indigo-400 bg-indigo-50' : ''
           } ${
               isAccepted ? 'border-indigo-100 hover:border-indigo-300 cursor-move' : 'border-slate-200 hover:border-slate-300 cursor-grab active:cursor-grabbing'
@@ -1798,6 +1812,7 @@ tex += `\\end{longtable}
                                       problem={p} 
                                       isAccepted={false} 
                                       onDragStart={(e: any) => handleDragStart(e, p.id, 'candidate')}
+                                      onDragEnd={handleDragEnd}
                                       expanded={composerExpandedMap[p.id] ?? true}
                                       onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
                                    />
@@ -1841,7 +1856,7 @@ tex += `\\end{longtable}
                             </div>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-50/30">
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30">
                              {composerAccepted.length === 0 ? (
                                 <div className="text-center py-20 pointer-events-none">
                                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
@@ -1853,7 +1868,7 @@ tex += `\\end{longtable}
                                 composerAccepted.map((p, idx) => (
                                     <React.Fragment key={p.id}>
                                         {dragOverIndex === idx && (
-                                            <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm" />
+                                            <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm pointer-events-none" />
                                         )}
                                         <ComposerItem 
                                             problem={p} 
@@ -1861,6 +1876,7 @@ tex += `\\end{longtable}
                                             index={idx}
                                             onDragStart={(e: any) => handleDragStart(e, p.id, 'accepted', idx)}
                                             onDragOverItem={handleDragOverItem}
+                                            onDragEnd={handleDragEnd}
                                             expanded={composerExpandedMap[p.id] ?? true}
                                             onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
                                         />
@@ -1869,7 +1885,7 @@ tex += `\\end{longtable}
                              )}
                              {/* Indicator at bottom if hovering end */}
                              {dragOverIndex === composerAccepted.length && (
-                                 <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm" />
+                                 <div className="h-1.5 bg-indigo-500 rounded-full my-1 transition-all animate-pulse shadow-sm pointer-events-none" />
                              )}
                         </div>
                     </div>
