@@ -166,15 +166,26 @@ export const api = {
   },
 
   // New: Reorder Round
-  reorderRound: async (problemIds: string[]): Promise<void> => {
+  reorderRound: async (problemIds: string[], roundId: string): Promise<void> => {
     if (USE_MOCK_BACKEND) return; 
 
     const res = await fetch(`${API_BASE_URL}/api/rounds/reorder`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problems: problemIds })
+      body: JSON.stringify({ problems: problemIds, roundId })
     });
     if (!res.ok) throw new Error('Reorder failed');
+  },
+
+  removeFromRound: async (problemId: string, roundId: string): Promise<void> => {
+    if (USE_MOCK_BACKEND) return;
+
+    const res = await fetch(`${API_BASE_URL}/api/rounds/remove`, {
+        method: 'POST',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ problemId, roundId })
+    });
+    if (!res.ok) throw new Error('Remove failed');
   },
 
   toggleVote: async (problemId: string): Promise<void> => {
