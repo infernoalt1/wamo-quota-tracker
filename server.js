@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
@@ -66,7 +65,6 @@ const initDB = async () => {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
         description TEXT,
-        folder TEXT DEFAULT 'Default',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -83,17 +81,10 @@ const initDB = async () => {
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'waitlist', -- Default changed to waitlist
+        status TEXT DEFAULT 'pending',
         order_index INTEGER DEFAULT 0,
         version INTEGER DEFAULT 1,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS round_problems (
-        round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
-        problem_id UUID REFERENCES problems(id) ON DELETE CASCADE,
-        order_index INTEGER DEFAULT 0,
-        PRIMARY KEY (round_id, problem_id)
       );
 
       CREATE TABLE IF NOT EXISTS votes (
@@ -117,7 +108,7 @@ const initDB = async () => {
     await client.query(`
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS difficulty NUMERIC(3,1) DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
-      ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'waitlist';
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS image_data TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS solution TEXT;
@@ -125,17 +116,7 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS round_id UUID REFERENCES rounds(id);
       
-      ALTER TABLE rounds ADD COLUMN IF NOT EXISTS folder TEXT DEFAULT 'Default';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
-    `);
-
-    // --- MIGRATION: Migrate Legacy Single-Round Problems to Join Table ---
-    // If problems have round_id set but no entry in round_problems, insert them
-    await client.query(`
-      INSERT INTO round_problems (round_id, problem_id, order_index)
-      SELECT round_id, id, order_index FROM problems
-      WHERE round_id IS NOT NULL
-      ON CONFLICT (round_id, problem_id) DO NOTHING
     `);
 
     // --- MIGRATION: Update Role Constraint to include 'director' and 'guest' ---
@@ -411,8 +392,6 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
         await client.query('DELETE FROM comments WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM votes WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
         await client.query('DELETE FROM comments WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
-        // Also clean up round_problems for this user's problems
-        await client.query('DELETE FROM round_problems WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
         await client.query('DELETE FROM problems WHERE author_id = $1', [userId]);
         await client.query('DELETE FROM users WHERE id = $1', [userId]);
         await client.query('COMMIT');
@@ -438,12 +417,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
     const result = await pool.query(`
       SELECT p.*, u.name as author_name, 
       (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
-      (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
-      (
-         SELECT json_agg(json_build_object('roundId', rp.round_id, 'orderIndex', rp.order_index)) 
-         FROM round_problems rp 
-         WHERE rp.problem_id = p.id
-      ) as assigned_rounds
+      (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       ORDER BY p.score DESC
@@ -453,12 +427,11 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       ...row,
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
-      quotaId: row.quota_id, 
-      roundId: row.round_id, // Deprecated in favor of assignedRounds, kept for compat
-      assignedRounds: row.assigned_rounds || [], // New M:N field
+      quotaId: row.quota_id, // Ensure we send this
+      roundId: row.round_id, // New round assignment
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
-      status: row.status || 'waitlist',
+      status: row.status || 'pending',
       orderIndex: row.order_index || 0,
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || [],
@@ -482,10 +455,9 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
     
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
     
-    // Default status is now 'waitlist'
     const result = await pool.query(
       'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1) RETURNING *',
-      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'waitlist', imageData, solution, answerKey]
+      [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData, solution, answerKey]
     );
 
     res.json({ ...result.rows[0], isAcceptable: true });
@@ -519,6 +491,7 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
     // Whitelist allowed fields to prevent arbitrary column injection
     const allowedFields = ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData', 'roundId', 'status', 'version'];
     
+    // Mapping frontend camelCase to DB snake_case
     const dbMapping = {
         title: 'title',
         statement: 'statement',
@@ -527,8 +500,9 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
         difficulty: 'difficulty',
         topics: 'topics',
         imageData: 'image_data',
-        roundId: 'round_id', // Legacy/Single update compat
+        roundId: 'round_id',
         status: 'status'
+        // version is handled specially
     };
 
     // Build SET clauses
@@ -536,54 +510,115 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
         if (allowedFields.includes(key) && key !== 'version') {
              const dbCol = dbMapping[key];
              if (dbCol) {
-                 // For round assignment, we might want to use the new join table logic instead of simple update
-                 // But keeping basic update for 'status' or text fields is fine
                  setClauses.push(`${dbCol} = $${idx++}`);
                  values.push(updates[key] === undefined ? null : updates[key]);
              }
         }
     }
 
-    // Special handling for Round Assignment (M:N) if passed
-    if (updates.roundId !== undefined) {
-         // If roundId is passed, we assume it's an assignment (add to join table) or unassignment
-         if (updates.roundId === null) {
-             // Removal logic - requires extra context usually, but if client sends roundId: null, 
-             // it means remove from "current context". Since we don't know context here easily without more params,
-             // we rely on the specific reorder/round endpoints. 
-             // However, for compatibility, if roundId is updated on problems table, sync it to round_problems
-             // NOTE: We are moving away from problems.round_id, so we mostly ignore this here unless specific legacy needs.
-         }
+    if (setClauses.length === 0) return res.status(400).json({error: "No valid fields to update"});
+
+    // Handle Version Increment
+    setClauses.push(`version = version + 1`);
+
+    let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
+    values.push(id);
+
+    // Optimistic locking check (if version provided)
+    if (updates.version !== undefined) {
+         query += ` AND version = $${idx++}`;
+         values.push(updates.version);
     }
 
-    if (setClauses.length > 0) {
-        // Handle Version Increment
-        setClauses.push(`version = version + 1`);
+    query += ` RETURNING *`;
 
-        let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
-        values.push(id);
+    const result = await pool.query(query, values);
 
-        // Optimistic locking check (if version provided)
-        if (updates.version !== undefined) {
-            query += ` AND version = $${idx++}`;
-            values.push(updates.version);
-        }
-
-        query += ` RETURNING *`;
-
-        const result = await pool.query(query, values);
-
-        if (result.rows.length === 0) {
-            return res.status(409).json({ error: 'Conflict: Problem modified or not found.' });
-        }
-        res.json({ success: true, problem: result.rows[0] });
-    } else {
-        res.json({ success: true }); // No update needed
+    if (result.rows.length === 0) {
+        return res.status(409).json({ error: 'Conflict: Problem modified or not found.' });
     }
+
+    res.json({ success: true, problem: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed', details: err.message });
   }
+});
+
+// New Route: Bulk Import Parsing
+app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
+    try {
+        const { text, defaultTopics, defaultDifficulty } = req.body;
+        if (!text) return res.status(400).json({ error: "No text provided" });
+
+        const problems = [];
+        let currentProblem = null;
+        
+        // Strategy 1: Look for explicit blocks
+        const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
+        let match;
+        
+        // Helper to extract metadata
+        const extractMetadata = (content) => {
+            let cleanContent = content;
+            let solution = "";
+            let answer = "";
+            
+            const solMatch = content.match(/\\begin\{solution\}([\s\S]*?)\\end\{solution\}/);
+            if (solMatch) {
+                solution = solMatch[1].trim();
+                cleanContent = cleanContent.replace(solMatch[0], '');
+            }
+            
+            const ansMatch = content.match(/\\answer\{(.*?)\}/);
+            if (ansMatch) {
+                answer = ansMatch[1].trim();
+                cleanContent = cleanContent.replace(ansMatch[0], '');
+            }
+            
+            return { statement: cleanContent.trim(), solution, answer };
+        };
+
+        while ((match = blockRegex.exec(text)) !== null) {
+            const raw = match[1];
+            const { statement, solution, answer } = extractMetadata(raw);
+            
+            problems.push({
+                title: `Imported Problem ${problems.length + 1}`,
+                statement: statement,
+                solution: solution,
+                answerKey: answer,
+                topics: defaultTopics || [],
+                difficulty: defaultDifficulty || 3
+            });
+        }
+
+        // Strategy 2: If no blocks, look for \item
+        if (problems.length === 0) {
+            const items = text.split(/\\item\s/);
+            if (items.length > 1) {
+                items.shift(); // remove preamble
+                items.forEach((item, idx) => {
+                    const { statement, solution, answer } = extractMetadata(item);
+                    if (statement.length > 5) {
+                         problems.push({
+                            title: `Imported Problem ${idx + 1}`,
+                            statement: statement,
+                            solution: solution,
+                            answerKey: answer,
+                            topics: defaultTopics || [],
+                            difficulty: defaultDifficulty || 3
+                        });
+                    }
+                });
+            }
+        }
+
+        res.json({ problems });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Parsing failed" });
+    }
 });
 
 // New Route: Update Status (Admin Only)
@@ -593,7 +628,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['waitlist', 'pending', 'accepted'].includes(status)) {
+  if (!['pending', 'accepted'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
 
@@ -606,30 +641,22 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-// New Route: Reorder Round (Admin Only) - Uses round_problems table
+// New Route: Reorder Round (Admin Only) - Sets status to 'accepted' and updates order_index
 app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
-  const { problems, roundId } = req.body; // problems is array of IDs
-  if (!roundId) return res.status(400).json({ error: "Round ID required" });
-
+  const { problems } = req.body; // Array of problem IDs in desired order
+  
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
       
-      // Update order in round_problems
+      // For each problem ID in the list, update its order_index
       for (let i = 0; i < problems.length; i++) {
-          // Check if exists, if so update order
-          // If problem not in round, insert it (implicit add)
-          await client.query(`
-            INSERT INTO round_problems (round_id, problem_id, order_index)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (round_id, problem_id) 
-            DO UPDATE SET order_index = $3
-          `, [roundId, problems[i], i]);
-
-          // Also set status to accepted if it's there
-          await client.query('UPDATE problems SET status = \'accepted\' WHERE id = $1', [problems[i]]);
+          await client.query(
+              'UPDATE problems SET order_index = $1 WHERE id = $2',
+              [i, problems[i]]
+          );
       }
       
       await client.query('COMMIT');
@@ -641,26 +668,6 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   } finally {
       client.release();
   }
-});
-
-// New Route: Remove from Round
-app.post('/api/rounds/remove', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-    const { problemId, roundId } = req.body;
-    try {
-        await pool.query('DELETE FROM round_problems WHERE round_id = $1 AND problem_id = $2', [roundId, problemId]);
-        // Note: We don't necessarily change problem status to 'pending' because it might be in another round.
-        // We only set to pending if it's not in any other round?
-        // For simplicity/safety, we leave status as 'accepted' if it's used elsewhere, or check count.
-        const check = await pool.query('SELECT COUNT(*) FROM round_problems WHERE problem_id = $1', [problemId]);
-        if (parseInt(check.rows[0].count) === 0) {
-            await pool.query('UPDATE problems SET status = \'pending\' WHERE id = $1', [problemId]);
-        }
-        res.json({ success: true });
-    } catch(e) {
-        console.error(e);
-        res.status(500).json({error: "Remove failed"});
-    }
 });
 
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
@@ -697,7 +704,7 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
 });
 
 // --- Comments Routes ---
-// ... (unchanged)
+
 app.get('/api/problems/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -748,80 +755,10 @@ app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Bulk Parse ---
-app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
-    try {
-        const { text, defaultTopics, defaultDifficulty } = req.body;
-        if (!text) return res.status(400).json({ error: "No text provided" });
-
-        const problems = [];
-        const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
-        let match;
-        
-        const extractMetadata = (content) => {
-            let cleanContent = content;
-            let solution = "";
-            let answer = "";
-            
-            const solMatch = content.match(/\\begin\{solution\}([\s\S]*?)\\end\{solution\}/);
-            if (solMatch) {
-                solution = solMatch[1].trim();
-                cleanContent = cleanContent.replace(solMatch[0], '');
-            }
-            
-            const ansMatch = content.match(/\\answer\{(.*?)\}/);
-            if (ansMatch) {
-                answer = ansMatch[1].trim();
-                cleanContent = cleanContent.replace(ansMatch[0], '');
-            }
-            
-            return { statement: cleanContent.trim(), solution, answer };
-        };
-
-        while ((match = blockRegex.exec(text)) !== null) {
-            const raw = match[1];
-            const { statement, solution, answer } = extractMetadata(raw);
-            
-            problems.push({
-                title: `Imported Problem ${problems.length + 1}`,
-                statement: statement,
-                solution: solution,
-                answerKey: answer,
-                topics: defaultTopics || [],
-                difficulty: defaultDifficulty || 3
-            });
-        }
-
-        if (problems.length === 0) {
-            const items = text.split(/\\item\s/);
-            if (items.length > 1) {
-                items.shift(); 
-                items.forEach((item, idx) => {
-                    const { statement, solution, answer } = extractMetadata(item);
-                    if (statement.length > 5) {
-                         problems.push({
-                            title: `Imported Problem ${idx + 1}`,
-                            statement: statement,
-                            solution: solution,
-                            answerKey: answer,
-                            topics: defaultTopics || [],
-                            difficulty: defaultDifficulty || 3
-                        });
-                    }
-                });
-            }
-        }
-
-        res.json({ problems });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ error: "Parsing failed" });
-    }
-});
-
-// --- Admin ---
+// --- Admin: Reset All Votes ---
 app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
+  
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
@@ -838,7 +775,8 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   }
 });
 
-// --- Quotas ---
+// --- Routes: Quotas ---
+
 app.get('/api/quotas', authenticateToken, async (req, res) => {
   const result = await pool.query('SELECT id, name, target_count as target, vote_target, instructions, due_date FROM quotas');
   const quotas = result.rows.map(q => ({
@@ -854,15 +792,25 @@ app.get('/api/quotas', authenticateToken, async (req, res) => {
 
 app.post('/api/quotas', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  
   const { name, target, voteTarget, instructions, dueDate } = req.body;
+  
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const vt = voteTarget || 3;
     const result = await pool.query(
       'INSERT INTO quotas (name, target_count, vote_target, instructions, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [name, target, voteTarget || 3, instructions, dateVal]
+      [name, target, vt, instructions, dateVal]
     );
     const row = result.rows[0];
-    res.json({ id: row.id, name: row.name, target: row.target_count, voteTarget: row.vote_target, instructions: row.instructions, dueDate: row.due_date ? new Date(row.due_date).getTime() : null });
+    res.json({
+        id: row.id,
+        name: row.name,
+        target: row.target_count,
+        voteTarget: row.vote_target,
+        instructions: row.instructions,
+        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Creation failed' });
@@ -875,19 +823,28 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
   const { name, target, voteTarget, instructions, dueDate } = req.body;
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const vt = voteTarget || 3;
     const result = await pool.query(
       'UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5 WHERE id = $6 RETURNING *',
-      [name, target, voteTarget || 3, instructions, dateVal, id]
+      [name, target, vt, instructions, dateVal, id]
     );
     const row = result.rows[0];
-    res.json({ id: row.id, name: row.name, target: row.target_count, voteTarget: row.vote_target, instructions: row.instructions, dueDate: row.due_date ? new Date(row.due_date).getTime() : null });
+    res.json({
+        id: row.id,
+        name: row.name,
+        target: row.target_count,
+        voteTarget: row.vote_target,
+        instructions: row.instructions,
+        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
   }
 });
 
-// --- Rounds ---
+// --- Routes: Rounds ---
+
 app.get('/api/rounds', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM rounds ORDER BY created_at DESC');
@@ -895,7 +852,6 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
             id: r.id,
             name: r.name,
             description: r.description,
-            folder: r.folder,
             createdAt: new Date(r.created_at).getTime()
         })));
     } catch (e) {
@@ -906,15 +862,14 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
 
 app.post('/api/rounds', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-    const { name, description, folder } = req.body;
+    const { name, description } = req.body;
     try {
-        const result = await pool.query('INSERT INTO rounds (name, description, folder) VALUES ($1, $2, $3) RETURNING *', [name, description, folder || 'Default']);
+        const result = await pool.query('INSERT INTO rounds (name, description) VALUES ($1, $2) RETURNING *', [name, description]);
         const r = result.rows[0];
         res.json({
             id: r.id,
             name: r.name,
             description: r.description,
-            folder: r.folder,
             createdAt: new Date(r.created_at).getTime()
         });
     } catch (e) {
@@ -923,14 +878,15 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
     }
 });
 
+// Update Round
 app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
-    const { name, description, folder } = req.body;
+    const { name, description } = req.body;
     try {
         const result = await pool.query(
-            'UPDATE rounds SET name = $1, description = $2, folder = $3 WHERE id = $4 RETURNING *',
-            [name, description, folder, id]
+            'UPDATE rounds SET name = $1, description = $2 WHERE id = $3 RETURNING *',
+            [name, description, id]
         );
         if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
         const r = result.rows[0];
@@ -938,7 +894,6 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
             id: r.id,
             name: r.name,
             description: r.description,
-            folder: r.folder,
             createdAt: new Date(r.created_at).getTime()
         });
     } catch (e) {
@@ -947,17 +902,16 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete Round
 app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // Legacy cleanup (problems table)
+        // Unassign problems first
         await client.query('UPDATE problems SET round_id = NULL, status = \'pending\', order_index = 0 WHERE round_id = $1', [id]);
-        // New join table cleanup
-        await client.query('DELETE FROM round_problems WHERE round_id = $1', [id]);
-        
+        // Delete round
         await client.query('DELETE FROM rounds WHERE id = $1', [id]);
         await client.query('COMMIT');
         res.json({ success: true });
@@ -970,10 +924,12 @@ app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// All other GET requests not handled before will return the React app
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// Initialize DB then Start Server
 initDB().then(() => {
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);

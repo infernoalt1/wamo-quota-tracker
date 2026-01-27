@@ -1,4 +1,3 @@
-
 export interface ProblemValidation {
   isAcceptable: boolean;
   rejectionReason?: string;
@@ -8,7 +7,6 @@ export interface Round {
   id: string;
   name: string;
   description: string;
-  folder?: string; // New: Grouping mechanism
   createdAt?: number;
 }
 
@@ -23,8 +21,7 @@ export interface Quota {
 
 export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
 
-// Updated Status flow: waitlist -> pending -> accepted
-export type ProblemStatus = 'waitlist' | 'pending' | 'accepted';
+export type ProblemStatus = 'pending' | 'accepted';
 
 export interface Comment {
   id: string;
@@ -34,19 +31,12 @@ export interface Comment {
   createdAt: number;
 }
 
-export interface AssignedRound {
-  roundId: string;
-  orderIndex: number;
-}
-
 export interface Problem {
   id: string;
   authorId: string;
   authorName: string; // Stored for admin, hidden in UI
   quotaId: string;    // Crucial for tracking which submission cycle this belongs to
-  // roundId is deprecated in favor of assignedRounds for M:N support, but kept optional for legacy type compat
-  roundId?: string;   
-  assignedRounds: AssignedRound[]; // New: M:N support
+  roundId?: string;   // The specific contest round this problem is assigned to
   title: string;
   statement: string;
   solution?: string; // New: Full LaTeX solution
@@ -58,7 +48,7 @@ export interface Problem {
   score: number;
   votedBy: string[]; // User IDs who have voted
   status: ProblemStatus;
-  orderIndex: number; // Deprecated: Use assignedRounds
+  orderIndex: number; // New: For ordering in the final round
   version: number; // New: Optimistic concurrency control
   commentCount?: number; // Optional count for UI
 }

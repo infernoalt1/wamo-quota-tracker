@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
@@ -51,8 +50,7 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
-  Copy,
-  FolderPlus
+  Copy
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -152,7 +150,6 @@ export default function App() {
   // Round Create New State
   const [newRoundName, setNewRoundName] = useState('');
   const [newRoundDesc, setNewRoundDesc] = useState('');
-  const [newRoundFolder, setNewRoundFolder] = useState('');
 
   // Pool View State (Sorting/Filtering)
   const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
@@ -162,7 +159,6 @@ export default function App() {
   const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<number>(0);
   const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<number>(10);
   const [poolIds, setPoolIds] = useState<string[]>([]);
-  const [poolShowWaitlist, setPoolShowWaitlist] = useState(false); // Toggle for Directors
 
   // Composer State
   const [composerSelectedRoundId, setComposerSelectedRoundId] = useState<string | null>(null);
@@ -173,7 +169,6 @@ export default function App() {
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
   const [composerSearchText, setComposerSearchText] = useState('');
   const [composerExpandedMap, setComposerExpandedMap] = useState<Record<string, boolean>>({});
-  const composerListRef = useRef<HTMLDivElement>(null);
   
   // Composer New Round UI / Editing Round
   const [isCreatingRound, setIsCreatingRound] = useState(false);
@@ -318,17 +313,12 @@ export default function App() {
           filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
       }
 
-      // Filter by Status (Waitlist vs Pool)
-      if (poolShowWaitlist) {
-          filtered = filtered.filter(p => p.status === 'waitlist');
-      } else {
-          // Standard Pool View: Pending or Accepted
-          if (poolFilterStatus !== 'All') {
-              filtered = filtered.filter(p => p.status === poolFilterStatus);
-          } else {
-             // By default pool shows pending and accepted (exclude waitlist)
-             filtered = filtered.filter(p => p.status !== 'waitlist');
-          }
+      // Filter by Status
+      if (poolFilterStatus !== 'All') {
+          filtered = filtered.filter(p => {
+             const s = p.status || 'pending';
+             return s === poolFilterStatus;
+          });
       }
 
       // Filter by Difficulty
@@ -356,7 +346,7 @@ export default function App() {
 
       setPoolIds(filtered.map(p => p.id));
     }
-  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota, poolShowWaitlist]); 
+  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota]); 
   
   // Set Composer default filter when opening view
   useEffect(() => {
@@ -416,12 +406,10 @@ export default function App() {
         const newRound = await api.createRound({
           name: newRoundName.trim(),
           description: newRoundDesc.trim() || 'No description.',
-          folder: newRoundFolder.trim() || 'Default'
         });
         setRounds([newRound, ...rounds]); // Add to top
         setNewRoundName('');
         setNewRoundDesc('');
-        setNewRoundFolder('');
         
         // Switch to this round immediately
         setComposerSelectedRoundId(newRound.id);
@@ -437,8 +425,7 @@ export default function App() {
           await api.updateRound({
               id: composerSelectedRoundId,
               name: editRoundForm.name,
-              description: editRoundForm.description || '',
-              folder: editRoundForm.folder
+              description: editRoundForm.description || ''
           });
           refreshData(); // Updates the rounds list
           setIsEditingRound(false);
@@ -762,11 +749,14 @@ export default function App() {
       const updatedProblems = problems.map(p => p.id === problemId ? { ...p, ...updates } : p);
       setProblems(updatedProblems);
       try {
+          // Merge updates with existing data for the API call to ensure robust update
+          const existing = problems.find(p => p.id === problemId);
+          if (!existing) return;
+          
           await api.updateProblem(problemId, updates);
       } catch(e) {
           console.error("Composer update failed");
-          // If silent fail, user might not know, but refresh on next load corrects it
-          // Avoiding full refresh to prevent scroll jump unless critical error
+          refreshData(); // Revert
       }
   };
 
@@ -774,66 +764,61 @@ export default function App() {
   const handleAddToRound = async (problem: Problem, targetIndex?: number) => {
       if (!composerSelectedRoundId) return;
       
-      // M:N Logic: Check if already assigned to this round
-      const currentAssignment = problem.assignedRounds.find(r => r.roundId === composerSelectedRoundId);
-      if (currentAssignment) return; // Already in round
-
-      // Get current problems in that round to determine order
+      // Get current problems in that round
       const accepted = problems
-        .filter(p => p.assignedRounds.some(r => r.roundId === composerSelectedRoundId))
-        .sort((a,b) => {
-             const ordA = a.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-             const ordB = b.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-             return ordA - ordB;
-        });
+        .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+        .sort((a,b) => a.orderIndex - b.orderIndex);
       
+      // If already added, do nothing (unless moving, which is handled in drag)
+      if (problem.roundId === composerSelectedRoundId && problem.status === 'accepted') return;
+
       const newOrder = [...accepted];
+      
+      // Insert at target index or end
       if (targetIndex !== undefined && targetIndex >= 0 && targetIndex <= newOrder.length) {
           newOrder.splice(targetIndex, 0, problem);
       } else {
           newOrder.push(problem);
       }
       
-      const orderedIds = newOrder.map(p => p.id);
-      
-      // Optimistic Update
+      // Create Map for fast update
+      const orderMap = new Map();
+      newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
+
       const updatedProblems = problems.map(p => {
-         if (p.id === problem.id) {
-             const newAssign = { roundId: composerSelectedRoundId, orderIndex: targetIndex ?? newOrder.length - 1 };
-             return { ...p, assignedRounds: [...p.assignedRounds, newAssign], status: 'accepted' as ProblemStatus };
-         }
-         // Update other items indexes if needed? The backend reorder will fix it.
-         return p;
+          if (p.id === problem.id) {
+               return { ...p, status: 'accepted', roundId: composerSelectedRoundId, orderIndex: orderMap.get(p.id) } as Problem;
+          }
+          if (orderMap.has(p.id)) {
+              return { ...p, orderIndex: orderMap.get(p.id) };
+          }
+          return p;
       });
       setProblems(updatedProblems);
       
       try {
-         // Reorder API handles insertion if not present
-         await api.reorderRound(orderedIds, composerSelectedRoundId);
-         // Refresh silently to get exact state if needed, but risky for scroll
-         // Let's assume reorderRound is robust
+         // Update problem round assignment
+         await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
+         
+         // Fix order
+         await api.reorderRound(newOrder.map(p => p.id));
       } catch(e) {
           refreshData();
       }
   };
 
   const handleRemoveFromRound = async (problem: Problem) => {
-      if (!composerSelectedRoundId) return;
-
+      // Sets back to pending, removes roundId
       const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) {
-              const newAssign = p.assignedRounds.filter(r => r.roundId !== composerSelectedRoundId);
-              // If no rounds left, maybe set to pending? 
-              // Wait, if it was 'accepted', removal from round might mean it goes back to 'pending' if no other rounds.
-              const newStatus = newAssign.length > 0 ? 'accepted' : 'pending';
-              return { ...p, assignedRounds: newAssign, status: newStatus as ProblemStatus };
-          }
+          // When removing, we keep quotaId but clear roundId
+          if (p.id === problem.id) return { ...p, status: 'pending', roundId: undefined } as Problem; // undefined for optimistic, will refresh null
           return p;
       });
       setProblems(updatedProblems);
 
       try {
-          await api.removeFromRound(problem.id, composerSelectedRoundId);
+          // Send null (or something that clears it)
+          await api.updateProblem(problem.id, { status: 'pending', roundId: null as any });
       } catch(e) {
           refreshData();
       }
@@ -842,8 +827,12 @@ export default function App() {
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
       // CRITICAL FIX: Defer the state update. 
+      // Setting state immediately causes a re-render which can destroy the DOM node being dragged
+      // before the browser captures the drag image, causing the drag to fail or require a second attempt.
       const dragImage = e.currentTarget.cloneNode(true) as HTMLElement;
       dragImage.style.opacity = '1';
+      // We can use default drag image, or set one. 
+      // Most important is not re-rendering the source element immediately synchronously.
       
       requestAnimationFrame(() => {
         setDraggingId(problemId);
@@ -887,7 +876,7 @@ export default function App() {
       }
   };
 
-  // Handle Drop on the "Official Round" List
+  // Handle Drop on the "Official Round" List (Accepts Candidates & Reorders Accepted)
   const handleDropOnRound = async (e: React.DragEvent) => {
       e.preventDefault();
       const problemId = e.dataTransfer.getData('problemId');
@@ -896,61 +885,65 @@ export default function App() {
       
       if (!composerSelectedRoundId) return;
 
-      const accepted = problems
-        .filter(p => p.assignedRounds.some(r => r.roundId === composerSelectedRoundId))
-        .sort((a,b) => {
-            const ordA = a.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-            const ordB = b.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-            return ordA - ordB;
-        });
-
       let targetIndex = dragOverIndex;
-      if (targetIndex === null) targetIndex = accepted.length;
+      // Default to end if null (dropped on container background)
+      if (targetIndex === null) {
+          // Fallback to getting from the filtered accepted list length
+          const accepted = problems.filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted');
+          targetIndex = accepted.length;
+      }
       
+      // Clear drag state
       setDraggingId(null);
       setDragOverIndex(null);
 
+      // Case 1: Dragging from Candidate -> Accepted
       if (source === 'candidate') {
           const problem = problems.find(p => p.id === problemId);
           if (problem) {
               handleAddToRound(problem, targetIndex); 
           }
       } 
+      // Case 2: Reordering within Accepted
       else if (source === 'accepted') {
           const sourceIndex = parseInt(sourceIndexStr);
           if (isNaN(sourceIndex)) return;
+          
+          // Optimization: No op if same position
           if (sourceIndex === targetIndex || sourceIndex === targetIndex - 1) return;
 
+          const accepted = problems
+            .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+            .sort((a,b) => a.orderIndex - b.orderIndex);
+          
+          // Adjusted Target Logic:
           const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
 
           const newOrder = [...accepted];
           const [movedItem] = newOrder.splice(sourceIndex, 1);
           newOrder.splice(adjustedTarget, 0, movedItem);
           
-          const orderedIds = newOrder.map(p => p.id);
+          // Create Map for fast optimistic update
+          const orderMap = new Map();
+          newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
 
-          // Optimistic update of state
           const updatedProblems = problems.map(p => {
-             // We need to update orderIndex in assignedRounds for ALL items involved in reorder
-             // But simpler to just update the moved one optimistically and let backend fix indices
-             // Since we sort by orderIndex in render, we just need to ensure sort holds
-             // This is tricky for local state without full refresh.
-             // We will trust api.reorderRound and refresh
-             return p;
+              if (orderMap.has(p.id)) {
+                  return { ...p, orderIndex: orderMap.get(p.id) };
+              }
+              return p;
           });
-          // Actually, let's just trigger backend. 
-          // Reordering visually is hard without updating orderIndex property on all items.
+          setProblems(updatedProblems);
           
           try {
-              await api.reorderRound(orderedIds, composerSelectedRoundId);
-              // Force refresh to get new indices
-              refreshData();
+              await api.reorderRound(newOrder.map(p => p.id));
           } catch(e) {
-              console.error(e);
+              refreshData();
           }
       }
   };
 
+  // Handle Drop on the "Candidates" List (Removes from Round)
   const handleDropOnCandidates = async (e: React.DragEvent) => {
       e.preventDefault();
       const problemId = e.dataTransfer.getData('problemId');
@@ -973,16 +966,13 @@ export default function App() {
   };
 
   const handleExportLatex = () => {
+      // WAMT LaTeX Export
       const targetRoundId = composerSelectedRoundId;
       if (!targetRoundId) return;
 
       const activeProblems = problems
-        .filter(p => p.assignedRounds.some(r => r.roundId === targetRoundId))
-        .sort((a,b) => {
-             const ordA = a.assignedRounds.find(r => r.roundId === targetRoundId)?.orderIndex || 0;
-             const ordB = b.assignedRounds.find(r => r.roundId === targetRoundId)?.orderIndex || 0;
-             return ordA - ordB;
-        });
+        .filter(p => p.roundId === targetRoundId && p.status === 'accepted')
+        .sort((a,b) => a.orderIndex - b.orderIndex);
 
       let tex = `\\documentclass[12pt]{extarticle}
 \\usepackage{float}
@@ -1024,6 +1014,7 @@ export default function App() {
       activeProblems.forEach((p, idx) => {
           const cleanStatement = p.statement.trim(); 
           tex += `    \\Large${idx + 1} & ${cleanStatement}`;
+          // Only add comments for answer key if it exists
           if (p.answerKey) {
              tex += `\n    %${p.answerKey}`;
           }
@@ -1051,6 +1042,8 @@ tex += `\\end{longtable}
       setComposerExpandedMap(newMap);
   };
 
+  // --- Component Logic ---
+  
   // Helper for Composer Item
   const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOverItem, onDragEnd, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOverItem?: any, onDragEnd: any, expanded: boolean, onToggleExpand: () => void }) => {
       const [editMode, setEditMode] = useState(false);
@@ -1063,6 +1056,7 @@ tex += `\\end{longtable}
       const saveEdit = () => {
           const updates: any = {};
           if (localStatement !== problem.statement) updates.statement = localStatement;
+          // Only update solution/answer if accepted (official round order)
           if (isAccepted) {
               if (localSolution !== problem.solution) updates.solution = localSolution;
               if (localAnswer !== problem.answerKey) updates.answerKey = localAnswer;
@@ -1080,6 +1074,7 @@ tex += `\\end{longtable}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragOver={(e) => {
+              // Pass drag over event up for calculation if accepted item
               if (isAccepted && !isDragging) {
                   onDragOverItem && onDragOverItem(e, index);
               }
@@ -1116,10 +1111,9 @@ tex += `\\end{longtable}
                     </div>
                     <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
                         <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
-                        {/* Show if problem is in other rounds */}
-                        {problem.assignedRounds.length > (isAccepted ? 1 : 0) && (
-                            <span className="flex items-center gap-0.5 bg-purple-50 text-purple-600 px-1 rounded font-semibold text-[10px]">
-                                <Layers className="w-3 h-3"/> {problem.assignedRounds.length} Rounds
+                        {problem.score > 0 && (
+                            <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
+                                <ThumbsUp className="w-3 h-3"/> {problem.score}
                             </span>
                         )}
                         <span className="flex items-center gap-0.5 text-slate-400">
@@ -1222,88 +1216,9 @@ tex += `\\end{longtable}
       );
   };
 
-  // --- Logic for M:N Filtering and Folders ---
-  const composerSelectedRound = rounds.find(r => r.id === composerSelectedRoundId);
-  const composerFolder = composerSelectedRound?.folder;
-
-  // Accepted in THIS round
-  const composerAccepted = problems
-    .filter(p => p.assignedRounds.some(r => r.roundId === composerSelectedRoundId))
-    .sort((a,b) => {
-        const ordA = a.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-        const ordB = b.assignedRounds.find(r => r.roundId === composerSelectedRoundId)?.orderIndex || 0;
-        return ordA - ordB;
-    });
-
-  // Candidates: 
-  // 1. Not in this round
-  // 2. Not in a round from another folder
-  const composerCandidates = problems
-    .filter(p => {
-        // Exclude if in this round
-        if (p.assignedRounds.some(r => r.roundId === composerSelectedRoundId)) return false;
-        
-        // Waitlist items should generally not be in composer (need approval first)
-        // But if they were already assigned somehow, they show up. 
-        // Let's hide waitlist items from candidates to enforce flow.
-        if (p.status === 'waitlist') return false;
-
-        // FOLDER LOGIC:
-        // If problem is assigned to a round, check if that round is in the SAME folder.
-        // If assigned to a round in a DIFFERENT folder, exclude it.
-        if (p.assignedRounds.length > 0) {
-            const hasConflict = p.assignedRounds.some(ar => {
-                const assignedRound = rounds.find(r => r.id === ar.roundId);
-                // If round not found (deleted) or folder mismatch, it's a conflict
-                // "Remove from candidates problems that are used in other rounds, EXCEPT for problems used in rounds in the same folder"
-                return assignedRound && assignedRound.folder !== composerFolder;
-            });
-            if (hasConflict) return false;
-        }
-
-        // Standard Filters
-        if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
-        if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
-        if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
-        if (composerSearchText) {
-            const lowerSearch = composerSearchText.toLowerCase();
-            const inTitle = p.title.toLowerCase().includes(lowerSearch);
-            const inStatement = p.statement.toLowerCase().includes(lowerSearch);
-            if (!inTitle && !inStatement) return false;
-        }
-
-        return true;
-    })
-    .sort((a, b) => {
-        if (composerSort === 'votes') return b.score - a.score;
-        if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
-        if (composerSort === 'newest') return b.createdAt - a.createdAt;
-        return 0;
-    });
-
-  const composerAvgDiff = composerAccepted.length > 0 
-      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
-      : '0.0';
-  
-  const composerTopicCounts: Record<string, number> = {};
-  TOPICS.forEach(t => composerTopicCounts[t] = 0);
-  composerAccepted.forEach(p => {
-      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
-  });
-
-  // Group Rounds by Folder
-  const roundsByFolder = rounds.reduce((acc, round) => {
-      const folder = round.folder || 'Uncategorized';
-      if (!acc[folder]) acc[folder] = [];
-      acc[folder].push(round);
-      return acc;
-  }, {} as Record<string, Round[]>);
-
   if (!currentUser) {
-    // ... (Login Screen unchanged) ...
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
-        {/* ... Login UI ... */}
         <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl p-8 border border-white/50 backdrop-blur-sm">
           <div className="flex justify-center mb-6">
             <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg transform rotate-3">
@@ -1317,6 +1232,11 @@ tex += `\\end{longtable}
             <div className="space-y-4">
                <div className="flex items-center justify-between px-1">
                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Select User</p>
+                 {usersError && (
+                     <button onClick={initApp} className="text-xs text-indigo-600 flex items-center gap-1 hover:underline">
+                        <RotateCcw className="w-3 h-3" /> Retry
+                     </button>
+                 )}
                </div>
                
                <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -1392,6 +1312,58 @@ tex += `\\end{longtable}
   const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
   const isGuest = currentUser.role === 'guest';
 
+  // --- Composer Data ---
+  // Using composerSelectedRoundId instead of activeQuotaId
+  const composerSelectedRound = rounds.find(r => r.id === composerSelectedRoundId);
+  
+  // Problems assigned to the round
+  const composerAccepted = problems
+    .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+    .sort((a,b) => a.orderIndex - b.orderIndex);
+  
+  // Problems NOT assigned to this round, filtered by source quota and search
+  const composerCandidates = problems
+    .filter(p => {
+        // Exclude problems already in THIS round
+        if (p.roundId === composerSelectedRoundId && p.status === 'accepted') return false;
+        
+        // Source Filter (Quota)
+        if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
+        
+        // Topic Filter
+        if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
+        
+        // Diff Filter
+        if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
+        
+        // Search Text Filter
+        if (composerSearchText) {
+            const lowerSearch = composerSearchText.toLowerCase();
+            const inTitle = p.title.toLowerCase().includes(lowerSearch);
+            const inStatement = p.statement.toLowerCase().includes(lowerSearch);
+            if (!inTitle && !inStatement) return false;
+        }
+
+        return true;
+    })
+    .sort((a, b) => {
+        if (composerSort === 'votes') return b.score - a.score;
+        if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
+        if (composerSort === 'newest') return b.createdAt - a.createdAt;
+        return 0;
+    });
+
+  // Composer Stats
+  const composerAvgDiff = composerAccepted.length > 0 
+      ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
+      : '0.0';
+  
+  const composerTopicCounts: Record<string, number> = {};
+  TOPICS.forEach(t => composerTopicCounts[t] = 0);
+  composerAccepted.forEach(p => {
+      p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
+  });
+
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
       
@@ -1453,7 +1425,6 @@ tex += `\\end{longtable}
           )}
         </nav>
 
-        {/* ... User footer ... */}
         <div className="p-6 border-t border-slate-50">
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-2">
               <div className="flex items-center gap-3 mb-3">
@@ -1481,7 +1452,7 @@ tex += `\\end{longtable}
         {/* VIEW: DASHBOARD */}
         {view === 'dashboard' && !isGuest && (
           <div className="max-w-6xl mx-auto space-y-10">
-            {/* ... Dashboard content (unchanged mostly) ... */}
+            {/* ... Dashboard Content ... */}
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">Hello, {currentUser.name.split(' ')[0]}</h1>
@@ -1491,7 +1462,6 @@ tex += `\\end{longtable}
 
             {/* Active Quota Info (Renamed from Round to prevent confusion) */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-8 relative">
-                {/* ... existing quota card code ... */}
                 <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none transform translate-x-10 -translate-y-4">
                     <BookOpen size={200} />
                 </div>
@@ -1516,8 +1486,7 @@ tex += `\\end{longtable}
 
             {/* Progress Cards Grid */}
             <div className="grid md:grid-cols-2 gap-8">
-                {/* ... existing progress cards ... */}
-                 {/* Writing Progress */}
+                {/* Writing Progress */}
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-56 relative overflow-hidden group hover:border-indigo-200 transition-colors">
                     <div className="relative z-10">
                         <div className="flex justify-between items-start mb-4">
@@ -1533,12 +1502,15 @@ tex += `\\end{longtable}
                             {Math.round(subPercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
                         </div>
                     </div>
+                    
                     <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
                         <div 
                             className={`h-full rounded-full transition-all duration-1000 ease-out ${submissionCount >= submissionTarget ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
                             style={{ width: `${subPercent}%` }}
                         ></div>
                     </div>
+
+                    {/* Decorative bg */}
                     <div className="absolute -bottom-6 -right-6 text-indigo-50 opacity-60 group-hover:scale-110 transition-transform duration-500">
                         <Pencil size={140} />
                     </div>
@@ -1560,12 +1532,15 @@ tex += `\\end{longtable}
                             {Math.round(votePercent)}<span className="text-3xl text-slate-400 font-bold ml-1">%</span>
                         </div>
                     </div>
+                    
                     <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative z-10">
                         <div 
                             className={`h-full rounded-full transition-all duration-1000 ease-out ${userVoteCount >= voteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
                             style={{ width: `${votePercent}%` }}
                         ></div>
                     </div>
+
+                    {/* Decorative bg */}
                     <div className="absolute -bottom-6 -right-6 text-teal-50 opacity-60 group-hover:scale-100 transition-transform duration-500">
                         <ThumbsUp size={140} />
                     </div>
@@ -1588,7 +1563,7 @@ tex += `\\end{longtable}
                     <ProblemCard 
                         key={p.id} 
                         problem={p} 
-                        roundName={rounds.find(r => p.assignedRounds.some(ar => ar.roundId === r.id))?.name}
+                        roundName={rounds.find(r => r.id === p.roundId)?.name}
                         showAuthor={true} 
                         currentUserId={currentUser.id}
                         currentUserRole={currentUser.role}
@@ -1615,7 +1590,7 @@ tex += `\\end{longtable}
             <div className="max-w-[1600px] mx-auto h-[calc(100vh-6rem)] flex flex-col">
               
               {!composerSelectedRoundId ? (
-                // --- COMPOSER: LANDING / SELECTION (With Folders) ---
+                // --- COMPOSER: LANDING / SELECTION ---
                 <div className="max-w-5xl mx-auto w-full">
                     <header className="mb-10 text-center">
                         <h1 className="text-4xl font-bold text-slate-900 mb-3">Round Composer</h1>
@@ -1628,17 +1603,11 @@ tex += `\\end{longtable}
                            <div className="space-y-4">
                                <input 
                                   type="text" 
-                                  placeholder="Folder Name (e.g. Fall 2024)" 
-                                  value={newRoundFolder}
-                                  onChange={e => setNewRoundFolder(e.target.value)}
-                                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
-                               />
-                               <input 
-                                  type="text" 
-                                  placeholder="Round Name (e.g. 5/6 Speed)" 
+                                  placeholder="Round Name (e.g. Fall 2024 Final)" 
                                   value={newRoundName} 
                                   onChange={e => setNewRoundName(e.target.value)}
                                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-base bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
+                                  autoFocus
                                />
                                <textarea
                                    placeholder="Description..."
@@ -1653,50 +1622,36 @@ tex += `\\end{longtable}
                            </div>
                         </div>
                     ) : (
-                        <div className="space-y-8">
-                            {/* Create New Card */}
-                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                <div 
-                                    onClick={() => setIsCreatingRound(true)}
-                                    className="bg-indigo-50 border-2 border-dashed border-indigo-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[160px] cursor-pointer hover:bg-indigo-100 transition-colors text-indigo-600 hover:text-indigo-800"
-                                >
-                                    <PlusCircle className="w-10 h-10" />
-                                    <span className="font-bold text-lg">Create New Round</span>
-                                </div>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div 
+                               onClick={() => setIsCreatingRound(true)}
+                               className="bg-indigo-50 border-2 border-dashed border-indigo-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[180px] cursor-pointer hover:bg-indigo-100 transition-colors text-indigo-600 hover:text-indigo-800"
+                            >
+                                <PlusCircle className="w-10 h-10" />
+                                <span className="font-bold text-lg">Create New Round</span>
                             </div>
                             
-                            {/* Folder Groups */}
-                            {Object.entries(roundsByFolder).map(([folderName, folderRounds]) => (
-                                <div key={folderName}>
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <FolderOpen className="w-5 h-5 text-slate-400" />
-                                        <h3 className="text-xl font-bold text-slate-800">{folderName}</h3>
+                            {rounds.map(r => {
+                                const rProbCount = problems.filter(p => p.roundId === r.id && p.status === 'accepted').length;
+                                return (
+                                    <div 
+                                        key={r.id}
+                                        onClick={() => setComposerSelectedRoundId(r.id)}
+                                        className="bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group"
+                                    >
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                                <FolderOpen className="w-5 h-5" />
+                                            </div>
+                                        </div>
+                                        <h3 className="font-bold text-slate-900 text-lg mb-1">{r.name}</h3>
+                                        <p className="text-sm text-slate-500 mb-4 line-clamp-2 min-h-[40px]">{r.description || 'No description.'}</p>
+                                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wide">
+                                            <LayoutList className="w-3 h-3" /> {rProbCount} Problems
+                                        </div>
                                     </div>
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {folderRounds.map(r => {
-                                            const rProbCount = problems.filter(p => p.assignedRounds.some(ar => ar.roundId === r.id)).length;
-                                            return (
-                                                <div 
-                                                    key={r.id}
-                                                    onClick={() => setComposerSelectedRoundId(r.id)}
-                                                    className="bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group"
-                                                >
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                                                            <LayoutList className="w-5 h-5" />
-                                                        </div>
-                                                    </div>
-                                                    <h3 className="font-bold text-slate-900 text-lg mb-1">{r.name}</h3>
-                                                    <p className="text-sm text-slate-500 mb-4 line-clamp-2 min-h-[40px]">{r.description || 'No description.'}</p>
-                                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wide">
-                                                        <CheckCircle className="w-3 h-3" /> {rProbCount} Problems
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -1712,16 +1667,10 @@ tex += `\\end{longtable}
                       {isEditingRound ? (
                           <div className="flex-1 flex gap-2">
                               <input 
-                                className="px-3 py-1 border border-indigo-300 rounded-lg font-bold text-lg text-slate-900 w-48" 
+                                className="px-3 py-1 border border-indigo-300 rounded-lg font-bold text-lg text-slate-900" 
                                 value={editRoundForm.name} 
                                 onChange={e => setEditRoundForm({...editRoundForm, name: e.target.value})} 
                                 placeholder="Round Name"
-                              />
-                              <input 
-                                className="px-3 py-1 border border-indigo-300 rounded-lg text-sm w-32" 
-                                value={editRoundForm.folder} 
-                                onChange={e => setEditRoundForm({...editRoundForm, folder: e.target.value})} 
-                                placeholder="Folder"
                               />
                               <input 
                                 className="flex-1 px-3 py-1 border border-indigo-300 rounded-lg text-sm" 
@@ -1734,10 +1683,7 @@ tex += `\\end{longtable}
                           </div>
                       ) : (
                           <div className="flex-1 min-w-0 group/header relative">
-                              <div className="flex items-center gap-2">
-                                <h1 className="text-2xl font-bold text-slate-900 truncate">{composerSelectedRound?.name}</h1>
-                                <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs font-bold">{composerSelectedRound?.folder}</span>
-                              </div>
+                              <h1 className="text-2xl font-bold text-slate-900 truncate">{composerSelectedRound?.name}</h1>
                               <p className="text-slate-500 text-xs mt-0.5 truncate">{composerSelectedRound?.description || 'No description'}</p>
                               
                               <div className="absolute right-0 top-1 opacity-0 group-hover/header:opacity-100 transition-opacity flex gap-2 bg-white pl-4">
@@ -1756,7 +1702,6 @@ tex += `\\end{longtable}
 
                 {showExportModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                        {/* ... Export Modal Content ... */}
                         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 w-full max-w-lg space-y-6">
                             <h2 className="text-xl font-bold text-slate-900">Export Settings</h2>
                             <div className="space-y-4">
@@ -1844,6 +1789,18 @@ tex += `\\end{longtable}
                                     {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                                  </select>
                             </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Diff</span>
+                                <input type="number" className="w-12 text-xs p-1 border rounded" value={composerMinDiff} onChange={e => setComposerMinDiff(Number(e.target.value))} />
+                                <span className="text-slate-300">-</span>
+                                <input type="number" className="w-12 text-xs p-1 border rounded" value={composerMaxDiff} onChange={e => setComposerMaxDiff(Number(e.target.value))} />
+                                <div className="flex-1"></div>
+                                <select className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white" value={composerSort} onChange={e => setComposerSort(e.target.value as any)}>
+                                    <option value="votes">Sort: Votes</option>
+                                    <option value="difficulty">Sort: Difficulty</option>
+                                    <option value="newest">Sort: Newest</option>
+                                </select>
+                            </div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/30">
                             {composerCandidates.length === 0 ? (
@@ -1899,7 +1856,7 @@ tex += `\\end{longtable}
                             </div>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30" ref={composerListRef}>
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30">
                              {composerAccepted.length === 0 ? (
                                 <div className="text-center py-20 pointer-events-none">
                                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
@@ -1939,9 +1896,9 @@ tex += `\\end{longtable}
         )}
 
         {/* VIEW: SUBMIT / EDIT / BULK */}
+        {/* ... (rest of the file remains unchanged, just ensuring closure) ... */}
         {view === 'submit' && (
           <div className="max-w-4xl mx-auto">
-             {/* ... (Submission Form UI unchanged, except verified check disclaimer) ... */}
             <header className="mb-10 flex justify-between items-start">
                <div>
                   {!isGuest && (
@@ -1953,14 +1910,16 @@ tex += `\\end{longtable}
                       {editingProblemId ? 'Edit Problem' : isGuest ? 'Propose a Problem' : 'New Submission'}
                   </h1>
                </div>
-               {/* ... */}
+               {!editingProblemId && !isGuest && (
+                   <Button variant="secondary" onClick={() => setShowBulkImport(true)} className="flex items-center gap-2">
+                       <FileText className="w-4 h-4"/> Bulk Import
+                   </Button>
+               )}
             </header>
 
-            {/* ... Bulk Import Modal ... */}
+            {/* Bulk Import Modal */}
             {showBulkImport ? (
                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
-                   {/* ... content ... */}
-                   {/* Using abbreviated form to save space in this response, assume logic remains */}
                    <div className="flex justify-between items-center">
                        <h2 className="text-xl font-bold text-slate-900">Bulk Import from LaTeX</h2>
                        <button onClick={() => setShowBulkImport(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
@@ -1971,19 +1930,47 @@ tex += `\\end{longtable}
                            <textarea
                                value={bulkText}
                                onChange={e => setBulkText(e.target.value)}
-                               placeholder={`Paste LaTeX here...`}
+                               placeholder={`Paste LaTeX here. Format example:\n\n\\begin{problem}\nProblem text...\n\\end{problem}\n\n\\begin{solution}\nSolution text...\n\\end{solution}\n\n\\answer{42}`}
                                className="w-full h-64 p-4 border border-slate-200 rounded-xl font-mono text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none"
                            />
-                           {/* ... controls ... */}
-                           <div className="flex justify-end gap-3 pt-4">
+                           <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Topic</label>
+                                    <select 
+                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                        onChange={e => setSelectedTopics([e.target.value as Topic])}
+                                    >
+                                        {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Default Difficulty</label>
+                                    <input 
+                                        type="number" 
+                                        value={difficulty} 
+                                        onChange={e => setDifficulty(e.target.value)}
+                                        className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white"
+                                    />
+                                </div>
+                           </div>
+                           <div className="flex justify-end gap-3">
                                <Button variant="ghost" onClick={() => setShowBulkImport(false)}>Cancel</Button>
                                <Button onClick={handleBulkParse} disabled={!bulkText}>Parse LaTeX</Button>
                            </div>
                        </>
                    ) : (
-                       // ... parsed list ...
                        <div className="space-y-4">
-                           {/* ... */}
+                           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-indigo-700 text-sm">
+                               <strong>Found {parsedProblems.length} problems!</strong> Review them below before importing.
+                           </div>
+                           <div className="max-h-96 overflow-y-auto space-y-3 custom-scrollbar border border-slate-100 rounded-xl p-2">
+                               {parsedProblems.map((p, idx) => (
+                                   <div key={idx} className="bg-slate-50 p-3 rounded-lg text-xs">
+                                       <strong>{idx + 1}.</strong> {p.statement.substring(0, 100)}...
+                                       <div className="mt-1 text-slate-500">Ans: {p.answerKey || 'None'}</div>
+                                   </div>
+                               ))}
+                           </div>
                            <div className="flex justify-end gap-3">
                                <Button variant="ghost" onClick={() => setParsedProblems([])}>Back</Button>
                                <Button onClick={handleBulkCommit} isLoading={isSubmitting}>Import All</Button>
@@ -1994,7 +1981,7 @@ tex += `\\end{longtable}
             ) : (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-10 space-y-10">
-                {/* ... Title, Topics, Difficulty, Statement inputs ... */}
+                {/* Title */}
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Problem Title</label>
                   <input 
@@ -2005,7 +1992,46 @@ tex += `\\end{longtable}
                     className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black placeholder:text-slate-400 text-lg"
                   />
                 </div>
-                {/* ... rest of form ... */}
+
+                {/* Topics & Difficulty */}
+                <div className="grid md:grid-cols-2 gap-8">
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Difficulty Rating</label>
+                        <div className="flex gap-2 items-center">
+                            <input 
+                                type="number" 
+                                step="0.1"
+                                min="0"
+                                max="10"
+                                value={difficulty}
+                                onChange={(e) => setDifficulty(e.target.value)}
+                                className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all text-black text-lg"
+                            />
+                        </div>
+                        <button onClick={() => setShowRatingScale(!showRatingScale)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
+                            <Info className="w-3 h-3" /> View Rating Scale
+                        </button>
+                        {showRatingScale && AOPS_SCALE_INFO}
+                    </div>
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Topics</label>
+                        <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                            {TOPICS.map(t => (
+                                <label key={t} className="flex items-center gap-3 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
+                                    <input 
+                                        type="checkbox"
+                                        checked={selectedTopics.includes(t)}
+                                        onChange={() => handleTopicToggle(t)}
+                                        className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
+                                    />
+                                    <span className="text-base text-slate-700 font-medium">{t}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Statement */}
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">
                     Problem Statement
@@ -2017,10 +2043,59 @@ tex += `\\end{longtable}
                     placeholder="Let $ABC$ be a triangle where..."
                     className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-serif text-black text-lg leading-relaxed mb-4"
                   />
-                  {/* ... Image Upload ... */}
+                  
+                  {/* Image Upload */}
+                  <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 border-dashed">
+                      <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center border border-slate-200 text-slate-400 shrink-0">
+                          <ImageIcon className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1">
+                          <label className="block text-sm font-bold text-slate-700 cursor-pointer hover:text-indigo-600 transition-colors">
+                              <span>Upload Image (Optional)</span>
+                              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                          </label>
+                          <p className="text-xs text-slate-400">PNG, JPG up to 2MB</p>
+                      </div>
+                      {imageData && (
+                          <div className="relative w-16 h-16 bg-white rounded-lg border border-slate-200 overflow-hidden">
+                              <img src={imageData} alt="Preview" className="w-full h-full object-cover" />
+                              <button onClick={() => setImageData(null)} className="absolute inset-0 bg-black/50 text-white opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <X className="w-4 h-4" />
+                              </button>
+                          </div>
+                      )}
+                  </div>
                 </div>
-                {/* ... Solution/Answer ... */}
-                
+
+                {/* Solution & Answer */}
+                <div className="grid md:grid-cols-2 gap-8">
+                     <div className="space-y-3">
+                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Solution Outline (LaTeX)</label>
+                         <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif" placeholder="Proof or derivation..."/>
+                     </div>
+                     <div className="space-y-3">
+                         <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Answer Key (Short)</label>
+                         <input type="text" value={answerKey} onChange={e => setAnswerKey(e.target.value)} className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 42"/>
+                     </div>
+                </div>
+
+                {/* Preview */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mt-4">
+                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-3">Live Preview</span>
+                     <MathText 
+                         text={statement || 'Type above to preview...'} 
+                         className="font-serif text-slate-800 text-lg leading-relaxed whitespace-pre-wrap min-h-[40px]" 
+                     />
+                     {imageData && (
+                        <div className="mt-4 rounded-xl overflow-hidden border border-slate-200">
+                            <img src={imageData} alt="Preview" className="max-h-96 w-auto mx-auto object-contain" />
+                            <div className="bg-slate-50 text-xs text-center text-slate-400 py-1 border-t border-slate-100 flex items-center justify-center gap-1">
+                                <ImageIcon className="w-3 h-3" /> Attachment
+                            </div>
+                        </div>
+                     )}
+                  </div>
+
                 {/* Verification / Disclaimer */}
                 <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 flex items-start gap-4 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setIsVerified(!isVerified)}>
                    <div className={`mt-0.5 w-6 h-6 rounded-md border border-indigo-300 flex items-center justify-center shrink-0 transition-colors ${isVerified ? 'bg-indigo-600 border-indigo-600' : 'bg-white'}`}>
@@ -2028,18 +2103,27 @@ tex += `\\end{longtable}
                    </div>
                    <div className="select-none">
                       <label className="font-bold text-indigo-900 text-base cursor-pointer">
-                          {isGuest ? "Usage Rights Agreement" : "Ready for Approval?"}
+                          {isGuest ? "Usage Rights Agreement" : "I certify that this is a valid problem."}
                       </label>
                       <p className="text-sm text-indigo-700/80 mt-1 leading-relaxed">
                           {isGuest 
-                            ? "By submitting, I allow WAMO to use... (Guest Text)"
-                            : "Submissions will be placed on the waitlist for Director approval before entering the blind voting pool."
+                            ? "By submitting, I allow WAMO to use, edit, and distribute this problem in any official capacity. I confirm this is original work and agree not to share or distribute this problem elsewhere."
+                            : "To prevent quota spam, all submissions are monitored for quality and relevance."
                           }
                       </p>
                    </div>
                 </div>
-                
-                {/* ... Error ... */}
+
+                {/* Error Message */}
+                {submissionError && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+                    <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-red-700 text-sm">Submission Rejected</h4>
+                      <p className="text-red-600 text-sm mt-1">{submissionError}</p>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="p-8 bg-slate-50 border-t border-slate-200 flex justify-end gap-4 items-center">
@@ -2051,7 +2135,7 @@ tex += `\\end{longtable}
                   size="lg"
                   className="px-8 shadow-indigo-200"
                 >
-                  {editingProblemId ? 'Update Problem' : 'Submit for Review'}
+                  {editingProblemId ? 'Update Problem' : 'Submit Problem'}
                 </Button>
               </div>
             </div>
@@ -2076,20 +2160,6 @@ tex += `\\end{longtable}
                 <div className="flex items-center gap-2 text-sm text-slate-500 font-bold uppercase tracking-wider">
                     <Filter className="w-4 h-4" /> Filters
                 </div>
-                
-                {isDirector && (
-                    <button 
-                        onClick={() => setPoolShowWaitlist(!poolShowWaitlist)}
-                        className={`px-4 py-2.5 rounded-xl text-sm font-bold border transition-colors flex items-center gap-2 ${
-                            poolShowWaitlist 
-                            ? 'bg-amber-100 text-amber-800 border-amber-200' 
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                    >
-                        {poolShowWaitlist ? <CheckCircle className="w-4 h-4"/> : <ShieldAlert className="w-4 h-4"/>}
-                        {poolShowWaitlist ? 'Reviewing Waitlist' : 'Review Queue'}
-                    </button>
-                )}
 
                 {/* Quota Filter */}
                 <select 
@@ -2104,7 +2174,6 @@ tex += `\\end{longtable}
                 </select>
                 
                 {/* Topic Filter */}
-                {/* ... */}
                 <select 
                     className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
                     value={poolFilterTopic}
@@ -2112,6 +2181,17 @@ tex += `\\end{longtable}
                 >
                     <option value="All">All Topics</option>
                     {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+
+                {/* Status Filter */}
+                <select 
+                    className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                    value={poolFilterStatus}
+                    onChange={(e) => setPoolFilterStatus(e.target.value)}
+                >
+                    <option value="All">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="accepted">Accepted</option>
                 </select>
 
                 {/* Difficulty Filter */}
@@ -2152,15 +2232,6 @@ tex += `\\end{longtable}
                     </select>
                 </div>
             </div>
-            
-            {poolShowWaitlist && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-amber-800 text-sm flex items-center gap-3">
-                    <ShieldAlert className="w-5 h-5" />
-                    <div>
-                        <strong>Waitlist Review Mode:</strong> As a Director, verify these problems. Edit to fix issues, then set Status to 'Accepted' (which means Approved for Pool) using the controls on the card.
-                    </div>
-                </div>
-            )}
 
             <div className="grid gap-8">
               {poolIds.length === 0 ? (
@@ -2172,6 +2243,7 @@ tex += `\\end{longtable}
                    <p className="text-slate-500 mt-2">Try adjusting your filters.</p>
                 </div>
               ) : (
+                // Use poolIds to render in filtered/sorted order
                 poolIds.map(id => {
                   const p = problems.find(prob => prob.id === id);
                   if (!p) return null;
@@ -2179,8 +2251,8 @@ tex += `\\end{longtable}
                     <ProblemCard 
                       key={p.id} 
                       problem={p} 
-                      roundName={rounds.find(r => p.assignedRounds.some(ar => ar.roundId === r.id))?.name}
-                      showAuthor={p.authorId === currentUser.id} 
+                      roundName={rounds.find(r => r.id === p.roundId)?.name}
+                      showAuthor={p.authorId === currentUser.id} // ONLY show if it is MY problem. Admin sees blind.
                       currentUserId={currentUser.id}
                       currentUserRole={currentUser.role}
                       onUpvote={handleToggleVote}
@@ -2196,28 +2268,36 @@ tex += `\\end{longtable}
           </div>
         )}
 
-        {/* VIEW: ADMIN PANEL (unchanged mostly, just closing bracket check) */}
+        {/* VIEW: ADMIN PANEL */}
         {view === 'admin' && isDirector && !isGuest && (
           <div className="max-w-6xl mx-auto">
-             {/* ... Admin content ... */}
              <div className="flex justify-between items-center mb-10">
                 <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
-                {/* ... */}
+                <div className="flex gap-3">
+                  <Button onClick={openExportModal} size="sm" variant="secondary" className="gap-2">
+                      <Download className="w-4 h-4" /> Export TeX
+                  </Button>
+                  {/* DANGER: Reset Votes Button (Admin Only) */}
+                  {currentUser.role === 'admin' && (
+                     <Button onClick={handleResetVotes} size="sm" variant="danger" className="gap-2">
+                         <ShieldAlert className="w-4 h-4" /> Reset All Votes
+                     </Button>
+                  )}
+                </div>
              </div>
-             {/* ... */}
+             
              <div className="grid md:grid-cols-2 gap-8 mb-8">
-                {/* ... Quota and User Management ... */}
                 {/* Quota Management */}
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                    <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
                       <Layers className="w-5 h-5 text-indigo-600" /> Quota / Rounds
                    </h3>
+                   
                    <div className="flex-1 space-y-4 mb-8">
                       {quotas.map(q => (
                          <div key={q.id} className={`p-5 rounded-2xl border flex flex-col gap-2 transition-all ${activeQuotaId === q.id ? 'bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500' : 'bg-slate-50 border-slate-200'}`}>
                             {editingQuotaId === q.id ? (
                                <div className="space-y-3">
-                                  {/* ... Edit Quota Form ... */}
                                   <input 
                                     className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-black text-sm" 
                                     value={editQuotaForm.name} 
@@ -2296,9 +2376,8 @@ tex += `\\end{longtable}
                    </div>
                 </div>
 
-                {/* Add User - unchanged */}
+                {/* Add User */}
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-                   {/* ... add user code ... */}
                    <h3 className="font-bold text-slate-900 mb-6 flex items-center gap-2 text-lg">
                       <UserPlus className="w-5 h-5 text-indigo-600" /> Add New User
                    </h3>
@@ -2317,6 +2396,7 @@ tex += `\\end{longtable}
                         placeholder="Password"
                         className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
+                      
                       <div className="flex gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-100">
                           <button 
                              onClick={() => setNewUserRole('writer')} 
@@ -2331,6 +2411,7 @@ tex += `\\end{longtable}
                              Director
                           </button>
                       </div>
+
                       <div className="flex justify-end pt-2">
                          <Button onClick={addUser} disabled={!newUserName.trim() || !newUserPassword.trim()} className="w-full">
                            Create Account
@@ -2339,163 +2420,181 @@ tex += `\\end{longtable}
                    </div>
                 </div>
              </div>
-             {/* ... Table of users (unchanged) ... */}
-             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                   <div>
-                     <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                         <TrendingUp className="w-5 h-5 text-indigo-600" /> User Management
-                     </h3>
-                     <p className="text-xs text-slate-400 mt-1">Configuring for Active Round: {activeQuota.name}</p>
-                   </div>
-                </div>
-                <table className="w-full text-left">
-                  <thead className="bg-white border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">User</th>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Password</th>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Role & Power</th>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Write Override</th>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Progress</th>
-                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {users.map(u => {
-                      const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
-                      const uVoteTarget = activeQuota.voteTarget || 3;
-                      const uCount = u.submittedCount || 0;
-                      const uVoteCount = u.voteCount || 0;
-                      
-                      const canEditThisUser = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin');
-                      const canDeleteThisUser = canEditThisUser && u.role !== 'director';
 
-                      if (editingUserId === u.id) {
-                          return (
-                             <tr key={u.id} className="bg-slate-50 shadow-inner">
-                                 {/* ... Edit Row ... */}
-                                 <td className="px-6 py-4">
-                                     <input 
-                                         className="w-full px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
-                                         value={editUserForm.name} 
-                                         onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
-                                     />
-                                 </td>
-                                 <td className="px-6 py-4">
-                                     {currentUser.role === 'admin' ? (
-                                         <div className="flex items-center gap-1">
-                                             <Lock className="w-3 h-3 text-slate-400"/>
-                                             <input 
-                                                 className="w-24 px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
-                                                 placeholder="Reset Pass"
-                                                 value={editUserForm.password}
-                                                 onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
-                                             />
-                                         </div>
-                                     ) : (
-                                         <span className="text-xs text-slate-400 italic flex items-center gap-1">
-                                             <Lock className="w-3 h-3"/> Locked
-                                         </span>
-                                     )}
-                                 </td>
-                                 <td className="px-6 py-4">
-                                      <div className="flex items-center gap-1">
-                                         <Zap className="w-3 h-3 text-amber-500"/>
-                                         <input 
-                                             type="number"
-                                             className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
-                                             value={editUserForm.votingPower}
-                                             onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value) || 0})}
-                                         />
-                                     </div>
-                                 </td>
-                                 <td className="px-6 py-4">
+             {/* Writer Progress & Voting Power Table */}
+             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+               <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <div>
+                    <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 text-indigo-600" /> User Management
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">Configuring for Active Round: {activeQuota.name}</p>
+                  </div>
+               </div>
+               <table className="w-full text-left">
+                 <thead className="bg-white border-b border-slate-200">
+                   <tr>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">User</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Password</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Role & Power</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Write Override</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Progress</th>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Actions</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-100">
+                   {users.map(u => {
+                     const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
+                     const uVoteTarget = activeQuota.voteTarget || 3;
+                     const uCount = u.submittedCount || 0;
+                     const uVoteCount = u.voteCount || 0;
+                     
+                     // Permission check
+                     const canEditThisUser = currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin');
+                     const canDeleteThisUser = canEditThisUser && u.role !== 'director';
+
+                     if (editingUserId === u.id) {
+                         // EDIT MODE ROW
+                         return (
+                            <tr key={u.id} className="bg-slate-50 shadow-inner">
+                                <td className="px-6 py-4">
+                                    <input 
+                                        className="w-full px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
+                                        value={editUserForm.name} 
+                                        onChange={e => setEditUserForm({...editUserForm, name: e.target.value})}
+                                    />
+                                    {currentUser.role === 'admin' && (
+                                       <select 
+                                         className="mt-2 w-full text-xs border border-indigo-300 rounded p-1 bg-white"
+                                         value={editUserForm.role}
+                                         onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
+                                       >
+                                           <option value="writer">Writer</option>
+                                           <option value="director">Director</option>
+                                           <option value="admin">Admin</option>
+                                       </select>
+                                    )}
+                                </td>
+                                <td className="px-6 py-4">
+                                    {currentUser.role === 'admin' ? (
+                                        <div className="flex items-center gap-1">
+                                            <Lock className="w-3 h-3 text-slate-400"/>
+                                            <input 
+                                                className="w-24 px-2 py-1 border border-indigo-300 rounded text-sm text-black" 
+                                                placeholder="Reset Pass"
+                                                value={editUserForm.password}
+                                                onChange={e => setEditUserForm({...editUserForm, password: e.target.value})}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-slate-400 italic flex items-center gap-1">
+                                            <Lock className="w-3 h-3"/> Locked
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="px-6 py-4">
                                      <div className="flex items-center gap-1">
-                                         <Target className="w-3 h-3 text-indigo-500"/>
-                                         <input 
-                                             type="number"
-                                             className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
-                                             value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target}
-                                             onChange={e => updateUserTarget(u.id, parseInt(e.target.value) || 0)}
-                                         />
-                                     </div>
-                                 </td>
-                                 <td className="px-6 py-4 text-xs text-slate-400">Saving...</td>
-                                 <td className="px-6 py-4">
-                                     <div className="flex gap-2">
-                                         <button onClick={() => saveUser(u.id)} className="p-1.5 text-green-600 bg-white border border-green-200 rounded-lg hover:bg-green-50"><Save className="w-4 h-4"/></button>
-                                         <button onClick={() => setEditingUserId(null)} className="p-1.5 text-slate-500 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"><X className="w-4 h-4"/></button>
-                                     </div>
-                                 </td>
-                             </tr>
-                          )
-                      }
-                      return (
-                        <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
-                          <td className="px-6 py-5 font-bold text-slate-800 flex items-center gap-2">
-                            {u.name}
-                            {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
-                            {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">Director</span>}
-                          </td>
-                          <td className="px-6 py-5 text-sm font-mono text-slate-400">
-                             {u.password || '********'}
-                          </td>
-                          <td className="px-6 py-5 text-sm">
-                            <div className="flex items-center gap-1">
-                               <Zap className="w-4 h-4 text-amber-500" />
-                               <span className="font-bold text-slate-900">{u.votingPower}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-5 text-sm">
-                              <div className="flex items-center gap-1">
-                                 <span className="font-bold text-slate-900 bg-slate-100 px-2 py-1 rounded-md min-w-[30px] text-center">
-                                     {uTarget}
-                                 </span>
-                              </div>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="flex flex-col gap-3 min-w-[140px]">
-                               <div className="flex items-center gap-3 text-xs">
-                                 <Pencil className="w-3.5 h-3.5 text-indigo-400" />
-                                 <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                     <div 
-                                     className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
-                                     style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}
-                                     ></div>
-                                 </div>
-                                 <span className={`font-mono font-bold ${uCount >= uTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uCount}/{uTarget}</span>
-                               </div>
-                               <div className="flex items-center gap-3 text-xs">
-                                 <ThumbsUp className="w-3.5 h-3.5 text-teal-400" />
-                                 <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                     <div 
-                                     className={`h-full rounded-full ${uVoteCount >= uVoteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
-                                     style={{ width: `${Math.min((uVoteCount / uVoteTarget) * 100, 100)}%` }}
-                                     ></div>
-                                 </div>
-                                 <span className={`font-mono font-bold ${uVoteCount >= uVoteTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uVoteCount}/{uVoteTarget}</span>
-                               </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-5">
-                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                 {canEditThisUser && (
-                                     <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors" title="Edit User">
-                                         <Pencil className="w-4 h-4" />
-                                     </button>
-                                 )}
-                                 {canDeleteThisUser && (
-                                     <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title="Delete User">
-                                         <Trash2 className="w-4 h-4" />
-                                     </button>
-                                 )}
+                                        <Zap className="w-3 h-3 text-amber-500"/>
+                                        <input 
+                                            type="number"
+                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
+                                            value={editUserForm.votingPower}
+                                            onChange={e => setEditUserForm({...editUserForm, votingPower: parseInt(e.target.value) || 0})}
+                                        />
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                    <div className="flex items-center gap-1">
+                                        <Target className="w-3 h-3 text-indigo-500"/>
+                                        <input 
+                                            type="number"
+                                            className="w-16 px-2 py-1 border border-indigo-300 rounded text-sm text-black text-center font-bold"
+                                            value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target}
+                                            onChange={e => updateUserTarget(u.id, parseInt(e.target.value) || 0)}
+                                        />
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4 text-xs text-slate-400">
+                                    Saving...
+                                </td>
+                                <td className="px-6 py-4">
+                                    <div className="flex gap-2">
+                                        <button onClick={() => saveUser(u.id)} className="p-1.5 text-green-600 bg-white border border-green-200 rounded-lg hover:bg-green-50"><Save className="w-4 h-4"/></button>
+                                        <button onClick={() => setEditingUserId(null)} className="p-1.5 text-slate-500 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"><X className="w-4 h-4"/></button>
+                                    </div>
+                                </td>
+                            </tr>
+                         )
+                     }
+
+                     return (
+                       <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
+                         <td className="px-6 py-5 font-bold text-slate-800 flex items-center gap-2">
+                           {u.name}
+                           {u.role === 'admin' && <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase flex items-center gap-1"><Crown className="w-3 h-3"/> Admin</span>}
+                           {u.role === 'director' && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase">Director</span>}
+                         </td>
+                         <td className="px-6 py-5 text-sm font-mono text-slate-400">
+                            {u.password || '********'}
+                         </td>
+                         <td className="px-6 py-5 text-sm">
+                           <div className="flex items-center gap-1">
+                              <Zap className="w-4 h-4 text-amber-500" />
+                              <span className="font-bold text-slate-900">{u.votingPower}</span>
+                           </div>
+                         </td>
+                         <td className="px-6 py-5 text-sm">
+                             <div className="flex items-center gap-1">
+                                <span className="font-bold text-slate-900 bg-slate-100 px-2 py-1 rounded-md min-w-[30px] text-center">
+                                    {uTarget}
+                                </span>
                              </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                         </td>
+                         <td className="px-6 py-5">
+                           <div className="flex flex-col gap-3 min-w-[140px]">
+                              {/* Writing Progress */}
+                              <div className="flex items-center gap-3 text-xs">
+                                <Pencil className="w-3.5 h-3.5 text-indigo-400" />
+                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                    <div 
+                                    className={`h-full rounded-full ${uCount >= uTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} 
+                                    style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}
+                                    ></div>
+                                </div>
+                                <span className={`font-mono font-bold ${uCount >= uTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uCount}/{uTarget}</span>
+                              </div>
+                              {/* Voting Progress */}
+                              <div className="flex items-center gap-3 text-xs">
+                                <ThumbsUp className="w-3.5 h-3.5 text-teal-400" />
+                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                    <div 
+                                    className={`h-full rounded-full ${uVoteCount >= uVoteTarget ? 'bg-emerald-500' : 'bg-teal-500'}`} 
+                                    style={{ width: `${Math.min((uVoteCount / uVoteTarget) * 100, 100)}%` }}
+                                    ></div>
+                                </div>
+                                <span className={`font-mono font-bold ${uVoteCount >= uVoteTarget ? 'text-emerald-600' : 'text-slate-500'}`}>{uVoteCount}/{uVoteTarget}</span>
+                              </div>
+                           </div>
+                         </td>
+                         <td className="px-6 py-5">
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {canEditThisUser && (
+                                    <button onClick={() => startEditUser(u)} className="text-indigo-600 hover:bg-indigo-50 p-2 rounded-lg transition-colors" title="Edit User">
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                )}
+                                {canDeleteThisUser && (
+                                    <button onClick={() => deleteUser(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title="Delete User">
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+                         </td>
+                       </tr>
+                     );
+                   })}
+                 </tbody>
+               </table>
              </div>
           </div>
         )}
