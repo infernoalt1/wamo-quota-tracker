@@ -1,10 +1,11 @@
+
 -- Users Table
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL, -- using email as username/login id
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'writer')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'director', 'writer', 'guest')),
   voting_power INTEGER DEFAULT 1,
   custom_targets JSONB DEFAULT '{}'::jsonb, -- Store quota specific overrides: {"quota_id": 10}
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

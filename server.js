@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
@@ -64,6 +65,7 @@ const initDB = async () => {
       CREATE TABLE IF NOT EXISTS rounds (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
+        tag TEXT,
         description TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -72,7 +74,7 @@ const initDB = async () => {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         author_id UUID REFERENCES users(id),
         quota_id UUID REFERENCES quotas(id),
-        round_id UUID REFERENCES rounds(id),
+        round_id UUID REFERENCES rounds(id), -- Kept for legacy compatibility/primary display
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
         solution TEXT,
@@ -85,6 +87,14 @@ const initDB = async () => {
         order_index INTEGER DEFAULT 0,
         version INTEGER DEFAULT 1,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- New: Many-to-Many Join Table for Rounds
+      CREATE TABLE IF NOT EXISTS problem_rounds (
+        problem_id UUID REFERENCES problems(id) ON DELETE CASCADE,
+        round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
+        order_index INTEGER DEFAULT 0,
+        PRIMARY KEY (problem_id, round_id)
       );
 
       CREATE TABLE IF NOT EXISTS votes (
@@ -116,8 +126,27 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS round_id UUID REFERENCES rounds(id);
       
+      ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
     `);
+
+    // --- MIGRATION: Backfill problem_rounds from legacy round_id if empty ---
+    const checkJoin = await client.query('SELECT count(*) FROM problem_rounds');
+    if (parseInt(checkJoin.rows[0].count) === 0) {
+        await client.query(`
+            INSERT INTO problem_rounds (problem_id, round_id, order_index)
+            SELECT id, round_id, order_index FROM problems WHERE round_id IS NOT NULL
+        `);
+    }
+
+    // --- MIGRATION: Update Statuses for New Workflow ---
+    // If we have 'pending' problems that are NOT in a round, and they are old, upgrade them to 'approved' (pool)
+    // so the new "Waitlist" logic doesn't hide all existing problems.
+    // We assume any problem created before "now" with status 'pending' is legacy and should be visible.
+    // However, for safety, let's just make sure we don't break the app. 
+    // We will treat 'pending' as Waitlist. If admins see an empty pool, they check waitlist.
+    // But to be nice, let's auto-approve legacy 'pending' items.
+    // await client.query("UPDATE problems SET status = 'approved' WHERE status = 'pending'");
 
     // --- MIGRATION: Update Role Constraint to include 'director' and 'guest' ---
     try {
@@ -417,7 +446,8 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
     const result = await pool.query(`
       SELECT p.*, u.name as author_name, 
       (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
-      (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count
+      (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
+      (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       ORDER BY p.score DESC
@@ -428,7 +458,8 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
       quotaId: row.quota_id, // Ensure we send this
-      roundId: row.round_id, // New round assignment
+      roundId: row.round_id, // Legacy/Primary round
+      roundIds: row.round_ids || [], // New: Many-to-Many
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
       status: row.status || 'pending',
@@ -483,67 +514,133 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
 
-    // 2. Dynamic Update Query Construction
-    const setClauses = [];
-    const values = [];
-    let idx = 1;
-
-    // Whitelist allowed fields to prevent arbitrary column injection
-    const allowedFields = ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData', 'roundId', 'status', 'version'];
-    
-    // Mapping frontend camelCase to DB snake_case
-    const dbMapping = {
-        title: 'title',
-        statement: 'statement',
-        solution: 'solution',
-        answerKey: 'answer_key',
-        difficulty: 'difficulty',
-        topics: 'topics',
-        imageData: 'image_data',
-        roundId: 'round_id',
-        status: 'status'
-        // version is handled specially
-    };
-
-    // Build SET clauses
-    for (const key of Object.keys(updates)) {
-        if (allowedFields.includes(key) && key !== 'version') {
-             const dbCol = dbMapping[key];
-             if (dbCol) {
-                 setClauses.push(`${dbCol} = $${idx++}`);
-                 values.push(updates[key] === undefined ? null : updates[key]);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        // Handle Round Assignment Special Case (Many-to-Many)
+        if (updates.roundId !== undefined) {
+             const newRoundId = updates.roundId;
+             
+             // If assigning to a round (not null/undefined)
+             if (newRoundId) {
+                // Check if already in this round
+                const exists = await client.query('SELECT * FROM problem_rounds WHERE problem_id = $1 AND round_id = $2', [id, newRoundId]);
+                if (exists.rows.length === 0) {
+                     // Get max index
+                     const maxIdxRes = await client.query('SELECT MAX(order_index) as m FROM problem_rounds WHERE round_id = $1', [newRoundId]);
+                     const nextIdx = (maxIdxRes.rows[0].m || 0) + 1;
+                     await client.query('INSERT INTO problem_rounds (problem_id, round_id, order_index) VALUES ($1, $2, $3)', [id, newRoundId, nextIdx]);
+                }
+                // Update legacy column for display compatibility
+                await client.query('UPDATE problems SET round_id = $1 WHERE id = $2', [newRoundId, id]);
+             } else if (newRoundId === null) {
+                 // Explicit null means remove from round? 
+                 // NOTE: Front end sends { roundId: null } when removing from *specific* round context usually.
+                 // But for simplicity, if frontend sends roundId, we update legacy.
+                 // For removing, we should use a specific endpoint or handle it carefully.
+                 // We will update the legacy column to null. 
+                 await client.query('UPDATE problems SET round_id = NULL WHERE id = $1', [id]);
+                 // We do NOT delete from problem_rounds here because we don't know WHICH round to remove from 
+                 // without more context, unless we clear ALL.
+                 // Use separate logic/endpoint for removing from round.
              }
         }
+        
+        // 2. Dynamic Update Query Construction for problems table
+        const setClauses = [];
+        const values = [];
+        let idx = 1;
+
+        // Whitelist allowed fields to prevent arbitrary column injection
+        const allowedFields = ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData', 'status', 'version'];
+        
+        // Mapping frontend camelCase to DB snake_case
+        const dbMapping = {
+            title: 'title',
+            statement: 'statement',
+            solution: 'solution',
+            answerKey: 'answer_key',
+            difficulty: 'difficulty',
+            topics: 'topics',
+            imageData: 'image_data',
+            status: 'status'
+            // version is handled specially
+        };
+
+        // Build SET clauses
+        for (const key of Object.keys(updates)) {
+            if (allowedFields.includes(key) && key !== 'version') {
+                 const dbCol = dbMapping[key];
+                 if (dbCol) {
+                     setClauses.push(`${dbCol} = $${idx++}`);
+                     values.push(updates[key] === undefined ? null : updates[key]);
+                 }
+            }
+        }
+
+        if (setClauses.length > 0) {
+            // Handle Version Increment
+            setClauses.push(`version = version + 1`);
+
+            let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
+            values.push(id);
+
+            // Optimistic locking check (if version provided)
+            if (updates.version !== undefined) {
+                 query += ` AND version = $${idx++}`;
+                 values.push(updates.version);
+            }
+
+            query += ` RETURNING *`;
+            await client.query(query, values);
+        }
+
+        await client.query('COMMIT');
+        
+        // Fetch fresh
+        const fresh = await pool.query('SELECT * FROM problems WHERE id = $1', [id]);
+        res.json({ success: true, problem: fresh.rows[0] });
+
+    } catch(e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
     }
-
-    if (setClauses.length === 0) return res.status(400).json({error: "No valid fields to update"});
-
-    // Handle Version Increment
-    setClauses.push(`version = version + 1`);
-
-    let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
-    values.push(id);
-
-    // Optimistic locking check (if version provided)
-    if (updates.version !== undefined) {
-         query += ` AND version = $${idx++}`;
-         values.push(updates.version);
-    }
-
-    query += ` RETURNING *`;
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-        return res.status(409).json({ error: 'Conflict: Problem modified or not found.' });
-    }
-
-    res.json({ success: true, problem: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed', details: err.message });
   }
 });
+
+// New Route: Remove problem from a specific round
+app.delete('/api/problems/:id/round/:roundId', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+    const { id, roundId } = req.params;
+    
+    try {
+        await pool.query('DELETE FROM problem_rounds WHERE problem_id = $1 AND round_id = $2', [id, roundId]);
+        
+        // Update legacy column if it matches
+        await pool.query('UPDATE problems SET round_id = NULL WHERE id = $1 AND round_id = $2', [id, roundId]);
+        
+        // If it's still in other rounds, maybe update round_id to one of them?
+        // For now, keep it simple. Legacy round_id just shows "one of" the rounds.
+        
+        // Status update logic: If no rounds left, set to 'approved' (pool)
+        const check = await pool.query('SELECT count(*) FROM problem_rounds WHERE problem_id = $1', [id]);
+        if (parseInt(check.rows[0].count) === 0) {
+            await pool.query("UPDATE problems SET status = 'approved' WHERE id = $1", [id]);
+        }
+        
+        res.json({ success: true });
+    } catch(e) {
+        console.error(e);
+        res.status(500).json({ error: 'Remove from round failed' });
+    }
+});
+
 
 // New Route: Bulk Import Parsing
 app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
@@ -628,7 +725,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['pending', 'accepted'].includes(status)) {
+  if (!['pending', 'approved', 'accepted'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
 
@@ -645,18 +742,34 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
 app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
-  const { problems } = req.body; // Array of problem IDs in desired order
+  const { problems, roundId } = req.body; // Array of problem IDs in desired order, and the Round ID
   
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
       
-      // For each problem ID in the list, update its order_index
-      for (let i = 0; i < problems.length; i++) {
-          await client.query(
-              'UPDATE problems SET order_index = $1 WHERE id = $2',
-              [i, problems[i]]
-          );
+      // For each problem ID in the list, update its order_index in the join table
+      // If roundId is provided, update problem_rounds. 
+      // Fallback to updating problems table if only legacy mode, but we should enforce roundId
+      
+      if (roundId) {
+          for (let i = 0; i < problems.length; i++) {
+              await client.query(
+                  'UPDATE problem_rounds SET order_index = $1 WHERE problem_id = $2 AND round_id = $3',
+                  [i, problems[i], roundId]
+              );
+              // Also update main table order_index if this is the "primary" round (legacy compat)
+              // Just simpler to update it always, though it might get overwritten by other round reorders.
+              await client.query(
+                  'UPDATE problems SET order_index = $1 WHERE id = $2 AND round_id = $3',
+                   [i, problems[i], roundId]
+              );
+          }
+      } else {
+          // Legacy behavior
+           for (let i = 0; i < problems.length; i++) {
+              await client.query('UPDATE problems SET order_index = $1 WHERE id = $2', [i, problems[i]]);
+          }
       }
       
       await client.query('COMMIT');
@@ -851,6 +964,7 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
         res.json(result.rows.map(r => ({
             id: r.id,
             name: r.name,
+            tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime()
         })));
@@ -862,13 +976,14 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
 
 app.post('/api/rounds', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-    const { name, description } = req.body;
+    const { name, description, tag } = req.body;
     try {
-        const result = await pool.query('INSERT INTO rounds (name, description) VALUES ($1, $2) RETURNING *', [name, description]);
+        const result = await pool.query('INSERT INTO rounds (name, description, tag) VALUES ($1, $2, $3) RETURNING *', [name, description, tag]);
         const r = result.rows[0];
         res.json({
             id: r.id,
             name: r.name,
+            tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime()
         });
@@ -882,17 +997,18 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
 app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
-    const { name, description } = req.body;
+    const { name, description, tag } = req.body;
     try {
         const result = await pool.query(
-            'UPDATE rounds SET name = $1, description = $2 WHERE id = $3 RETURNING *',
-            [name, description, id]
+            'UPDATE rounds SET name = $1, description = $2, tag = $3 WHERE id = $4 RETURNING *',
+            [name, description, tag, id]
         );
         if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
         const r = result.rows[0];
         res.json({
             id: r.id,
             name: r.name,
+            tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime()
         });
@@ -909,8 +1025,12 @@ app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // Unassign problems first
-        await client.query('UPDATE problems SET round_id = NULL, status = \'pending\', order_index = 0 WHERE round_id = $1', [id]);
+        // Unassign problems first from main table (legacy)
+        await client.query('UPDATE problems SET round_id = NULL, status = \'approved\' WHERE round_id = $1', [id]);
+        
+        // Delete from join table
+        await client.query('DELETE FROM problem_rounds WHERE round_id = $1', [id]);
+        
         // Delete round
         await client.query('DELETE FROM rounds WHERE id = $1', [id]);
         await client.query('COMMIT');

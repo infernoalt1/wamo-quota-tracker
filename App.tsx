@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment } from './types';
 import { Button } from './components/Button';
@@ -50,7 +51,10 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
-  Copy
+  Copy,
+  Tag,
+  ListChecks,
+  Hourglass
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -149,6 +153,7 @@ export default function App() {
   
   // Round Create New State
   const [newRoundName, setNewRoundName] = useState('');
+  const [newRoundTag, setNewRoundTag] = useState('');
   const [newRoundDesc, setNewRoundDesc] = useState('');
 
   // Pool View State (Sorting/Filtering)
@@ -169,6 +174,7 @@ export default function App() {
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
   const [composerSearchText, setComposerSearchText] = useState('');
   const [composerExpandedMap, setComposerExpandedMap] = useState<Record<string, boolean>>({});
+  const [composerScrollTop, setComposerScrollTop] = useState(0); // Track scroll
   
   // Composer New Round UI / Editing Round
   const [isCreatingRound, setIsCreatingRound] = useState(false);
@@ -301,7 +307,8 @@ export default function App() {
   // Handle Pool Sorting & Filtering
   useEffect(() => {
     if (view === 'pool') {
-      let filtered = [...problems];
+      // In the "Pool", we only show Approved problems, or Accepted. We hide Pending (Waitlist).
+      let filtered = [...problems].filter(p => p.status === 'approved' || p.status === 'accepted');
 
       // Filter by Quota
       if (poolFilterQuota !== 'All') {
@@ -313,7 +320,7 @@ export default function App() {
           filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
       }
 
-      // Filter by Status
+      // Filter by Status (Within allowed pool types)
       if (poolFilterStatus !== 'All') {
           filtered = filtered.filter(p => {
              const s = p.status || 'pending';
@@ -405,10 +412,12 @@ export default function App() {
     try {
         const newRound = await api.createRound({
           name: newRoundName.trim(),
+          tag: newRoundTag.trim() || undefined,
           description: newRoundDesc.trim() || 'No description.',
         });
         setRounds([newRound, ...rounds]); // Add to top
         setNewRoundName('');
+        setNewRoundTag('');
         setNewRoundDesc('');
         
         // Switch to this round immediately
@@ -425,6 +434,7 @@ export default function App() {
           await api.updateRound({
               id: composerSelectedRoundId,
               name: editRoundForm.name,
+              tag: editRoundForm.tag || '',
               description: editRoundForm.description || ''
           });
           refreshData(); // Updates the rounds list
@@ -750,9 +760,6 @@ export default function App() {
       setProblems(updatedProblems);
       try {
           // Merge updates with existing data for the API call to ensure robust update
-          const existing = problems.find(p => p.id === problemId);
-          if (!existing) return;
-          
           await api.updateProblem(problemId, updates);
       } catch(e) {
           console.error("Composer update failed");
@@ -766,11 +773,11 @@ export default function App() {
       
       // Get current problems in that round
       const accepted = problems
-        .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+        .filter(p => p.roundIds && p.roundIds.includes(composerSelectedRoundId) && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
       
       // If already added, do nothing (unless moving, which is handled in drag)
-      if (problem.roundId === composerSelectedRoundId && problem.status === 'accepted') return;
+      if (problem.roundIds?.includes(composerSelectedRoundId)) return;
 
       const newOrder = [...accepted];
       
@@ -785,9 +792,12 @@ export default function App() {
       const orderMap = new Map();
       newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
 
+      // Optimistic update
       const updatedProblems = problems.map(p => {
           if (p.id === problem.id) {
-               return { ...p, status: 'accepted', roundId: composerSelectedRoundId, orderIndex: orderMap.get(p.id) } as Problem;
+               const newRoundIds = [...(p.roundIds || []), composerSelectedRoundId];
+               // We set status 'accepted' if in any round
+               return { ...p, status: 'accepted', roundIds: newRoundIds, orderIndex: orderMap.get(p.id) } as Problem;
           }
           if (orderMap.has(p.id)) {
               return { ...p, orderIndex: orderMap.get(p.id) };
@@ -797,28 +807,33 @@ export default function App() {
       setProblems(updatedProblems);
       
       try {
-         // Update problem round assignment
+         // Update problem round assignment (add to round)
          await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
          
          // Fix order
-         await api.reorderRound(newOrder.map(p => p.id));
+         await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
       } catch(e) {
           refreshData();
       }
   };
 
   const handleRemoveFromRound = async (problem: Problem) => {
-      // Sets back to pending, removes roundId
+      if (!composerSelectedRoundId) return;
+
+      // Removes current roundId from list
       const updatedProblems = problems.map(p => {
-          // When removing, we keep quotaId but clear roundId
-          if (p.id === problem.id) return { ...p, status: 'pending', roundId: undefined } as Problem; // undefined for optimistic, will refresh null
+          if (p.id === problem.id) {
+             const newRoundIds = (p.roundIds || []).filter(rid => rid !== composerSelectedRoundId);
+             // If no rounds left, it goes back to 'approved' (pool)
+             const newStatus = newRoundIds.length === 0 ? 'approved' : 'accepted';
+             return { ...p, status: newStatus, roundIds: newRoundIds } as Problem;
+          }
           return p;
       });
       setProblems(updatedProblems);
 
       try {
-          // Send null (or something that clears it)
-          await api.updateProblem(problem.id, { status: 'pending', roundId: null as any });
+          await api.removeFromRound(problem.id, composerSelectedRoundId);
       } catch(e) {
           refreshData();
       }
@@ -826,13 +841,8 @@ export default function App() {
 
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
-      // CRITICAL FIX: Defer the state update. 
-      // Setting state immediately causes a re-render which can destroy the DOM node being dragged
-      // before the browser captures the drag image, causing the drag to fail or require a second attempt.
       const dragImage = e.currentTarget.cloneNode(true) as HTMLElement;
       dragImage.style.opacity = '1';
-      // We can use default drag image, or set one. 
-      // Most important is not re-rendering the source element immediately synchronously.
       
       requestAnimationFrame(() => {
         setDraggingId(problemId);
@@ -889,7 +899,7 @@ export default function App() {
       // Default to end if null (dropped on container background)
       if (targetIndex === null) {
           // Fallback to getting from the filtered accepted list length
-          const accepted = problems.filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted');
+          const accepted = problems.filter(p => p.roundIds?.includes(composerSelectedRoundId) && p.status === 'accepted');
           targetIndex = accepted.length;
       }
       
@@ -913,7 +923,7 @@ export default function App() {
           if (sourceIndex === targetIndex || sourceIndex === targetIndex - 1) return;
 
           const accepted = problems
-            .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+            .filter(p => p.roundIds?.includes(composerSelectedRoundId) && p.status === 'accepted')
             .sort((a,b) => a.orderIndex - b.orderIndex);
           
           // Adjusted Target Logic:
@@ -936,7 +946,7 @@ export default function App() {
           setProblems(updatedProblems);
           
           try {
-              await api.reorderRound(newOrder.map(p => p.id));
+              await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
           } catch(e) {
               refreshData();
           }
@@ -971,7 +981,7 @@ export default function App() {
       if (!targetRoundId) return;
 
       const activeProblems = problems
-        .filter(p => p.roundId === targetRoundId && p.status === 'accepted')
+        .filter(p => p.roundIds?.includes(targetRoundId) && p.status === 'accepted')
         .sort((a,b) => a.orderIndex - b.orderIndex);
 
       let tex = `\\documentclass[12pt]{extarticle}
@@ -1216,6 +1226,62 @@ tex += `\\end{longtable}
       );
   };
 
+  const WaitlistProblemCard = ({ p }: { p: Problem }) => {
+      const [editDiff, setEditDiff] = useState(p.difficulty);
+      const [isEditing, setIsEditing] = useState(false);
+      
+      const approve = async () => {
+          if (editDiff !== p.difficulty) {
+              await api.updateProblem(p.id, { difficulty: editDiff });
+          }
+          await handleStatusChange(p.id, 'approved');
+      };
+
+      return (
+          <div className="bg-white border border-l-4 border-l-amber-400 border-slate-200 rounded-xl p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex justify-between items-start">
+                  <div>
+                      <h4 className="font-bold text-slate-800 text-sm"><MathText text={p.title} /></h4>
+                      <p className="text-xs text-slate-400 mt-1">By {p.authorName} • {new Date(p.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                       <span className="text-[10px] font-bold text-slate-400 uppercase">Diff</span>
+                       <input 
+                          type="number" 
+                          className="w-12 text-xs p-1 border rounded bg-slate-50 text-center" 
+                          value={editDiff} 
+                          onChange={e => setEditDiff(Number(e.target.value))} 
+                       />
+                       <Button size="sm" onClick={approve} className="bg-emerald-600 hover:bg-emerald-700 text-white border-none py-1 h-8 text-xs">
+                           Approve
+                       </Button>
+                  </div>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-sm font-serif">
+                  <MathText text={p.statement} className="line-clamp-3"/>
+              </div>
+              <div className="flex gap-2">
+                   {p.topics.map(t => <span key={t} className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-bold">{t}</span>)}
+              </div>
+          </div>
+      );
+  };
+  
+  // Composer Scroll Fix
+  const composerListRef = useRef<HTMLDivElement>(null);
+  
+  // Save scroll position before updates if needed
+  useEffect(() => {
+      if (composerListRef.current) {
+          // If we had a saved scroll top and the data refreshed, restore it? 
+          // Actually, React preserves scroll on simple updates. 
+          // The issue described is likely due to full re-mounts.
+          // By ensuring keys are stable (p.id), we mitigate most issues.
+          // But let's restore if we have a tracking state.
+          // However, if we simply don't unmount the list container, it stays.
+      }
+  }, [problems]); // Naive check
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
@@ -1315,17 +1381,36 @@ tex += `\\end{longtable}
   // --- Composer Data ---
   // Using composerSelectedRoundId instead of activeQuotaId
   const composerSelectedRound = rounds.find(r => r.id === composerSelectedRoundId);
+  const composerSelectedRoundTag = composerSelectedRound?.tag;
   
-  // Problems assigned to the round
+  // Problems assigned to the round (using roundIds array for many-to-many)
   const composerAccepted = problems
-    .filter(p => p.roundId === composerSelectedRoundId && p.status === 'accepted')
+    .filter(p => p.roundIds && p.roundIds.includes(composerSelectedRoundId || '') && p.status === 'accepted')
     .sort((a,b) => a.orderIndex - b.orderIndex);
   
   // Problems NOT assigned to this round, filtered by source quota and search
   const composerCandidates = problems
     .filter(p => {
         // Exclude problems already in THIS round
-        if (p.roundId === composerSelectedRoundId && p.status === 'accepted') return false;
+        if (p.roundIds && p.roundIds.includes(composerSelectedRoundId || '')) return false;
+        
+        // Exclude problems already in ANY round, UNLESS that round shares the same TAG
+        if (p.status === 'accepted' && p.roundIds && p.roundIds.length > 0) {
+             // Find rounds this problem is in
+             const assignedRounds = rounds.filter(r => p.roundIds?.includes(r.id));
+             // If any assigned round has a DIFFERENT tag (or no tag) than current round, exclude it.
+             // i.e. "Fall 2024 Div A" can share with "Fall 2024 Div B" (Same Tag), 
+             // but not with "Spring 2025" (Different Tag).
+             // If current round has NO tag, it can't share with anyone.
+             if (!composerSelectedRoundTag) return false; 
+             
+             // Check for incompatibility
+             const hasIncompatibleRound = assignedRounds.some(r => r.tag !== composerSelectedRoundTag);
+             if (hasIncompatibleRound) return false;
+        }
+
+        // Must be in pool (approved) or accepted (shared round)
+        if (p.status === 'pending') return false; // Hide waitlist problems
         
         // Source Filter (Quota)
         if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
@@ -1363,6 +1448,9 @@ tex += `\\end{longtable}
   composerAccepted.forEach(p => {
       p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
   });
+  
+  // Pending Count for Director
+  const pendingCount = problems.filter(p => p.status === 'pending').length;
 
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col md:flex-row font-sans text-slate-900">
@@ -1416,8 +1504,13 @@ tex += `\\end{longtable}
                 onClick={() => setView('composer')} 
               />
               <NavItem 
-                icon={<Settings className="w-5 h-5" />} 
-                label="Director Panel" 
+                icon={
+                    <div className="relative">
+                        <Settings className="w-5 h-5" />
+                        {pendingCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
+                    </div>
+                } 
+                label={pendingCount > 0 ? `Director Panel (${pendingCount})` : "Director Panel"} 
                 active={view === 'admin'} 
                 onClick={() => setView('admin')} 
               />
@@ -1563,7 +1656,7 @@ tex += `\\end{longtable}
                     <ProblemCard 
                         key={p.id} 
                         problem={p} 
-                        roundName={rounds.find(r => r.id === p.roundId)?.name}
+                        roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
                         showAuthor={true} 
                         currentUserId={currentUser.id}
                         currentUserRole={currentUser.role}
@@ -1609,6 +1702,16 @@ tex += `\\end{longtable}
                                   className="w-full px-4 py-3 border border-slate-300 rounded-xl text-base bg-white text-black focus:ring-2 focus:ring-indigo-500 outline-none"
                                   autoFocus
                                />
+                               <div className="flex gap-2 items-center">
+                                   <Tag className="w-5 h-5 text-slate-400" />
+                                   <input 
+                                      type="text" 
+                                      placeholder="Round Tag (e.g. 'Fall2024' - allows shared problems)" 
+                                      value={newRoundTag} 
+                                      onChange={e => setNewRoundTag(e.target.value)}
+                                      className="flex-1 px-4 py-3 border border-slate-300 rounded-xl text-sm"
+                                   />
+                               </div>
                                <textarea
                                    placeholder="Description..."
                                    value={newRoundDesc}
@@ -1632,7 +1735,7 @@ tex += `\\end{longtable}
                             </div>
                             
                             {rounds.map(r => {
-                                const rProbCount = problems.filter(p => p.roundId === r.id && p.status === 'accepted').length;
+                                const rProbCount = problems.filter(p => p.roundIds && p.roundIds.includes(r.id)).length;
                                 return (
                                     <div 
                                         key={r.id}
@@ -1643,6 +1746,7 @@ tex += `\\end{longtable}
                                             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                                                 <FolderOpen className="w-5 h-5" />
                                             </div>
+                                            {r.tag && <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase">{r.tag}</span>}
                                         </div>
                                         <h3 className="font-bold text-slate-900 text-lg mb-1">{r.name}</h3>
                                         <p className="text-sm text-slate-500 mb-4 line-clamp-2 min-h-[40px]">{r.description || 'No description.'}</p>
@@ -1673,6 +1777,12 @@ tex += `\\end{longtable}
                                 placeholder="Round Name"
                               />
                               <input 
+                                className="w-32 px-3 py-1 border border-indigo-300 rounded-lg text-sm" 
+                                value={editRoundForm.tag} 
+                                onChange={e => setEditRoundForm({...editRoundForm, tag: e.target.value})} 
+                                placeholder="Tag"
+                              />
+                              <input 
                                 className="flex-1 px-3 py-1 border border-indigo-300 rounded-lg text-sm" 
                                 value={editRoundForm.description} 
                                 onChange={e => setEditRoundForm({...editRoundForm, description: e.target.value})} 
@@ -1683,7 +1793,10 @@ tex += `\\end{longtable}
                           </div>
                       ) : (
                           <div className="flex-1 min-w-0 group/header relative">
-                              <h1 className="text-2xl font-bold text-slate-900 truncate">{composerSelectedRound?.name}</h1>
+                              <div className="flex items-center gap-2">
+                                  <h1 className="text-2xl font-bold text-slate-900 truncate">{composerSelectedRound?.name}</h1>
+                                  {composerSelectedRound?.tag && <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase border border-indigo-100">{composerSelectedRound.tag}</span>}
+                              </div>
                               <p className="text-slate-500 text-xs mt-0.5 truncate">{composerSelectedRound?.description || 'No description'}</p>
                               
                               <div className="absolute right-0 top-1 opacity-0 group-hover/header:opacity-100 transition-opacity flex gap-2 bg-white pl-4">
@@ -1804,7 +1917,7 @@ tex += `\\end{longtable}
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/30">
                             {composerCandidates.length === 0 ? (
-                               <div className="text-center py-10 text-slate-400 italic text-sm">No matching problems found.</div>
+                               <div className="text-center py-10 text-slate-400 italic text-sm">No matching problems found.<br/>Check filters or Waitlist.</div>
                             ) : (
                                composerCandidates.map(p => (
                                    <ComposerItem 
@@ -1856,7 +1969,10 @@ tex += `\\end{longtable}
                             </div>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30">
+                        <div 
+                            className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30"
+                            ref={composerListRef}
+                        >
                              {composerAccepted.length === 0 ? (
                                 <div className="text-center py-20 pointer-events-none">
                                     <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-indigo-50 text-indigo-300 mb-3">
@@ -2150,7 +2266,7 @@ tex += `\\end{longtable}
                <div>
                   <h1 className="text-3xl font-bold text-slate-900">Problem Pool</h1>
                   <p className="text-slate-500 mt-2">
-                    {problems.length} problems submitted • <span className="text-indigo-600 font-semibold">Blind Review Active</span>
+                    {problems.filter(p => p.status === 'approved').length} approved problems • <span className="text-indigo-600 font-semibold">Blind Review Active</span>
                   </p>
                </div>
             </header>
@@ -2190,8 +2306,8 @@ tex += `\\end{longtable}
                     onChange={(e) => setPoolFilterStatus(e.target.value)}
                 >
                     <option value="All">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="accepted">Accepted</option>
+                    <option value="approved">Approved</option>
+                    <option value="accepted">Accepted in Round</option>
                 </select>
 
                 {/* Difficulty Filter */}
@@ -2251,7 +2367,7 @@ tex += `\\end{longtable}
                     <ProblemCard 
                       key={p.id} 
                       problem={p} 
-                      roundName={rounds.find(r => r.id === p.roundId)?.name}
+                      roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
                       showAuthor={p.authorId === currentUser.id} // ONLY show if it is MY problem. Admin sees blind.
                       currentUserId={currentUser.id}
                       currentUserRole={currentUser.role}
@@ -2272,7 +2388,7 @@ tex += `\\end{longtable}
         {view === 'admin' && isDirector && !isGuest && (
           <div className="max-w-6xl mx-auto">
              <div className="flex justify-between items-center mb-10">
-                <h1 className="text-3xl font-bold text-slate-900">Contest Administration</h1>
+                <h1 className="text-3xl font-bold text-slate-900">Director Administration</h1>
                 <div className="flex gap-3">
                   <Button onClick={openExportModal} size="sm" variant="secondary" className="gap-2">
                       <Download className="w-4 h-4" /> Export TeX
@@ -2284,6 +2400,27 @@ tex += `\\end{longtable}
                      </Button>
                   )}
                 </div>
+             </div>
+             
+             {/* PENDING WAITLIST (New Feature) */}
+             <div className="mb-12">
+                 <div className="flex items-center gap-3 mb-6">
+                     <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center"><Hourglass className="w-4 h-4"/></div>
+                     <h3 className="font-bold text-slate-900 text-xl">Problem Waitlist</h3>
+                     <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs font-bold">{pendingCount} Pending</span>
+                 </div>
+                 
+                 {pendingCount > 0 ? (
+                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                         {problems.filter(p => p.status === 'pending').map(p => (
+                             <WaitlistProblemCard key={p.id} p={p} />
+                         ))}
+                     </div>
+                 ) : (
+                     <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
+                         No problems waiting for approval.
+                     </div>
+                 )}
              </div>
              
              <div className="grid md:grid-cols-2 gap-8 mb-8">

@@ -1,3 +1,4 @@
+
 export interface ProblemValidation {
   isAcceptable: boolean;
   rejectionReason?: string;
@@ -6,6 +7,7 @@ export interface ProblemValidation {
 export interface Round {
   id: string;
   name: string;
+  tag?: string; // New: Tag for grouping rounds (e.g. "Fall 2024")
   description: string;
   createdAt?: number;
 }
@@ -21,7 +23,8 @@ export interface Quota {
 
 export type Topic = 'Algebra' | 'Geometry' | 'Combinatorics' | 'Number Theory';
 
-export type ProblemStatus = 'pending' | 'accepted';
+// Updated status workflow: pending (waitlist) -> approved (pool) -> accepted (round)
+export type ProblemStatus = 'pending' | 'approved' | 'accepted';
 
 export interface Comment {
   id: string;
@@ -36,7 +39,8 @@ export interface Problem {
   authorId: string;
   authorName: string; // Stored for admin, hidden in UI
   quotaId: string;    // Crucial for tracking which submission cycle this belongs to
-  roundId?: string;   // The specific contest round this problem is assigned to
+  roundId?: string;   // Deprecated: Primary round ID for legacy display
+  roundIds?: string[]; // New: List of all rounds this problem belongs to
   title: string;
   statement: string;
   solution?: string; // New: Full LaTeX solution
