@@ -10,6 +10,7 @@ export interface Round {
   tag?: string; // New: Tag for grouping rounds (e.g. "Fall 2024")
   description: string;
   createdAt?: number;
+  problemCount?: number; // New: accurate count from backend
 }
 
 export interface Quota {

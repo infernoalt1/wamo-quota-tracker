@@ -140,13 +140,13 @@ const initDB = async () => {
     }
 
     // --- MIGRATION: Update Statuses for New Workflow ---
-    // If we have 'pending' problems that are NOT in a round, and they are old, upgrade them to 'approved' (pool)
-    // so the new "Waitlist" logic doesn't hide all existing problems.
-    // We assume any problem created before "now" with status 'pending' is legacy and should be visible.
-    // However, for safety, let's just make sure we don't break the app. 
-    // We will treat 'pending' as Waitlist. If admins see an empty pool, they check waitlist.
-    // But to be nice, let's auto-approve legacy 'pending' items.
-    // await client.query("UPDATE problems SET status = 'approved' WHERE status = 'pending'");
+    // 1. Ensure problems in rounds are marked 'accepted'
+    await client.query("UPDATE problems SET status = 'accepted' WHERE id IN (SELECT problem_id FROM problem_rounds)");
+    
+    // 2. Ensure problems NOT in rounds but 'approved' (legacy Pool) are moved to 'pending' (Waitlist)
+    //    We only do this for problems that are 'approved' and have NO round entries.
+    //    This effectively resets the pool so the Director must verify everything via Waitlist.
+    await client.query("UPDATE problems SET status = 'pending' WHERE status = 'approved' AND id NOT IN (SELECT problem_id FROM problem_rounds)");
 
     // --- MIGRATION: Update Role Constraint to include 'director' and 'guest' ---
     try {
@@ -960,13 +960,18 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
 
 app.get('/api/rounds', authenticateToken, async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM rounds ORDER BY created_at DESC');
+        const result = await pool.query(`
+            SELECT r.*, (SELECT COUNT(*)::int FROM problem_rounds WHERE round_id = r.id) as problem_count 
+            FROM rounds r 
+            ORDER BY r.created_at DESC
+        `);
         res.json(result.rows.map(r => ({
             id: r.id,
             name: r.name,
             tag: r.tag,
             description: r.description,
-            createdAt: new Date(r.created_at).getTime()
+            createdAt: new Date(r.created_at).getTime(),
+            problemCount: parseInt(r.problem_count || '0')
         })));
     } catch (e) {
         console.error(e);
@@ -985,7 +990,8 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
             name: r.name,
             tag: r.tag,
             description: r.description,
-            createdAt: new Date(r.created_at).getTime()
+            createdAt: new Date(r.created_at).getTime(),
+            problemCount: 0
         });
     } catch (e) {
         console.error(e);
@@ -1005,12 +1011,14 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
         );
         if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
         const r = result.rows[0];
+        // We need to fetch count again or just return previous
         res.json({
             id: r.id,
             name: r.name,
             tag: r.tag,
             description: r.description,
-            createdAt: new Date(r.created_at).getTime()
+            createdAt: new Date(r.created_at).getTime(),
+            // problemCount is missing here but usually update doesn't need it immediately or can refetch
         });
     } catch (e) {
         console.error(e);
