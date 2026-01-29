@@ -54,7 +54,8 @@ import {
   Copy,
   Tag,
   ListChecks,
-  Hourglass
+  Hourglass,
+  History
 } from 'lucide-react';
 
 interface NavItemProps {
@@ -62,9 +63,10 @@ interface NavItemProps {
   label: string;
   active: boolean;
   onClick: () => void;
+  badge?: number;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
+const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, badge }) => (
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
@@ -74,7 +76,12 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick }) => (
     }`}
   >
     <div className={active ? 'text-indigo-600' : 'text-slate-400'}>{icon}</div>
-    {label}
+    <span className="flex-1 text-left">{label}</span>
+    {badge !== undefined && badge > 0 && (
+      <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+        {badge}
+      </span>
+    )}
   </button>
 );
 
@@ -1287,8 +1294,8 @@ tex += `\\end{longtable}
       return (
           <div className={`bg-white border-l-4 ${hasChanges ? 'border-l-indigo-500' : 'border-l-amber-400'} border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col gap-4 transition-all`}>
               {/* Header Line */}
-              <div className="flex justify-between items-start gap-4">
-                  <div className="flex-1">
+              <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                  <div className="flex-1 w-full">
                       <input 
                           className="font-bold text-slate-800 text-lg w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none transition-colors"
                           value={formData.title}
@@ -1300,7 +1307,7 @@ tex += `\\end{longtable}
                           <span>{new Date(p.createdAt).toLocaleDateString()}</span>
                       </div>
                   </div>
-                  <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100 self-end md:self-auto">
                        <div className="flex flex-col items-center">
                            <span className="text-[10px] font-bold text-slate-400 uppercase">Diff</span>
                            <input 
@@ -1619,21 +1626,17 @@ tex += `\\end{longtable}
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administration</p>
               </div>
               <NavItem 
+                icon={<ListChecks className="w-5 h-5" />} 
+                label="Waitlist" 
+                active={view === 'waitlist'} 
+                onClick={() => setView('waitlist')}
+                badge={pendingCount}
+              />
+              <NavItem 
                 icon={<LayoutList className="w-5 h-5" />} 
                 label="Round Composer" 
                 active={view === 'composer'} 
                 onClick={() => setView('composer')} 
-              />
-              <NavItem 
-                icon={
-                    <div className="relative">
-                        <ListChecks className="w-5 h-5" />
-                        {pendingCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
-                    </div>
-                } 
-                label={`Waitlist (${pendingCount})`}
-                active={view === 'waitlist'} 
-                onClick={() => setView('waitlist')} 
               />
               <NavItem 
                 icon={<Settings className="w-5 h-5" />} 
@@ -1674,15 +1677,15 @@ tex += `\\end{longtable}
             <div className="max-w-4xl mx-auto animate-in fade-in slide-in-from-left-4 duration-300">
                 <div className="flex justify-between items-center mb-8">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shadow-sm">
-                            <Hourglass className="w-5 h-5"/>
+                        <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center shadow-sm">
+                            <Hourglass className="w-6 h-6"/>
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold text-slate-900">Problem Waitlist</h1>
-                            <p className="text-slate-500 text-sm mt-1">Review pending submissions before approving them to the pool.</p>
+                            <p className="text-slate-500 text-sm mt-1">Review, edit, and approve pending submissions.</p>
                         </div>
                     </div>
-                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold border border-slate-200">{pendingCount} Pending</span>
+                    <span className="bg-slate-100 text-slate-600 px-4 py-1.5 rounded-full text-sm font-bold border border-slate-200 shadow-sm">{pendingCount} Pending</span>
                 </div>
                 
                 {pendingCount > 0 ? (
@@ -1692,10 +1695,10 @@ tex += `\\end{longtable}
                         ))}
                     </div>
                 ) : (
-                    <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-16 text-center text-slate-400">
-                        <CheckCircle className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                        <h3 className="font-bold text-lg text-slate-600">All caught up!</h3>
-                        <p className="text-sm">No problems currently waiting for approval.</p>
+                    <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-16 text-center text-slate-400 flex flex-col items-center">
+                        <CheckCircle className="w-16 h-16 mb-4 text-slate-300" />
+                        <h3 className="font-bold text-xl text-slate-700">All caught up!</h3>
+                        <p className="text-slate-500 mt-2">No problems currently waiting for approval.</p>
                     </div>
                 )}
             </div>

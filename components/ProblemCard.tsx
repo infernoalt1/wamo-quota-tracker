@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { Problem, ProblemStatus, Comment } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle, Image as ImageIcon, MessageSquare, ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle, Image as ImageIcon, MessageSquare, ChevronDown, ChevronUp, Send, RotateCcw } from 'lucide-react';
 import { MathText } from './MathText';
 import { Button } from './Button';
 import { api } from '../api';
@@ -130,9 +131,9 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                                 <button 
                                     onClick={() => onStatusChange(problem.id, 'pending')} 
                                     className={`p-1.5 rounded transition-all ${status === 'pending' ? 'bg-white shadow text-slate-700' : 'text-slate-400 hover:text-slate-600'}`}
-                                    title="Set Pending"
+                                    title={status === 'approved' ? "Return to Waitlist" : "Set Pending"}
                                 >
-                                    <AlertCircle className="w-4 h-4" />
+                                    {status === 'approved' ? <RotateCcw className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                                 </button>
                                 <button 
                                     onClick={() => onStatusChange(problem.id, 'accepted')} 
