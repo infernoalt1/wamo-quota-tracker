@@ -5,12 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WAMO Quota Tracker - Math Contest Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
     <style>
       body {
         font-family: 'Inter', sans-serif;
+        background-color: #020202;
+        color: #e4e4e7;
       }
+      /* Custom Scrollbar for Cyber Look */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #09090b; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #27272a; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3f3f46; 
+      }
+      .katex { font-size: 1.1em; color: inherit; }
     </style>
 <script type="importmap">
 {
@@ -30,7 +48,8 @@
     "cors": "https://esm.sh/cors@^2.8.6",
     "jsonwebtoken": "https://esm.sh/jsonwebtoken@^9.0.3",
     "express": "https://esm.sh/express@^5.2.1",
-    "bcrypt": "https://esm.sh/bcrypt@^6.0.0"
+    "bcrypt": "https://esm.sh/bcrypt@^6.0.0",
+    "framer-motion": "https://esm.sh/framer-motion@11.0.8"
   }
 }
 </script>
