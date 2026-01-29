@@ -44,22 +44,22 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   const canEdit = isAdmin || problem.authorId === currentUserId;
 
   const topicColors: Record<string, string> = {
-    'Algebra': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    'Geometry': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    'Combinatorics': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-    'Number Theory': 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+    'Algebra': 'bg-blue-500/10 text-blue-300 border-blue-500/20',
+    'Geometry': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+    'Combinatorics': 'bg-orange-500/10 text-orange-300 border-orange-500/20',
+    'Number Theory': 'bg-purple-500/10 text-purple-300 border-purple-500/20'
   };
 
   const StatusBadge = () => {
     if (status === 'accepted') {
       return (
-        <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full text-[10px] font-bold border border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+        <span className="flex items-center gap-1.5 bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full text-[10px] font-bold border border-green-500/20 shadow-[0_0_10px_-3px_rgba(74,222,128,0.2)]">
            <CheckCircle className="w-3 h-3" /> 
            <span>Accepted {roundName ? `in ${roundName}` : ''}</span>
         </span>
       );
     }
-    return null; 
+    return null; // Pending status doesn't need a loud badge
   };
 
   const toggleExpand = async () => {
@@ -93,9 +93,8 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.005, borderColor: "rgba(255,255,255,0.2)" }}
-      transition={{ duration: 0.2 }}
-      className={`group bg-white/[0.02] backdrop-blur-md rounded-2xl border transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-emerald-500/30 ring-1 ring-emerald-500/10' : 'border-white/10'}`}
+      layout
+      className={`group bg-white/[0.03] backdrop-blur-xl rounded-3xl border transition-all duration-300 overflow-hidden relative flex flex-col md:flex-row ${status === 'accepted' ? 'border-green-500/30 ring-1 ring-green-500/20' : 'border-white/10 hover:border-indigo-500/30'}`}
     >
       
       {/* Vote Section */}
@@ -106,16 +105,16 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
             className={`flex flex-col items-center gap-1 transition-all duration-300 ${
                hasVoted 
                  ? 'text-indigo-400 scale-110 drop-shadow-[0_0_8px_rgba(129,140,248,0.5)]' 
-                 : currentUserRole === 'guest' ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-600 hover:text-zinc-400 hover:scale-110'
+                 : currentUserRole === 'guest' ? 'text-gray-700 cursor-not-allowed' : 'text-gray-600 hover:text-gray-300 hover:scale-110'
             }`}
             title={currentUserRole === 'guest' ? "Guests cannot vote" : hasVoted ? "Click to remove vote" : `Upvote (Power: ${votingPower})`}
          >
             <ThumbsUp className={`w-6 h-6 ${hasVoted ? 'fill-current' : ''}`} />
          </button>
-         <span className={`font-bold text-xl ${score > 0 ? 'text-indigo-300' : 'text-zinc-600'}`}>
+         <span className={`font-bold text-xl tracking-tight ${score > 0 ? 'text-indigo-100' : 'text-gray-600'}`}>
             {score}
          </span>
-         <span className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest hidden md:block">Votes</span>
+         <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest hidden md:block">Votes</span>
       </div>
 
       <div className="flex-1 flex flex-col">
@@ -124,7 +123,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
             <div className="flex flex-col gap-2 flex-1">
                 <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3 flex-wrap">
-                        <h3 className="text-xl font-bold text-zinc-100 leading-tight">
+                        <h3 className="text-xl font-bold text-gray-100 leading-tight tracking-tight">
                             <MathText text={problem.title} />
                         </h3>
                         <StatusBadge />
@@ -133,17 +132,17 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                     <div className="flex items-center gap-1">
                         {/* Admin Status Controls */}
                         {isAdmin && onStatusChange && (
-                            <div className="flex items-center bg-black/30 border border-white/10 rounded-lg p-1 mr-2 gap-1" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-1 mr-2 gap-1" onClick={e => e.stopPropagation()}>
                                 <button 
                                     onClick={() => onStatusChange(problem.id, 'pending')} 
-                                    className={`p-1.5 rounded transition-all ${status === 'pending' ? 'bg-white/10 text-zinc-200 shadow-sm' : 'text-zinc-600 hover:text-zinc-400'}`}
+                                    className={`p-1.5 rounded transition-all ${status === 'pending' ? 'bg-white/10 text-gray-200 shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
                                     title={status === 'approved' ? "Return to Waitlist" : "Set Pending"}
                                 >
                                     {status === 'approved' ? <RotateCcw className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                                 </button>
                                 <button 
                                     onClick={() => onStatusChange(problem.id, 'accepted')} 
-                                    className={`p-1.5 rounded transition-all ${status === 'accepted' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'text-zinc-600 hover:text-emerald-400'}`}
+                                    className={`p-1.5 rounded transition-all ${status === 'accepted' ? 'bg-green-500/20 text-green-400 shadow-sm' : 'text-gray-500 hover:text-green-400'}`}
                                     title="Accept"
                                 >
                                     <CheckCircle className="w-4 h-4" />
@@ -154,38 +153,38 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                         {canEdit && (
                             <button 
                                 onClick={(e) => { e.stopPropagation(); onEdit(problem); }}
-                                className="text-zinc-500 hover:text-indigo-400 p-2 rounded-lg hover:bg-indigo-500/10 transition-colors"
+                                className="text-gray-500 hover:text-indigo-400 p-2 rounded-lg hover:bg-white/5 transition-colors"
                                 title="Edit Problem"
                             >
                                 <Pencil className="w-4 h-4" />
                             </button>
                         )}
 
-                        <button className="text-zinc-500 hover:text-zinc-300 p-1">
+                        <button className="text-gray-500 hover:text-gray-300 p-1">
                             {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                         </button>
                     </div>
                 </div>
                 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-500 mt-1">
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-1">
                 {showAuthor ? (
                     <span className="font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md">
                         By {problem.authorName}
                     </span>
                 ) : (
-                    <span className="font-medium italic flex items-center gap-1 text-zinc-600">
+                    <span className="font-medium italic flex items-center gap-1 text-gray-600">
                         <MoreHorizontal className="w-3 h-3" /> Blind Review
                     </span>
                 )}
-                <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded text-zinc-400 border border-white/5">
+                <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded text-gray-400 border border-white/5">
                     <Target className="w-3 h-3" />
-                    Diff: <span className="font-bold text-zinc-200">{problem.difficulty}</span>
+                    Diff: <span className="font-bold text-gray-200">{problem.difficulty}</span>
                 </span>
-                <span className="flex items-center gap-1 text-zinc-500">
+                <span className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
                     {new Date(problem.createdAt).toLocaleDateString()}
                 </span>
-                <span className="flex items-center gap-1 text-zinc-500">
+                <span className="flex items-center gap-1 text-gray-500">
                     <MessageSquare className="w-3 h-3" /> {problem.commentCount || 0}
                 </span>
                 </div>
@@ -195,23 +194,21 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
             {/* Topics */}
             <div className="flex flex-wrap gap-2 mb-4">
                 {problem.topics && problem.topics.map(t => (
-                    <span key={t} className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md uppercase tracking-wider border ${topicColors[t] || 'bg-zinc-800 text-zinc-400 border-zinc-700'}`}>
+                    <span key={t} className={`text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider border ${topicColors[t] || 'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
                         {t}
                     </span>
                 ))}
             </div>
 
-            <div className={`text-zinc-300 font-serif text-lg leading-relaxed ${!isExpanded && 'line-clamp-3'}`}>
-                <MathText 
-                    text={problem.statement} 
-                    className="whitespace-pre-wrap"
-                />
-            </div>
+            <MathText 
+            text={problem.statement} 
+            className={`bg-white/[0.02] p-6 rounded-2xl font-serif text-gray-200 border border-white/5 whitespace-pre-wrap leading-relaxed shadow-inner text-lg ${!isExpanded && 'line-clamp-3'}`} 
+            />
             
             {problem.imageData && (
-            <div className="mt-4 rounded-xl overflow-hidden border border-white/10 bg-black/30">
-                <img src={problem.imageData} alt="Problem attachment" className="max-h-96 w-auto mx-auto object-contain opacity-90 hover:opacity-100 transition-opacity" />
-                <div className="bg-white/5 text-[10px] uppercase tracking-widest text-center text-zinc-500 py-1.5 border-t border-white/5 flex items-center justify-center gap-1">
+            <div className="mt-4 rounded-xl overflow-hidden border border-white/10 bg-black/40">
+                <img src={problem.imageData} alt="Problem attachment" className="max-h-96 w-auto mx-auto object-contain" />
+                <div className="bg-black/60 text-xs text-center text-gray-500 py-1 border-t border-white/5 flex items-center justify-center gap-1 backdrop-blur-sm">
                     <ImageIcon className="w-3 h-3" /> Attachment
                 </div>
             </div>
@@ -225,50 +222,48 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="border-t border-white/5 p-6 md:p-8 bg-black/20"
+                className="border-t border-white/10 p-6 md:p-8 bg-black/20"
             >
                  <div className="grid md:grid-cols-2 gap-8 mb-8">
                      <div>
-                         <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">Solution Outline</h4>
+                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Solution Outline</h4>
                          {problem.solution ? (
-                             <div className="bg-white/5 p-4 rounded-xl border border-white/5 text-zinc-300 text-sm whitespace-pre-wrap font-serif shadow-inner">
-                                <MathText text={problem.solution} />
-                             </div>
+                             <MathText text={problem.solution} className="bg-white/[0.03] p-4 rounded-xl border border-white/10 text-gray-300 text-sm whitespace-pre-wrap font-serif" />
                          ) : (
-                             <div className="text-zinc-600 italic text-sm">No solution provided.</div>
+                             <div className="text-gray-600 italic text-sm">No solution provided.</div>
                          )}
                      </div>
                      <div>
-                         <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">Answer Key</h4>
-                         <div className="bg-white/5 p-4 rounded-xl border border-white/5 text-zinc-100 font-bold font-mono shadow-inner">
-                             {problem.answerKey || <span className="text-zinc-600 font-normal italic">None</span>}
+                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Answer Key</h4>
+                         <div className="bg-white/[0.03] p-4 rounded-xl border border-white/10 text-indigo-300 font-bold font-mono shadow-inner">
+                             {problem.answerKey || <span className="text-gray-600 font-normal italic">None</span>}
                          </div>
                      </div>
                  </div>
 
                  {/* Comments */}
-                 <div className="border-t border-white/5 pt-6">
-                     <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                         <MessageSquare className="w-3 h-3" /> Discussion
+                 <div className="border-t border-white/10 pt-6">
+                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                         <MessageSquare className="w-4 h-4" /> Discussion
                      </h4>
                      
                      <div className="space-y-4 mb-4">
                          {loadingComments ? (
-                             <div className="text-zinc-600 text-sm italic">Loading comments...</div>
+                             <div className="text-gray-600 text-sm italic">Loading comments...</div>
                          ) : comments.length === 0 ? (
-                             <div className="text-zinc-600 text-sm italic">No comments yet.</div>
+                             <div className="text-gray-600 text-sm italic">No comments yet.</div>
                          ) : (
                              comments.map(c => (
-                                 <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2">
-                                     <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-zinc-400 font-bold text-xs shrink-0 border border-white/5">
+                                 <div key={c.id} className="flex gap-3">
+                                     <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-gray-400 font-bold text-xs shrink-0 border border-white/5">
                                          {c.userName.charAt(0)}
                                      </div>
-                                     <div className="bg-white/5 p-3 rounded-2xl rounded-tl-none border border-white/5 text-sm max-w-2xl">
+                                     <div className="bg-white/[0.03] p-3 rounded-2xl rounded-tl-none border border-white/10 text-sm max-w-2xl">
                                          <div className="flex items-center gap-2 mb-1">
-                                             <span className="font-bold text-zinc-300">{c.userName}</span>
-                                             <span className="text-[10px] text-zinc-600">{new Date(c.createdAt).toLocaleDateString()}</span>
+                                             <span className="font-bold text-gray-300">{c.userName}</span>
+                                             <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleDateString()}</span>
                                          </div>
-                                         <p className="text-zinc-400">{c.text}</p>
+                                         <p className="text-gray-400">{c.text}</p>
                                      </div>
                                  </div>
                              ))
@@ -281,7 +276,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                                 value={newComment}
                                 onChange={e => setNewComment(e.target.value)}
                                 placeholder="Add a comment..." 
-                                className="flex-1 bg-black/20 border border-white/10 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none resize-none h-20 text-zinc-200 placeholder:text-zinc-600"
+                                className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none h-20 text-white placeholder-gray-600 transition-all"
                                 onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); postComment(); } }}
                             />
                             <Button size="sm" onClick={postComment} disabled={!newComment.trim()}>
