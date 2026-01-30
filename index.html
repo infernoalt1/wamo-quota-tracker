@@ -5,30 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WAMO Quota Tracker - Math Contest Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
     <style>
       body {
         font-family: 'Inter', sans-serif;
-        background-color: #020202; /* Deep Obsidian */
-        color: #e2e8f0;
+        background-color: #F9FAFB; /* Soft Paper Gray */
+        color: #0f172a; /* Slate 900 */
+        /* Blueprint Grid Pattern */
+        background-image: linear-gradient(#E2E8F0 1px, transparent 1px), linear-gradient(90deg, #E2E8F0 1px, transparent 1px);
+        background-size: 40px 40px;
       }
-      /* Custom Scrollbar for Dark Mode */
+      /* Custom Scrollbar for Light Mode */
       .custom-scrollbar::-webkit-scrollbar {
         width: 6px;
         height: 6px;
       }
       .custom-scrollbar::-webkit-scrollbar-track {
-        background: rgba(255, 255, 255, 0.02);
+        background: rgba(0, 0, 0, 0.02);
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(0, 0, 0, 0.1);
         border-radius: 3px;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.2);
       }
-      /* KaTeX override for dark mode */
+      /* KaTeX override */
       .katex {
         color: inherit !important;
       }

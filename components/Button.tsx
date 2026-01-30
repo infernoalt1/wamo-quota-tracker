@@ -1,6 +1,7 @@
 import React from 'react';
+import { motion, HTMLMotionProps } from 'framer-motion';
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends HTMLMotionProps<"button"> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
@@ -15,28 +16,30 @@ export const Button: React.FC<ButtonProps> = ({
   disabled,
   ...props 
 }) => {
-  const baseStyles = "rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-[#020202]";
+  const baseStyles = "rounded-xl font-bold transition-colors duration-200 flex items-center justify-center gap-2 focus:outline-none focus:ring-4 focus:ring-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed";
   
   const sizes = {
     sm: "px-3 py-1.5 text-xs",
-    md: "px-5 py-2.5 text-sm",
+    md: "px-5 py-3 text-sm",
     lg: "px-8 py-4 text-base"
   };
 
   const variants = {
-    // Indigo Glow
-    primary: "bg-indigo-600 text-white hover:bg-indigo-500 shadow-[0_0_20px_-5px_rgba(79,70,229,0.5)] border border-indigo-400/20 hover:shadow-[0_0_25px_-5px_rgba(79,70,229,0.7)]",
-    // Glassy White
-    secondary: "bg-white/[0.05] text-gray-200 border border-white/10 hover:bg-white/[0.1] hover:text-white backdrop-blur-sm shadow-lg",
-    // Red Glow
-    danger: "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40",
-    // Minimal
-    ghost: "bg-transparent text-gray-400 hover:text-white hover:bg-white/[0.05]"
+    // Stripe-style Indigo
+    primary: "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200 border border-transparent",
+    // Clean White / Paper
+    secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm hover:shadow-md",
+    // Soft Red
+    danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 hover:border-red-200",
+    // Transparent
+    ghost: "bg-transparent text-slate-500 hover:text-indigo-600 hover:bg-indigo-50/50"
   };
 
   return (
-    <button 
-      className={`${baseStyles} ${sizes[size]} ${variants[variant]} ${isLoading || disabled ? 'opacity-50 cursor-not-allowed grayscale' : ''} ${className}`}
+    <motion.button 
+      whileHover={{ scale: disabled ? 1 : 1.02 }}
+      whileTap={{ scale: disabled ? 1 : 0.98 }}
+      className={`${baseStyles} ${sizes[size]} ${variants[variant]} ${className}`}
       disabled={isLoading || disabled}
       {...props}
     >
@@ -49,6 +52,6 @@ export const Button: React.FC<ButtonProps> = ({
           Processing...
         </>
       ) : children}
-    </button>
+    </motion.button>
   );
 };
