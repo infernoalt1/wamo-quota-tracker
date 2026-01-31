@@ -4,7 +4,8 @@ import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
 import { api } from './api';
-import { motion, AnimatePresence, Variants, useMotionValue, useTransform } from 'framer-motion';
+import { motion, AnimatePresence, Variants, useAnimation } from 'framer-motion';
+import { ArrowRight, Lock, User, Sparkles, Command } from 'lucide-react';
 import { 
   PlusCircle, 
   LayoutDashboard, 
@@ -1523,245 +1524,197 @@ tex += `\\end{longtable}
       }
   }, [problems]);
 
-  // --- PLACE THIS INSIDE App.tsx BEFORE THE RETURN ---
-
-if (!currentUser) {
-  // 1. GPU-ACCELERATED TILT (No Re-renders)
-  // We use useMotionValue instead of useState for 60fps performance
-  const cardX = useMotionValue(0);
-  const cardY = useMotionValue(0);
-  const rotateX = useTransform(cardY, [-300, 300], [10, -10]); // Reverse axis for natural tilt
-  const rotateY = useTransform(cardX, [-300, 300], [-10, 10]);
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
-    cardX.set(x);
-    cardY.set(y);
-  };
-
-  const handleMouseLeave = () => {
-    cardX.set(0);
-    cardY.set(0);
-  };
-
+  if (!currentUser) {
   return (
-    <div className="relative min-h-screen w-full bg-[#FAFAFA] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
+    <div className="relative min-h-screen w-full bg-[#F2F4F8] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
       
-      {/* --- LAYER 1: CINEMATIC BACKGROUND --- */}
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-         {/* A. The "Breathing" Mesh Gradient */}
-         <motion.div 
-            animate={{ 
-               scale: [1, 1.1, 1],
-               rotate: [0, 5, -5, 0],
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className="absolute top-[-50%] left-[-20%] w-[150%] h-[150%] opacity-40 blur-[100px]"
-            style={{
-               background: "radial-gradient(circle at 50% 50%, #E0E7FF 0%, rgba(255,255,255,0) 50%), radial-gradient(circle at 80% 20%, #F0FDFA 0%, rgba(255,255,255,0) 30%)"
-            }}
-         />
-
-         {/* B. Floating 3D Elements (Math Symbols) */}
-         {/* We position them explicitly to ensure they are visible */}
-         {[
-            { sym: "∫", top: "15%", left: "15%", delay: 0 },
-            { sym: "∑", top: "20%", right: "20%", delay: 2 },
-            { sym: "π", bottom: "15%", left: "25%", delay: 4 },
-            { sym: "∞", bottom: "25%", right: "15%", delay: 1 },
-         ].map((item, i) => (
-            <motion.div
-               key={i}
-               initial={{ y: 0, opacity: 0 }}
-               animate={{ 
-                  y: [-20, 20, -20],
-                  rotate: [0, 10, -10, 0],
-                  opacity: [0.3, 0.6, 0.3]
-               }}
-               transition={{ 
-                  duration: 8, 
-                  repeat: Infinity, 
-                  ease: "easeInOut",
-                  delay: item.delay
-               }}
-               className="absolute text-8xl font-serif font-bold text-slate-900/5 select-none z-0"
-               style={{ top: item.top, left: item.left, right: item.right, bottom: item.bottom }}
-            >
-               {item.sym}
-            </motion.div>
-         ))}
-
-         {/* C. The Moving Grid (Subtle Technical Feel) */}
-         <div 
-            className="absolute inset-0 opacity-[0.04] z-0"
-            style={{ 
-               backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`,
-               backgroundSize: '80px 80px' 
-            }} 
-         />
+      {/* --- LAYER 1: AMBIENT MESH GRADIENTS --- */}
+      <div className="absolute inset-0 z-0 overflow-hidden">
+        <motion.div 
+          animate={{ 
+            scale: [1, 1.2, 1],
+            rotate: [0, 10, -10, 0],
+            x: [0, 50, -50, 0]
+          }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          className="absolute -top-[20%] -left-[10%] w-[80vw] h-[80vw] bg-purple-200/40 rounded-full blur-[120px] mix-blend-multiply"
+        />
+        <motion.div 
+          animate={{ 
+            scale: [1.2, 1, 1.2],
+            x: [0, -50, 50, 0],
+            y: [0, 30, -30, 0]
+          }}
+          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+          className="absolute top-[20%] -right-[10%] w-[60vw] h-[60vw] bg-indigo-200/40 rounded-full blur-[100px] mix-blend-multiply"
+        />
+        <div className="absolute inset-0 bg-white/40 backdrop-blur-[100px]" />
       </div>
 
-      {/* --- LAYER 2: MAIN INTERFACE --- */}
-      <div className="relative z-10 w-full max-w-7xl px-6 flex flex-col lg:flex-row items-center justify-center lg:justify-between gap-16 lg:gap-0">
-         
-         {/* Left Side: Brand Narrative */}
-         <motion.div 
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }} // "Apple" Easing
-            className="text-center lg:text-left lg:max-w-xl"
-         >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-8">
-               <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-               </span>
-               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">System v3.0 Live</span>
-            </div>
+      {/* --- LAYER 2: ARCHITECTURAL TYPOGRAPHY --- */}
+      <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none select-none overflow-hidden">
+        <motion.h1 
+          initial={{ opacity: 0, y: 100 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1.5, ease: "easeOut" }}
+          className="text-[25vw] font-black leading-none text-white tracking-tighter mix-blend-overlay opacity-60"
+          style={{ textShadow: '0 20px 60px rgba(100,100,255,0.1)' }}
+        >
+          WAMO
+        </motion.h1>
+      </div>
+
+      {/* --- LAYER 3: THE "NEURO-LINK" CABLE (SVG ANIMATION) --- */}
+      <svg className="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
+        <motion.path
+          d="M -100 600 C 400 600, 400 200, 800 200 S 1400 400, 2000 100"
+          fill="none"
+          stroke="url(#gradient-line)"
+          strokeWidth="12"
+          strokeLinecap="round"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: 2.5, ease: "easeInOut" }}
+        />
+        <motion.path
+          d="M -100 600 C 400 600, 400 200, 800 200 S 1400 400, 2000 100"
+          fill="none"
+          stroke="rgba(99, 102, 241, 0.2)"
+          strokeWidth="25"
+          className="blur-xl"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 0.5, 0.3] }}
+          transition={{ duration: 3, delay: 1 }}
+        />
+        <defs>
+          <linearGradient id="gradient-line" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#C084FC" />
+            <stop offset="50%" stopColor="#6366F1" />
+            <stop offset="100%" stopColor="#3B82F6" />
+          </linearGradient>
+        </defs>
+      </svg>
+
+      {/* --- LAYER 4: FLOATING OBJECTS --- */}
+      <motion.div
+        animate={{ y: [0, -20, 0], rotate: [0, 5, 0] }}
+        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute left-[15%] top-[20%] z-20 hidden lg:block"
+      >
+        <div className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-2xl border border-white/40 shadow-xl flex items-center justify-center transform -rotate-12">
+            <span className="text-4xl">∑</span>
+        </div>
+      </motion.div>
+      
+      <motion.div
+        animate={{ y: [0, 30, 0], rotate: [0, -10, 0] }}
+        transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+        className="absolute right-[15%] bottom-[20%] z-20 hidden lg:block"
+      >
+        <div className="w-32 h-32 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full shadow-2xl flex items-center justify-center opacity-90">
+             <Command className="text-white w-12 h-12" />
+        </div>
+      </motion.div>
+
+      {/* --- LAYER 5: THE MAIN GLASS INTERFACE --- */}
+      <div className="relative z-30 w-full max-w-md px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 50, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.8, ease: "circOut" }}
+          className="relative"
+        >
+          {/* Frosted Glass Card */}
+          <div className="relative bg-white/60 backdrop-blur-2xl rounded-[32px] p-8 md:p-12 shadow-[0_40px_100px_-15px_rgba(0,0,0,0.1)] border border-white/50 overflow-hidden">
             
-            <h1 className="text-6xl md:text-8xl font-black text-slate-900 tracking-tighter leading-[0.9] mb-6">
-               Problem <br />
-               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">
-                  Architecture.
-               </span>
-            </h1>
-            <p className="text-xl text-slate-500 font-medium leading-relaxed max-w-md mx-auto lg:mx-0">
-               A pristine environment for the curation, analysis, and deployment of mathematical contests.
-            </p>
-         </motion.div>
+            {/* Iridescent Top Glow */}
+            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 opacity-50" />
+            
+            <div className="mb-10 text-center">
+              <motion.div 
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
+                className="w-16 h-16 bg-white rounded-2xl mx-auto shadow-lg flex items-center justify-center mb-6 relative group"
+              >
+                <div className="absolute inset-0 bg-indigo-500/20 blur-lg rounded-2xl group-hover:blur-xl transition-all" />
+                <Sparkles className="text-indigo-600 relative z-10 w-8 h-8 fill-indigo-100" />
+              </motion.div>
+              
+              <h2 className="text-3xl font-black text-slate-800 tracking-tight mb-2">
+                Welcome Back
+              </h2>
+              <p className="text-slate-500 font-medium">
+                Enter your credentials to access the laboratory.
+              </p>
+            </div>
 
-         {/* Right Side: The Physics Card */}
-         <motion.div
-            style={{ perspective: 2000 }} // Deep perspective for 3D effect
-            className="w-full max-w-[420px]"
-         >
-            <motion.div
-               style={{ rotateX, rotateY }} // Bind MotionValues directly
-               onMouseMove={handleMouseMove}
-               onMouseLeave={handleMouseLeave}
-               className="relative bg-white/80 backdrop-blur-2xl rounded-[2.5rem] border border-white/60 shadow-[0_50px_100px_-20px_rgba(50,50,93,0.12)] overflow-hidden"
-            >
-               {/* Glossy Sheen Overlay */}
-               <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-transparent to-black/5 pointer-events-none" />
+            <form onSubmit={handleLoginAttempt} className="space-y-5">
+              
+              {/* Name Input */}
+              <div className="space-y-2 group">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Alice Noether"
+                    className="w-full bg-white/50 border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-slate-800 font-semibold placeholder:text-slate-300 outline-none focus:border-indigo-500/50 focus:bg-white focus:shadow-[0_0_20px_rgba(99,102,241,0.1)] transition-all duration-300"
+                  />
+                </div>
+              </div>
 
-               <div className="relative z-10 p-10 flex flex-col min-h-[500px]">
-                  {/* Card Header */}
-                  <div className="flex items-center justify-between mb-10">
-                     <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg">
-                        <BookOpen size={24} strokeWidth={3} />
-                     </div>
-                     <div className="text-right">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Access Node</div>
-                        <div className="text-[10px] font-bold text-slate-400">Secure Connection</div>
-                     </div>
-                  </div>
+              {/* Password Input */}
+              <div className="space-y-2 group">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Access Key</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-white/50 border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-slate-800 font-semibold placeholder:text-slate-300 outline-none focus:border-indigo-500/50 focus:bg-white focus:shadow-[0_0_20px_rgba(99,102,241,0.1)] transition-all duration-300"
+                  />
+                </div>
+              </div>
 
-                  <AnimatePresence mode="wait">
-                     {!selectedLoginId ? (
-                        <motion.div 
-                           key="list"
-                           initial={{ opacity: 0, x: -20 }}
-                           animate={{ opacity: 1, x: 0 }}
-                           exit={{ opacity: 0, x: -20 }}
-                           transition={{ duration: 0.3 }}
-                           className="flex-1 flex flex-col"
-                        >
-                           <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-6">Select Identity</h3>
-                           
-                           <div className="flex-1 overflow-y-auto -mx-4 px-4 space-y-2 custom-scrollbar-none">
-                              {users.map((user) => (
-                                 <motion.button
-                                    layoutId={`user-card-${user.id}`}
-                                    key={user.id}
-                                    onClick={() => setSelectedLoginId(user.id)}
-                                    className="group w-full p-3 rounded-2xl bg-white border border-slate-100 shadow-sm flex items-center gap-4 hover:border-indigo-500 hover:shadow-md hover:scale-[1.02] transition-all duration-200"
-                                 >
-                                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-900 font-black text-sm border border-slate-200 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                                       {user.name.charAt(0)}
-                                    </div>
-                                    <div className="flex-1 text-left">
-                                       <div className="text-sm font-bold text-slate-800">{user.name}</div>
-                                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.role}</div>
-                                    </div>
-                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
-                                 </motion.button>
-                              ))}
-                           </div>
-
-                           <div className="pt-6 mt-4 border-t border-slate-100">
-                              <button onClick={handleGuestLogin} className="w-full py-3 text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest flex items-center justify-center gap-2 group">
-                                 Guest Observer
-                                 <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-                              </button>
-                           </div>
-                        </motion.div>
-                     ) : (
-                        <motion.div 
-                           key="form"
-                           initial={{ opacity: 0, x: 20 }}
-                           animate={{ opacity: 1, x: 0 }}
-                           exit={{ opacity: 0, x: 20 }}
-                           transition={{ duration: 0.3 }}
-                           className="flex-1 flex flex-col"
-                        >
-                           <motion.div 
-                              layoutId={`user-card-${selectedLoginId}`}
-                              className="w-full p-4 rounded-2xl bg-slate-900 shadow-xl flex items-center gap-4 mb-8"
-                           >
-                              <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-white font-black text-lg border border-white/10">
-                                 {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
-                              </div>
-                              <div className="flex-1 text-left">
-                                 <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Authenticating</div>
-                                 <div className="text-lg font-bold text-white">{users.find(u => u.id === selectedLoginId)?.name}</div>
-                              </div>
-                              <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); }} className="p-2 rounded-lg bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors">
-                                 <X size={16} />
-                              </button>
-                           </motion.div>
-
-                           <div className="space-y-6 flex-1">
-                              <div>
-                                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Access Key</label>
-                                 <input 
-                                    type="password"
-                                    value={loginPassword}
-                                    onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-mono text-lg outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner text-center tracking-[0.3em]"
-                                    autoFocus
-                                 />
-                              </div>
-                              
-                              <AnimatePresence>
-                                 {loginError && (
-                                    <motion.div 
-                                       initial={{ height: 0, opacity: 0 }} 
-                                       animate={{ height: "auto", opacity: 1 }}
-                                       className="text-red-500 text-[10px] font-bold text-center bg-red-50 py-2 rounded-lg"
-                                    >
-                                       {loginError}
-                                    </motion.div>
-                                 )}
-                              </AnimatePresence>
-                           </div>
-
-                           <motion.button 
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
-                              onClick={handleLogin}
-                              className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-lg shadow-indigo-200 transition-all mt-auto"
-                           >
-                              Initialize Session
-                           </motion.button>
-                        </motion.div>
-                     )}
-                  </AnimatePresence>
-               </div>
-            </motion.div>
-         </motion.div>
+              {/* Submit Button */}
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                type="submit"
+                disabled={isLoading}
+                className="w-full mt-4 bg-[#0A0A0A] text-white h-14 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 shadow-xl shadow-slate-900/10 relative overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <span className="relative z-10 flex items-center gap-2">
+                  {isLoading ? 'Authenticating...' : 'Enter WAMO'}
+                  {!isLoading && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
+                </span>
+              </motion.button>
+              
+              {error && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-xs font-bold text-center"
+                >
+                  {error}
+                </motion.div>
+              )}
+            </form>
+          </div>
+          
+          {/* Footer Text */}
+          <div className="mt-8 text-center">
+             <p className="text-slate-400 text-xs font-medium tracking-wide">
+                WAMO TRACKER v3.0 <span className="mx-2">•</span> SECURE CONNECTION
+             </p>
+          </div>
+        </motion.div>
       </div>
     </div>
   );
