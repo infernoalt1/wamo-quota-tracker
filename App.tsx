@@ -1410,8 +1410,9 @@ tex += `\\end{longtable}
                         <span className="text-[8px] font-bold text-slate-400 uppercase">Diff</span>
                         <input 
                             type="number" step="0.1"
-                            className="w-10 text-sm bg-transparent text-center font-bold text-slate-800 outline-none" 
+                            className="w-10 text-sm bg-transparent text-center font-bold text-slate-800 outline-none placeholder:text-slate-400" 
                             value={formData.difficulty} 
+                            placeholder="0.0"
                             onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
                         />
                     </div>
