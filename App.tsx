@@ -4,7 +4,7 @@ import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
 import { api } from './api';
-import { motion, AnimatePresence, Variants } from 'framer-motion';
+import { motion, AnimatePresence, Variants, useMotionValue, useTransform } from 'framer-motion';
 import { 
   PlusCircle, 
   LayoutDashboard, 
@@ -1523,278 +1523,245 @@ tex += `\\end{longtable}
       }
   }, [problems]);
 
-  if (!currentUser) {
-  // --- MOUSE TILT HOOK ---
-  const useTilt = (ref: React.RefObject<HTMLDivElement>) => {
-    const [rotateX, setRotateX] = useState(0);
-    const [rotateY, setRotateY] = useState(0);
+  // --- PLACE THIS INSIDE App.tsx BEFORE THE RETURN ---
 
-    useEffect(() => {
-      const el = ref.current;
-      if (!el) return;
+if (!currentUser) {
+  // 1. GPU-ACCELERATED TILT (No Re-renders)
+  // We use useMotionValue instead of useState for 60fps performance
+  const cardX = useMotionValue(0);
+  const cardY = useMotionValue(0);
+  const rotateX = useTransform(cardY, [-300, 300], [10, -10]); // Reverse axis for natural tilt
+  const rotateY = useTransform(cardX, [-300, 300], [-10, 10]);
 
-      const handleMouseMove = (e: MouseEvent) => {
-        const rect = el.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const xPct = mouseX / width - 0.5;
-        const yPct = mouseY / height - 0.5;
-        setRotateX(yPct * -10); // Max tilt deg
-        setRotateY(xPct * 10);
-      };
-
-      const handleMouseLeave = () => {
-        setRotateX(0);
-        setRotateY(0);
-      };
-
-      el.addEventListener('mousemove', handleMouseMove);
-      el.addEventListener('mouseleave', handleMouseLeave);
-      return () => {
-        el.removeEventListener('mousemove', handleMouseMove);
-        el.removeEventListener('mouseleave', handleMouseLeave);
-      };
-    }, [ref]);
-
-    return { rotateX, rotateY };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left - rect.width / 2;
+    const y = e.clientY - rect.top - rect.height / 2;
+    cardX.set(x);
+    cardY.set(y);
   };
 
-  const LoginCard = () => {
-    const cardRef = useRef<HTMLDivElement>(null);
-    const { rotateX, rotateY } = useTilt(cardRef);
-
-    return (
-      <div style={{ perspective: 1000 }}>
-        <motion.div
-          ref={cardRef}
-          animate={{ rotateX, rotateY }}
-          transition={{ type: "spring", stiffness: 300, damping: 20 }} // Physics-based movement
-          className="relative w-full max-w-[480px] bg-white/70 backdrop-blur-3xl rounded-[2.5rem] p-10 border border-white/50 shadow-[0_40px_100px_-20px_rgba(50,50,93,0.15),0_25px_50px_-20px_rgba(0,0,0,0.1)] overflow-hidden"
-        >
-          {/* Internal Glint (Shiny reflection) */}
-          <div className="absolute inset-0 bg-gradient-to-tr from-white/80 via-transparent to-transparent opacity-50 pointer-events-none" />
-          
-          <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center justify-center mb-8">
-               <motion.div 
-                 initial={{ scale: 0, rotate: -180 }}
-                 animate={{ scale: 1, rotate: 0 }}
-                 transition={{ type: "spring", duration: 1.5 }}
-                 className="w-16 h-16 bg-gradient-to-br from-slate-900 to-indigo-900 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/20"
-               >
-                  <BookOpen size={32} strokeWidth={2.5} />
-               </motion.div>
-            </div>
-
-            <div className="text-center mb-10 space-y-2">
-                <motion.h1 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-3xl font-black text-slate-900 tracking-tight"
-                >
-                  WAMO<span className="text-indigo-600">Tracker</span>
-                </motion.h1>
-                <motion.p 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                  className="text-slate-400 text-sm font-bold uppercase tracking-widest"
-                >
-                  v3.0.0 Secure Node
-                </motion.p>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {!selectedLoginId ? (
-                <motion.div 
-                  key="user-list"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20, transition: { duration: 0.2 } }}
-                  className="space-y-3"
-                >
-                  <div className="max-h-[280px] overflow-y-auto pr-1 space-y-2 custom-scrollbar-light">
-                    {users.map((user, i) => (
-                      <motion.button
-                        layoutId={`user-${user.id}`} // Magic Morphing ID
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.05 }}
-                        whileHover={{ scale: 1.02, x: 5, backgroundColor: "rgba(255,255,255,0.9)" }}
-                        whileTap={{ scale: 0.98 }}
-                        key={user.id}
-                        onClick={() => setSelectedLoginId(user.id)}
-                        className="w-full p-4 rounded-xl border border-slate-100 bg-white/40 flex items-center justify-between group relative overflow-hidden"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="flex items-center gap-4 relative z-10">
-                          <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-slate-700 font-black shadow-sm border border-slate-100 group-hover:text-indigo-600 group-hover:border-indigo-200 transition-colors">
-                            {user.name.charAt(0)}
-                          </div>
-                          <div className="text-left">
-                             <span className="block text-slate-800 font-bold text-sm">{user.name}</span>
-                             <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">{user.role}</span>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
-                      </motion.button>
-                    ))}
-                  </div>
-                  
-                  <motion.button 
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleGuestLogin} 
-                    className="w-full mt-4 py-4 rounded-xl border border-dashed border-slate-300 text-xs font-black text-slate-400 hover:text-slate-600 hover:border-slate-400 transition-all uppercase tracking-widest"
-                  >
-                    Guest Access
-                  </motion.button>
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="password-form"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
-                >
-                  <motion.div 
-                    layoutId={`user-${selectedLoginId}`} // Morph source
-                    className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-indigo-100 shadow-lg shadow-indigo-100/50"
-                  >
-                     <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-lg shadow-md">
-                        {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
-                     </div>
-                     <div className="flex-1">
-                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Identity</p>
-                        <h4 className="text-slate-900 font-bold text-lg leading-tight">{users.find(u => u.id === selectedLoginId)?.name}</h4>
-                     </div>
-                     <button onClick={() => setSelectedLoginId('')} className="p-2 bg-slate-50 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
-                        <X size={18} />
-                     </button>
-                  </motion.div>
-
-                  <div className="space-y-4">
-                    <div className="relative group">
-                      <input 
-                        type="password"
-                        placeholder="ENTER PIN"
-                        value={loginPassword}
-                        onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                        className="w-full px-6 py-5 bg-white/50 border border-slate-200 rounded-2xl text-slate-800 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-center tracking-[0.5em] font-mono text-lg font-bold placeholder:text-slate-300 group-hover:bg-white"
-                        autoFocus
-                      />
-                      <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent scale-x-0 group-focus-within:scale-x-100 transition-transform duration-500" />
-                    </div>
-                    
-                    <AnimatePresence>
-                    {loginError && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }} 
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="text-red-500 text-[10px] font-black uppercase text-center tracking-widest bg-red-50 py-2 rounded-lg"
-                      >
-                        {loginError}
-                      </motion.div>
-                    )}
-                    </AnimatePresence>
-                  </div>
-
-                  <motion.button 
-                    whileHover={{ scale: 1.03, boxShadow: "0 20px 40px -10px rgba(79, 70, 229, 0.4)" }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleLogin} 
-                    className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.25em] shadow-xl transition-all relative overflow-hidden group"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <span className="relative z-10 flex items-center justify-center gap-2">
-                       Initialize <ArrowRight size={14} />
-                    </span>
-                  </motion.button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      </div>
-    );
+  const handleMouseLeave = () => {
+    cardX.set(0);
+    cardY.set(0);
   };
 
   return (
-    <div className="relative min-h-screen w-full bg-slate-50 flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-200 selection:text-indigo-900">
+    <div className="relative min-h-screen w-full bg-[#FAFAFA] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
       
-      {/* --- EXTREME BACKGROUND --- */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-         {/* 1. Moving Grid */}
+      {/* --- LAYER 1: CINEMATIC BACKGROUND --- */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+         {/* A. The "Breathing" Mesh Gradient */}
          <motion.div 
-            animate={{ backgroundPosition: ["0px 0px", "40px 40px"] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-            className="absolute inset-0 opacity-[0.03]"
-            style={{ 
-              backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`,
-              backgroundSize: '40px 40px' 
-            }} 
+            animate={{ 
+               scale: [1, 1.1, 1],
+               rotate: [0, 5, -5, 0],
+            }}
+            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+            className="absolute top-[-50%] left-[-20%] w-[150%] h-[150%] opacity-40 blur-[100px]"
+            style={{
+               background: "radial-gradient(circle at 50% 50%, #E0E7FF 0%, rgba(255,255,255,0) 50%), radial-gradient(circle at 80% 20%, #F0FDFA 0%, rgba(255,255,255,0) 30%)"
+            }}
          />
-         
-         {/* 2. Floating Math Symbols */}
-         {["∑", "∫", "π", "∞", "√"].map((sym, i) => (
+
+         {/* B. Floating 3D Elements (Math Symbols) */}
+         {/* We position them explicitly to ensure they are visible */}
+         {[
+            { sym: "∫", top: "15%", left: "15%", delay: 0 },
+            { sym: "∑", top: "20%", right: "20%", delay: 2 },
+            { sym: "π", bottom: "15%", left: "25%", delay: 4 },
+            { sym: "∞", bottom: "25%", right: "15%", delay: 1 },
+         ].map((item, i) => (
             <motion.div
                key={i}
-               initial={{ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight }}
+               initial={{ y: 0, opacity: 0 }}
                animate={{ 
-                  y: [0, -100, 0], 
-                  rotate: [0, 360],
-                  opacity: [0.1, 0.3, 0.1]
+                  y: [-20, 20, -20],
+                  rotate: [0, 10, -10, 0],
+                  opacity: [0.3, 0.6, 0.3]
                }}
-               transition={{ duration: 15 + Math.random() * 10, repeat: Infinity, ease: "linear" }}
-               className="absolute text-9xl font-serif text-slate-900/5 font-black select-none"
+               transition={{ 
+                  duration: 8, 
+                  repeat: Infinity, 
+                  ease: "easeInOut",
+                  delay: item.delay
+               }}
+               className="absolute text-8xl font-serif font-bold text-slate-900/5 select-none z-0"
+               style={{ top: item.top, left: item.left, right: item.right, bottom: item.bottom }}
             >
-               {sym}
+               {item.sym}
             </motion.div>
          ))}
 
-         {/* 3. The "Aurora" Orbs */}
-         <motion.div 
-            animate={{ scale: [1, 1.2, 1], x: [0, 100, 0], y: [0, 50, 0] }}
-            transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-indigo-300/30 rounded-full blur-[100px]" 
-         />
-         <motion.div 
-            animate={{ scale: [1, 1.5, 1], x: [0, -100, 0], y: [0, -50, 0] }}
-            transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] bg-purple-300/30 rounded-full blur-[120px]" 
+         {/* C. The Moving Grid (Subtle Technical Feel) */}
+         <div 
+            className="absolute inset-0 opacity-[0.04] z-0"
+            style={{ 
+               backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`,
+               backgroundSize: '80px 80px' 
+            }} 
          />
       </div>
 
-      <div className="relative z-10 w-full max-w-7xl px-4 flex flex-col md:flex-row items-center justify-center gap-12 md:gap-32">
-         {/* LEFT: Text Hero */}
+      {/* --- LAYER 2: MAIN INTERFACE --- */}
+      <div className="relative z-10 w-full max-w-7xl px-6 flex flex-col lg:flex-row items-center justify-center lg:justify-between gap-16 lg:gap-0">
+         
+         {/* Left Side: Brand Narrative */}
          <motion.div 
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 1, ease: "circOut" }}
-            className="text-left hidden md:block"
+            transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }} // "Apple" Easing
+            className="text-center lg:text-left lg:max-w-xl"
          >
-            <h1 className="text-8xl font-black text-slate-900 tracking-tighter leading-[0.85] mb-6">
-               Math <br/>
-               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">Reimagined.</span>
-            </h1>
-            <p className="text-xl text-slate-500 font-medium max-w-sm leading-relaxed">
-               The ultimate platform for problem curation and contest architecture.
-            </p>
-            <div className="mt-8 flex gap-3">
-               <div className="w-3 h-3 rounded-full bg-red-400 animate-pulse"/>
-               <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse delay-75"/>
-               <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse delay-150"/>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm mb-8">
+               <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+               </span>
+               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">System v3.0 Live</span>
             </div>
+            
+            <h1 className="text-6xl md:text-8xl font-black text-slate-900 tracking-tighter leading-[0.9] mb-6">
+               Problem <br />
+               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">
+                  Architecture.
+               </span>
+            </h1>
+            <p className="text-xl text-slate-500 font-medium leading-relaxed max-w-md mx-auto lg:mx-0">
+               A pristine environment for the curation, analysis, and deployment of mathematical contests.
+            </p>
          </motion.div>
 
-         {/* RIGHT: Interactive Card */}
-         <LoginCard />
+         {/* Right Side: The Physics Card */}
+         <motion.div
+            style={{ perspective: 2000 }} // Deep perspective for 3D effect
+            className="w-full max-w-[420px]"
+         >
+            <motion.div
+               style={{ rotateX, rotateY }} // Bind MotionValues directly
+               onMouseMove={handleMouseMove}
+               onMouseLeave={handleMouseLeave}
+               className="relative bg-white/80 backdrop-blur-2xl rounded-[2.5rem] border border-white/60 shadow-[0_50px_100px_-20px_rgba(50,50,93,0.12)] overflow-hidden"
+            >
+               {/* Glossy Sheen Overlay */}
+               <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-transparent to-black/5 pointer-events-none" />
+
+               <div className="relative z-10 p-10 flex flex-col min-h-[500px]">
+                  {/* Card Header */}
+                  <div className="flex items-center justify-between mb-10">
+                     <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                        <BookOpen size={24} strokeWidth={3} />
+                     </div>
+                     <div className="text-right">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Access Node</div>
+                        <div className="text-[10px] font-bold text-slate-400">Secure Connection</div>
+                     </div>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                     {!selectedLoginId ? (
+                        <motion.div 
+                           key="list"
+                           initial={{ opacity: 0, x: -20 }}
+                           animate={{ opacity: 1, x: 0 }}
+                           exit={{ opacity: 0, x: -20 }}
+                           transition={{ duration: 0.3 }}
+                           className="flex-1 flex flex-col"
+                        >
+                           <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-6">Select Identity</h3>
+                           
+                           <div className="flex-1 overflow-y-auto -mx-4 px-4 space-y-2 custom-scrollbar-none">
+                              {users.map((user) => (
+                                 <motion.button
+                                    layoutId={`user-card-${user.id}`}
+                                    key={user.id}
+                                    onClick={() => setSelectedLoginId(user.id)}
+                                    className="group w-full p-3 rounded-2xl bg-white border border-slate-100 shadow-sm flex items-center gap-4 hover:border-indigo-500 hover:shadow-md hover:scale-[1.02] transition-all duration-200"
+                                 >
+                                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-900 font-black text-sm border border-slate-200 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                       {user.name.charAt(0)}
+                                    </div>
+                                    <div className="flex-1 text-left">
+                                       <div className="text-sm font-bold text-slate-800">{user.name}</div>
+                                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{user.role}</div>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                                 </motion.button>
+                              ))}
+                           </div>
+
+                           <div className="pt-6 mt-4 border-t border-slate-100">
+                              <button onClick={handleGuestLogin} className="w-full py-3 text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest flex items-center justify-center gap-2 group">
+                                 Guest Observer
+                                 <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                              </button>
+                           </div>
+                        </motion.div>
+                     ) : (
+                        <motion.div 
+                           key="form"
+                           initial={{ opacity: 0, x: 20 }}
+                           animate={{ opacity: 1, x: 0 }}
+                           exit={{ opacity: 0, x: 20 }}
+                           transition={{ duration: 0.3 }}
+                           className="flex-1 flex flex-col"
+                        >
+                           <motion.div 
+                              layoutId={`user-card-${selectedLoginId}`}
+                              className="w-full p-4 rounded-2xl bg-slate-900 shadow-xl flex items-center gap-4 mb-8"
+                           >
+                              <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-white font-black text-lg border border-white/10">
+                                 {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
+                              </div>
+                              <div className="flex-1 text-left">
+                                 <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Authenticating</div>
+                                 <div className="text-lg font-bold text-white">{users.find(u => u.id === selectedLoginId)?.name}</div>
+                              </div>
+                              <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); }} className="p-2 rounded-lg bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors">
+                                 <X size={16} />
+                              </button>
+                           </motion.div>
+
+                           <div className="space-y-6 flex-1">
+                              <div>
+                                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Access Key</label>
+                                 <input 
+                                    type="password"
+                                    value={loginPassword}
+                                    onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-mono text-lg outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-inner text-center tracking-[0.3em]"
+                                    autoFocus
+                                 />
+                              </div>
+                              
+                              <AnimatePresence>
+                                 {loginError && (
+                                    <motion.div 
+                                       initial={{ height: 0, opacity: 0 }} 
+                                       animate={{ height: "auto", opacity: 1 }}
+                                       className="text-red-500 text-[10px] font-bold text-center bg-red-50 py-2 rounded-lg"
+                                    >
+                                       {loginError}
+                                    </motion.div>
+                                 )}
+                              </AnimatePresence>
+                           </div>
+
+                           <motion.button 
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={handleLogin}
+                              className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-lg shadow-indigo-200 transition-all mt-auto"
+                           >
+                              Initialize Session
+                           </motion.button>
+                        </motion.div>
+                     )}
+                  </AnimatePresence>
+               </div>
+            </motion.div>
+         </motion.div>
       </div>
     </div>
   );
