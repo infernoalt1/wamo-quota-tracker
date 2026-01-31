@@ -687,7 +687,7 @@ export default function App() {
     setStatement('');
     setSolution('');
     setAnswerKey('');
-    setDifficulty('3.0');
+    setDifficulty('');
     setSelectedTopics([]);
     setImageData(null);
     setIsVerified(false);
@@ -1516,6 +1516,7 @@ tex += `\\end{longtable}
         </AnimatePresence>
     </motion.div>
 );
+  }
   
   // Composer Scroll Fix
   const composerListRef = useRef<HTMLDivElement>(null);
@@ -2721,5 +2722,4 @@ tex += `\\end{longtable}
       </main>
     </div>
   );
-    }
-}
+}    
