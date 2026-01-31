@@ -233,7 +233,7 @@ export default function App() {
   const [statement, setStatement] = useState('');
   const [solution, setSolution] = useState('');
   const [answerKey, setAnswerKey] = useState('');
-  const [difficulty, setDifficulty] = useState<string>('3.0');
+  const [difficulty, setDifficulty] = useState('');
   const [showRatingScale, setShowRatingScale] = useState(false);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
@@ -1396,116 +1396,126 @@ tex += `\\end{longtable}
       };
 
       return (
-           <motion.div 
-          className={`bg-white rounded-xl border-l-4 ${hasChanges ? 'border-l-indigo-500' : 'border-l-amber-400'} border-y border-r border-slate-200 p-5 shadow-sm hover:shadow-md transition-all`}
-        >
-            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-                <div className="flex-1 w-full">
-                    <input 
-                        className="font-bold text-slate-900 text-lg w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none transition-colors py-1"
-                        value={formData.title}
-                        onChange={e => setFormData({...formData, title: e.target.value})}
-                    />
-                    {/* FULL STATEMENT - No more line-clamp */}
+    <motion.div 
+        className={`bg-white rounded-xl border-l-4 ${hasChanges ? 'border-l-indigo-500' : 'border-l-amber-400'} border-y border-r border-slate-200 p-5 shadow-sm hover:shadow-md transition-all`}
+    >
+        <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+            <div className="flex-1 w-full">
+                {/* 1. TITLE & META */}
+                <input 
+                    className="font-bold text-slate-900 text-lg w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none transition-colors py-1"
+                    value={formData.title}
+                    onChange={e => setFormData({...formData, title: e.target.value})}
+                />
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1 flex gap-2">
+                    <span>ID: {p.authorId.substring(0,6)}</span>
+                    <span>•</span>
+                    <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                </div>
+
+                {/* 2. FULL PREVIEW (Only shows when NOT expanded/editing) */}
+                {!isExpanded && (
                     <div className="mt-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm font-serif text-slate-700 leading-relaxed shadow-inner">
                         <MathText text={formData.statement} />
                         
-                        {/* IMAGES RESTORED IN WAITLIST */}
                         {p.imageData && (
                             <div className="mt-4 rounded-lg overflow-hidden border border-slate-200 bg-white inline-block">
                                 <img src={p.imageData} alt="Attachment" className="max-h-64 w-auto object-contain" />
                             </div>
                         )}
                     </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-3 shrink-0">
-                     {/* WIDER DIFFICULTY BOX */}
-                     <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 w-32 flex flex-col items-center">
-                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Difficulty</span>
-                         <input 
-                            type="number" step="0.5"
-                            className="w-full text-base p-1 bg-white border border-slate-200 rounded-lg text-center font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500" 
-                            value={formData.difficulty} 
-                            onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
-                         />
-                     </div>
-                     <Button size="sm" onClick={approve} className="w-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200 shadow-sm">
-                         Approve
-                     </Button>
-                </div>
+                )}
             </div>
-              <AnimatePresence>
-              {isExpanded && (
-                  <motion.div 
+
+            {/* 3. DIFFICULTY & APPROVE BUTTON (Sidebar of the card) */}
+            <div className="flex flex-col items-end gap-3 shrink-0">
+                 <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 w-32 flex flex-col items-center">
+                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Difficulty</span>
+                     <input 
+                        type="number" step="0.5"
+                        className="w-full text-base p-1 bg-white border border-slate-200 rounded-lg text-center font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500" 
+                        value={formData.difficulty} 
+                        onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
+                     />
+                 </div>
+                 <div className="flex gap-2 w-full">
+                    <Button size="sm" onClick={approve} className="flex-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200 shadow-sm">
+                        Approve
+                    </Button>
+                    <button 
+                        onClick={() => setIsExpanded(!isExpanded)} 
+                        className={`p-2 rounded-lg border transition-colors ${isExpanded ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:text-indigo-600'}`}
+                    >
+                        {isExpanded ? <X className="w-4 h-4"/> : <Pencil className="w-4 h-4"/>}
+                    </button>
+                 </div>
+            </div>
+        </div>
+
+        {/* 4. EDIT FORM (Only shows when expanded) */}
+        <AnimatePresence>
+            {isExpanded && (
+                <motion.div 
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    className="space-y-4 pt-4 border-t border-slate-100 mt-3"
-                  >
-                      <div className="grid md:grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Statement</label>
-                              <textarea 
-                                  className="w-full h-28 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                  value={formData.statement}
-                                  onChange={e => setFormData({...formData, statement: e.target.value})}
-                              />
-                          </div>
-                          <div className="space-y-3">
-                              <div>
-                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Solution</label>
-                                  <textarea 
-                                      className="w-full h-16 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                      value={formData.solution}
-                                      onChange={e => setFormData({...formData, solution: e.target.value})}
-                                      placeholder="No solution provided."
-                                  />
-                              </div>
-                              <div>
-                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Answer</label>
-                                  <input 
-                                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                      value={formData.answerKey}
-                                      onChange={e => setFormData({...formData, answerKey: e.target.value})}
-                                      placeholder="No answer provided."
-                                  />
-                              </div>
-                          </div>
-                      </div>
-                      
-                      <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Topics</label>
-                          <div className="flex flex-wrap gap-1.5">
-                              {TOPICS.map(t => (
-                                  <button
-                                      key={t}
-                                      onClick={() => toggleTopic(t)}
-                                      className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all border ${formData.topics.includes(t) ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
-                                  >
-                                      {t}
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
+                    className="space-y-4 pt-4 border-t border-slate-100 mt-4 overflow-hidden"
+                >
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Statement</label>
+                            <textarea 
+                                className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
+                                value={formData.statement}
+                                onChange={e => setFormData({...formData, statement: e.target.value})}
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Solution</label>
+                                <textarea 
+                                    className="w-full h-16 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
+                                    value={formData.solution}
+                                    onChange={e => setFormData({...formData, solution: e.target.value})}
+                                    placeholder="No solution..."
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Answer</label>
+                                <input 
+                                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
+                                    value={formData.answerKey}
+                                    onChange={e => setFormData({...formData, answerKey: e.target.value})}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Topics</label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {TOPICS.map(t => (
+                                <button
+                                    key={t}
+                                    onClick={() => toggleTopic(t)}
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all border ${formData.topics.includes(t) ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
-                      {hasChanges && (
-                          <div className="flex justify-end">
-                              <Button size="sm" onClick={handleSave} isLoading={isSaving}>Save Changes</Button>
-                          </div>
-                      )}
-                  </motion.div>
-              )}
-              </AnimatePresence>
-              
-              {!isExpanded && (
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs font-serif text-slate-600 mt-2 shadow-inner">
-                      <MathText text={formData.statement} className="line-clamp-2"/>
-                  </div>
-              )}
-          </motion.div>
-      );
-  };
+                    {hasChanges && (
+                        <div className="flex justify-end pt-2">
+                            <Button size="sm" onClick={handleSave} isLoading={isSaving}>Save Changes</Button>
+                        </div>
+                    )}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    </motion.div>
+);
   
   // Composer Scroll Fix
   const composerListRef = useRef<HTMLDivElement>(null);
