@@ -1524,213 +1524,277 @@ tex += `\\end{longtable}
   }, [problems]);
 
   if (!currentUser) {
-  return (
-    <div className="relative min-h-screen w-full bg-white flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-100">
-      
-      {/* --- GENERATIVE BACKGROUND ART --- */}
-      {/* 1. Iridescent Ambient Blobs (Moving Pastels) */}
-      <div className="absolute inset-0 z-0">
-        <motion.div 
-          animate={{ 
-            x: [0, 100, -50, 0], 
-            y: [0, -80, 50, 0],
-            scale: [1, 1.2, 0.9, 1] 
-          }}
-          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-          className="absolute top-[-10%] left-[-5%] w-[600px] h-[600px] bg-indigo-100/50 rounded-full blur-[120px]"
-        />
-        <motion.div 
-          animate={{ 
-            x: [0, -120, 80, 0], 
-            y: [0, 100, -40, 0],
-            rotate: [0, 90, 180, 360]
-          }}
-          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          className="absolute bottom-[-15%] right-[-5%] w-[700px] h-[700px] bg-teal-50/60 rounded-full blur-[130px]"
-        />
-        <motion.div 
-          animate={{ opacity: [0.2, 0.5, 0.2] }}
-          transition={{ duration: 10, repeat: Infinity }}
-          className="absolute top-[20%] right-[10%] w-[400px] h-[400px] bg-purple-50/50 rounded-full blur-[100px]"
-        />
-      </div>
+  // --- MOUSE TILT HOOK ---
+  const useTilt = (ref: React.RefObject<HTMLDivElement>) => {
+    const [rotateX, setRotateX] = useState(0);
+    const [rotateY, setRotateY] = useState(0);
 
-      {/* 2. Interactive Spotlight (Follows Mouse) */}
-      <motion.div 
-        className="pointer-events-none absolute inset-0 z-10"
-        style={{
-          background: `radial-gradient(600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(99, 102, 241, 0.04), transparent 80%)`
-        }}
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          e.currentTarget.style.setProperty("--mouse-x", `${e.clientX - rect.left}px`);
-          e.currentTarget.style.setProperty("--mouse-y", `${e.clientY - rect.top}px`);
-        }}
-      />
+    useEffect(() => {
+      const el = ref.current;
+      if (!el) return;
 
-      {/* 3. Subtle Technical Grid */}
-      <div 
-        className="absolute inset-0 z-0 opacity-[0.03]"
-        style={{ 
-          backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`,
-          backgroundSize: '60px 60px' 
-        }} 
-      />
+      const handleMouseMove = (e: MouseEvent) => {
+        const rect = el.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const xPct = mouseX / width - 0.5;
+        const yPct = mouseY / height - 0.5;
+        setRotateX(yPct * -10); // Max tilt deg
+        setRotateY(xPct * 10);
+      };
 
-      {/* --- MAIN CONTENT LAYER --- */}
-      <div className="relative z-20 w-full max-w-7xl px-8 grid lg:grid-cols-2 gap-20 items-center">
-        
-        {/* LEFT SIDE: Hero Content */}
-        <motion.div 
-          initial="hidden"
-          animate="show"
-          variants={containerVar}
-          className="text-left"
+      const handleMouseLeave = () => {
+        setRotateX(0);
+        setRotateY(0);
+      };
+
+      el.addEventListener('mousemove', handleMouseMove);
+      el.addEventListener('mouseleave', handleMouseLeave);
+      return () => {
+        el.removeEventListener('mousemove', handleMouseMove);
+        el.removeEventListener('mouseleave', handleMouseLeave);
+      };
+    }, [ref]);
+
+    return { rotateX, rotateY };
+  };
+
+  const LoginCard = () => {
+    const cardRef = useRef<HTMLDivElement>(null);
+    const { rotateX, rotateY } = useTilt(cardRef);
+
+    return (
+      <div style={{ perspective: 1000 }}>
+        <motion.div
+          ref={cardRef}
+          animate={{ rotateX, rotateY }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }} // Physics-based movement
+          className="relative w-full max-w-[480px] bg-white/70 backdrop-blur-3xl rounded-[2.5rem] p-10 border border-white/50 shadow-[0_40px_100px_-20px_rgba(50,50,93,0.15),0_25px_50px_-20px_rgba(0,0,0,0.1)] overflow-hidden"
         >
-          <motion.div variants={itemVar} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] mb-8 shadow-xl shadow-indigo-100">
-            <Activity size={12} className="text-indigo-400" />
-            <span>System Status: Online</span>
-          </motion.div>
+          {/* Internal Glint (Shiny reflection) */}
+          <div className="absolute inset-0 bg-gradient-to-tr from-white/80 via-transparent to-transparent opacity-50 pointer-events-none" />
           
-          <motion.h1 variants={itemVar} className="text-7xl md:text-9xl font-black text-slate-900 leading-[0.85] tracking-[-0.06em] mb-8">
-            The New <br />
-            <span className="relative inline-block">
-              Standard
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: '100%' }}
-                transition={{ delay: 1, duration: 1, ease: "circOut" }}
-                className="absolute bottom-4 left-0 h-4 bg-indigo-500/10 -z-10" 
-              />
-            </span>
-          </motion.h1>
-          
-          <motion.p variants={itemVar} className="text-slate-500 text-xl md:text-2xl max-w-lg leading-relaxed font-medium mb-12">
-            A high-performance environment for the modern mathematical architect.
-          </motion.p>
-
-          <motion.div variants={itemVar} className="flex items-center gap-12">
-             <div className="space-y-1">
-                <p className="text-3xl font-black text-slate-900 tracking-tighter">15+</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Collaborators</p>
-             </div>
-             <div className="w-px h-10 bg-slate-200" />
-             <div className="space-y-1">
-                <p className="text-3xl font-black text-slate-900 tracking-tighter">2.4k</p>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Problems Solved</p>
-             </div>
-          </motion.div>
-        </motion.div>
-
-        {/* RIGHT SIDE: The Glass Login Card */}
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9, rotateY: 15 }}
-          animate={{ opacity: 1, scale: 1, rotateY: 0 }}
-          transition={{ duration: 1, ease: "easeOut" }}
-          className="perspective-1000"
-        >
-          <div className="relative group">
-            {/* Soft Outer Glow */}
-            <div className="absolute -inset-8 bg-indigo-500/5 rounded-[4rem] blur-[60px] opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-            
-            <div className="relative bg-white/60 border border-white backdrop-blur-3xl rounded-[3rem] p-12 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] overflow-hidden">
-              {/* Subtle Internal Light Sweep */}
-              <motion.div 
-                animate={{ x: ['-100%', '200%'] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", repeatDelay: 1 }}
-                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -skew-x-12"
-              />
-
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-12">
-                   <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
-                      <BookOpen className="text-white" size={28} strokeWidth={2.5} />
-                   </div>
-                   <div className="text-right">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 mb-1">Authorization</p>
-                      <p className="text-[10px] font-bold text-slate-400">v3.0 Secure Node</p>
-                   </div>
-                </div>
-
-                {!selectedLoginId ? (
-                  <div className="space-y-6">
-                    <div className="space-y-2">
-                        <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Welcome back.</h3>
-                        <p className="text-slate-400 text-sm font-medium">Select your profile to initialize session.</p>
-                    </div>
-
-                    <div className="max-h-[300px] overflow-y-auto pr-3 space-y-3 custom-scrollbar-light">
-                      {users.map((user) => (
-                        <motion.button
-                          whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.8)" }}
-                          whileTap={{ scale: 0.98 }}
-                          key={user.id}
-                          onClick={() => setSelectedLoginId(user.id)}
-                          className="w-full p-5 rounded-2xl border border-slate-100 bg-white/50 flex items-center justify-between transition-all shadow-sm hover:shadow-md hover:border-indigo-100 group/item"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="w-11 h-11 rounded-xl bg-slate-50 flex items-center justify-center text-slate-900 font-black border border-slate-200 group-hover/item:bg-indigo-600 group-hover/item:text-white transition-colors">
-                              {user.name.charAt(0)}
-                            </div>
-                            <span className="text-slate-700 font-bold text-base">{user.name}</span>
-                          </div>
-                          <ArrowRight className="w-5 h-5 text-slate-300 group-hover/item:text-indigo-500 transition-transform group-hover/item:translate-x-1" />
-                        </motion.button>
-                      ))}
-                    </div>
-
-                    <button 
-                      onClick={handleGuestLogin} 
-                      className="w-full py-4 text-xs font-black text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-[0.2em]"
-                    >
-                      Enter as Observer
-                    </button>
-                  </div>
-                ) : (
-                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                    <div className="flex items-center gap-5 p-5 bg-slate-50 rounded-[2rem] border border-slate-100">
-                       <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center text-white font-black text-xl shadow-lg">
-                          {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
-                       </div>
-                       <div>
-                          <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Identity Confirmed</p>
-                          <h4 className="text-slate-900 font-black text-xl tracking-tight">{users.find(u => u.id === selectedLoginId)?.name}</h4>
-                       </div>
-                       <button onClick={() => setSelectedLoginId('')} className="ml-auto w-10 h-10 rounded-full flex items-center justify-center hover:bg-slate-200 transition-colors">
-                          <X size={20} className="text-slate-400" />
-                       </button>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="relative">
-                        <input 
-                          type="password"
-                          placeholder="ACCESS KEY"
-                          value={loginPassword}
-                          onChange={(e) => setLoginPassword(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                          className="w-full px-8 py-6 bg-white border border-slate-200 rounded-[1.5rem] text-slate-900 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-center tracking-[0.5em] font-mono text-lg shadow-inner"
-                          autoFocus
-                        />
-                        <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-300">
-                          <Lock size={18} />
-                        </div>
-                      </div>
-                      {loginError && <p className="text-red-500 text-[10px] font-black uppercase text-center tracking-widest">{loginError}</p>}
-                    </div>
-
-                    <Button 
-                      onClick={handleLogin} 
-                      className="w-full py-6 !bg-slate-900 !text-white hover:!bg-indigo-600 rounded-[1.5rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl shadow-indigo-200 transition-all active:scale-[0.98]"
-                    >
-                      Open Environment
-                    </Button>
-                  </motion.div>
-                )}
-              </div>
+          <div className="relative z-10 flex flex-col h-full">
+            <div className="flex items-center justify-center mb-8">
+               <motion.div 
+                 initial={{ scale: 0, rotate: -180 }}
+                 animate={{ scale: 1, rotate: 0 }}
+                 transition={{ type: "spring", duration: 1.5 }}
+                 className="w-16 h-16 bg-gradient-to-br from-slate-900 to-indigo-900 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/20"
+               >
+                  <BookOpen size={32} strokeWidth={2.5} />
+               </motion.div>
             </div>
+
+            <div className="text-center mb-10 space-y-2">
+                <motion.h1 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-3xl font-black text-slate-900 tracking-tight"
+                >
+                  WAMO<span className="text-indigo-600">Tracker</span>
+                </motion.h1>
+                <motion.p 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-slate-400 text-sm font-bold uppercase tracking-widest"
+                >
+                  v3.0.0 Secure Node
+                </motion.p>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {!selectedLoginId ? (
+                <motion.div 
+                  key="user-list"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20, transition: { duration: 0.2 } }}
+                  className="space-y-3"
+                >
+                  <div className="max-h-[280px] overflow-y-auto pr-1 space-y-2 custom-scrollbar-light">
+                    {users.map((user, i) => (
+                      <motion.button
+                        layoutId={`user-${user.id}`} // Magic Morphing ID
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                        whileHover={{ scale: 1.02, x: 5, backgroundColor: "rgba(255,255,255,0.9)" }}
+                        whileTap={{ scale: 0.98 }}
+                        key={user.id}
+                        onClick={() => setSelectedLoginId(user.id)}
+                        className="w-full p-4 rounded-xl border border-slate-100 bg-white/40 flex items-center justify-between group relative overflow-hidden"
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="flex items-center gap-4 relative z-10">
+                          <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-slate-700 font-black shadow-sm border border-slate-100 group-hover:text-indigo-600 group-hover:border-indigo-200 transition-colors">
+                            {user.name.charAt(0)}
+                          </div>
+                          <div className="text-left">
+                             <span className="block text-slate-800 font-bold text-sm">{user.name}</span>
+                             <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">{user.role}</span>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+                      </motion.button>
+                    ))}
+                  </div>
+                  
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleGuestLogin} 
+                    className="w-full mt-4 py-4 rounded-xl border border-dashed border-slate-300 text-xs font-black text-slate-400 hover:text-slate-600 hover:border-slate-400 transition-all uppercase tracking-widest"
+                  >
+                    Guest Access
+                  </motion.button>
+                </motion.div>
+              ) : (
+                <motion.div 
+                  key="password-form"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className="space-y-6"
+                >
+                  <motion.div 
+                    layoutId={`user-${selectedLoginId}`} // Morph source
+                    className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-indigo-100 shadow-lg shadow-indigo-100/50"
+                  >
+                     <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-lg shadow-md">
+                        {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
+                     </div>
+                     <div className="flex-1">
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Identity</p>
+                        <h4 className="text-slate-900 font-bold text-lg leading-tight">{users.find(u => u.id === selectedLoginId)?.name}</h4>
+                     </div>
+                     <button onClick={() => setSelectedLoginId('')} className="p-2 bg-slate-50 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                        <X size={18} />
+                     </button>
+                  </motion.div>
+
+                  <div className="space-y-4">
+                    <div className="relative group">
+                      <input 
+                        type="password"
+                        placeholder="ENTER PIN"
+                        value={loginPassword}
+                        onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                        className="w-full px-6 py-5 bg-white/50 border border-slate-200 rounded-2xl text-slate-800 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-center tracking-[0.5em] font-mono text-lg font-bold placeholder:text-slate-300 group-hover:bg-white"
+                        autoFocus
+                      />
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent scale-x-0 group-focus-within:scale-x-100 transition-transform duration-500" />
+                    </div>
+                    
+                    <AnimatePresence>
+                    {loginError && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }} 
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="text-red-500 text-[10px] font-black uppercase text-center tracking-widest bg-red-50 py-2 rounded-lg"
+                      >
+                        {loginError}
+                      </motion.div>
+                    )}
+                    </AnimatePresence>
+                  </div>
+
+                  <motion.button 
+                    whileHover={{ scale: 1.03, boxShadow: "0 20px 40px -10px rgba(79, 70, 229, 0.4)" }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleLogin} 
+                    className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.25em] shadow-xl transition-all relative overflow-hidden group"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <span className="relative z-10 flex items-center justify-center gap-2">
+                       Initialize <ArrowRight size={14} />
+                    </span>
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="relative min-h-screen w-full bg-slate-50 flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-200 selection:text-indigo-900">
+      
+      {/* --- EXTREME BACKGROUND --- */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+         {/* 1. Moving Grid */}
+         <motion.div 
+            animate={{ backgroundPosition: ["0px 0px", "40px 40px"] }}
+            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-0 opacity-[0.03]"
+            style={{ 
+              backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`,
+              backgroundSize: '40px 40px' 
+            }} 
+         />
+         
+         {/* 2. Floating Math Symbols */}
+         {["∑", "∫", "π", "∞", "√"].map((sym, i) => (
+            <motion.div
+               key={i}
+               initial={{ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight }}
+               animate={{ 
+                  y: [0, -100, 0], 
+                  rotate: [0, 360],
+                  opacity: [0.1, 0.3, 0.1]
+               }}
+               transition={{ duration: 15 + Math.random() * 10, repeat: Infinity, ease: "linear" }}
+               className="absolute text-9xl font-serif text-slate-900/5 font-black select-none"
+            >
+               {sym}
+            </motion.div>
+         ))}
+
+         {/* 3. The "Aurora" Orbs */}
+         <motion.div 
+            animate={{ scale: [1, 1.2, 1], x: [0, 100, 0], y: [0, 50, 0] }}
+            transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-indigo-300/30 rounded-full blur-[100px]" 
+         />
+         <motion.div 
+            animate={{ scale: [1, 1.5, 1], x: [0, -100, 0], y: [0, -50, 0] }}
+            transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] bg-purple-300/30 rounded-full blur-[120px]" 
+         />
+      </div>
+
+      <div className="relative z-10 w-full max-w-7xl px-4 flex flex-col md:flex-row items-center justify-center gap-12 md:gap-32">
+         {/* LEFT: Text Hero */}
+         <motion.div 
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 1, ease: "circOut" }}
+            className="text-left hidden md:block"
+         >
+            <h1 className="text-8xl font-black text-slate-900 tracking-tighter leading-[0.85] mb-6">
+               Math <br/>
+               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">Reimagined.</span>
+            </h1>
+            <p className="text-xl text-slate-500 font-medium max-w-sm leading-relaxed">
+               The ultimate platform for problem curation and contest architecture.
+            </p>
+            <div className="mt-8 flex gap-3">
+               <div className="w-3 h-3 rounded-full bg-red-400 animate-pulse"/>
+               <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse delay-75"/>
+               <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse delay-150"/>
+            </div>
+         </motion.div>
+
+         {/* RIGHT: Interactive Card */}
+         <LoginCard />
       </div>
     </div>
   );
