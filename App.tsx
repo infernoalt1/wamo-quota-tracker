@@ -1417,8 +1417,9 @@ tex += `\\end{longtable}
                     </div>
                     {/* ORIGINAL GREEN APPROVE BUTTON */}
                     <Button 
-                        size="sm" onClick={approve} 
-                        className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200 h-8 text-xs px-4 shadow-sm"
+                        size="sm" 
+                        onClick={approve} 
+                        className="!bg-white !text-emerald-600 border border-slate-200 hover:!bg-slate-50 h-8 text-xs px-4 shadow-sm font-bold"
                     >
                         Approve
                     </Button>
@@ -1463,7 +1464,7 @@ tex += `\\end{longtable}
                             onChange={e => setFormData({...formData, solution: e.target.value})}
                         />
                     ) : (
-                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs font-serif text-slate-600 italic">
+                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs font-serif text-slate-600">
                             <MathText text={formData.solution || 'No solution provided.'} />
                         </div>
                     )}
@@ -2722,23 +2723,22 @@ tex += `\\end{longtable}
                                                 </button>
                                             </div>
                                         ) : (
-                                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                {/* EDIT BUTTON: Allowed for Admins, or Directors editing anyone but Admins */}
+                                            /* REMOVED OPACITY CLASSES BELOW */
+                                            <div className="flex justify-end gap-1">
                                                 {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin')) && (
                                                     <button 
                                                         onClick={() => startEditUser(u)} 
-                                                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100"
                                                         title="Edit User"
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
                                                 )}
                                                 
-                                                {/* DELETE BUTTON: Allowed for Admins, or Directors deleting Writers */}
                                                 {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role === 'writer')) && (
                                                     <button 
                                                         onClick={() => deleteUser(u.id)} 
-                                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
                                                         title="Delete User"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" />
