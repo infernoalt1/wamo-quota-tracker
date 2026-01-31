@@ -1524,104 +1524,172 @@ tex += `\\end{longtable}
   }, [problems]);
 
   if (!currentUser) {
-    return (
-      <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        {/* HERO: Constellation Background */}
-        <ConstellationBg />
-        
-        {/* Login Modal */}
-        <motion.div 
-           initial={{ opacity: 0, scale: 0.95, y: 10 }}
-           animate={{ opacity: 1, scale: 1, y: 0 }}
-           transition={{ duration: 0.6, type: "spring", stiffness: 100 }}
-           className="relative z-10 w-full max-w-md p-8 bg-white/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/50"
-        >
-          <div className="flex justify-center mb-8">
-            <motion.div 
-               initial={{ rotate: -10, scale: 0.8 }}
-               animate={{ rotate: 0, scale: 1 }}
-               transition={{ duration: 0.8, type: "spring" }}
-               className="w-16 h-16 bg-gradient-to-tr from-slate-900 to-indigo-900 rounded-xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 transform"
-            >
-              <BookOpen size={28} strokeWidth={2} />
-            </motion.div>
-          </div>
-          
-          <div className="text-center mb-10">
-              <h1 className="text-3xl font-bold text-slate-900 mb-2 tracking-tight">WAMO<span className="text-indigo-600">Tracker</span></h1>
-              <p className="text-slate-500 text-sm font-medium">Contest Architecture Platform</p>
-          </div>
-          
-          {!selectedLoginId ? (
-            <div className="space-y-4">
-               <div className="flex items-center justify-between px-1">
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Select Profile</p>
-                 {usersError && (
-                     <button onClick={initApp} className="text-xs text-indigo-600 flex items-center gap-1 hover:underline">
-                        <RotateCcw className="w-3 h-3" /> Retry
-                     </button>
-                 )}
-               </div>
-               
-               <div className="max-h-[240px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {usersLoading && users.length === 0 && <div className="text-sm text-slate-400 italic p-4 text-center">Connecting to node...</div>}
-                  
-                  {users.map(user => (
-                    <motion.button
-                      whileHover={{ scale: 1.01, backgroundColor: "#F8FAFC" }}
-                      whileTap={{ scale: 0.99 }}
-                      key={user.id}
-                      onClick={() => setSelectedLoginId(user.id)}
-                      className="w-full p-3.5 bg-white border border-slate-200 rounded-xl text-left transition-all duration-200 group flex items-center justify-between hover:border-indigo-200 hover:shadow-sm"
-                    >
-                      <span className="font-semibold text-slate-700 group-hover:text-slate-900 text-sm">{user.name}</span>
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500" />
-                    </motion.button>
-                  ))}
-               </div>
+  return (
+    <div className="relative min-h-screen w-full bg-[#030303] flex items-center justify-center overflow-hidden font-sans">
+      
+      {/* --- BACKGROUND ARTICULATION --- */}
+      {/* 1. The Light Beam (Huly Style) */}
+      <motion.div 
+        initial={{ opacity: 0, height: 0 }}
+        animate={{ opacity: 1, height: '100vh' }}
+        transition={{ duration: 2, ease: "circOut" }}
+        className="absolute left-1/2 top-0 w-[2px] bg-gradient-to-b from-transparent via-indigo-500 to-transparent blur-[1px] z-0"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scaleY: 0 }}
+        animate={{ opacity: [0, 0.4, 0.2], scaleY: 1 }}
+        transition={{ duration: 3, repeat: Infinity, repeatType: "reverse" }}
+        className="absolute left-1/2 top-0 w-[40px] -translate-x-1/2 bg-indigo-500/20 blur-[60px] z-0"
+      />
 
-               <div className="pt-4 mt-2 border-t border-slate-100">
-                  <Button variant="ghost" onClick={handleGuestLogin} className="w-full py-3 text-xs text-slate-400 hover:text-slate-600">
-                    Enter as Guest Observer
-                  </Button>
+      {/* 2. Dark Mesh Grid */}
+      <div 
+        className="absolute inset-0 z-0 opacity-20"
+        style={{ 
+          backgroundImage: `radial-gradient(circle at 2px 2px, #333 1px, transparent 0)`,
+          backgroundSize: '40px 40px' 
+        }} 
+      />
+
+      {/* 3. Floating Ambient Blobs */}
+      <motion.div 
+        animate={{ 
+          x: [0, 100, 0], 
+          y: [0, -50, 0],
+          opacity: [0.1, 0.3, 0.1] 
+        }}
+        transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+        className="absolute -top-[10%] -left-[10%] w-[500px] h-[500px] bg-indigo-900/30 rounded-full blur-[120px]"
+      />
+
+      {/* --- MAIN CONTENT LAYER --- */}
+      <div className="relative z-10 w-full max-w-6xl px-6 grid lg:grid-cols-2 gap-12 items-center">
+        
+        {/* LEFT SIDE: Hero Text */}
+        <motion.div 
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, delay: 0.2 }}
+          className="text-left space-y-6"
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-indigo-300 text-xs font-medium tracking-wide shadow-2xl backdrop-blur-md">
+            <Zap size={12} className="fill-current" />
+            <span>v3.0.0 "Obsidian" Release</span>
+          </div>
+          
+          <h1 className="text-6xl md:text-8xl font-black text-white leading-[0.9] tracking-tighter">
+            Architecting <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-white to-indigo-400">
+              Math Excellence
+            </span>
+          </h1>
+          
+          <p className="text-slate-400 text-lg md:text-xl max-w-md leading-relaxed font-medium">
+            The all-in-one laboratory for problem writing, contest curation, and math organization management.
+          </p>
+
+          <div className="flex items-center gap-6 pt-4">
+             <div className="flex -space-x-3">
+                {[1,2,3,4].map(i => (
+                  <div key={i} className="w-10 h-10 rounded-full border-2 border-[#030303] bg-slate-800 flex items-center justify-center text-[10px] text-white font-bold">
+                    {String.fromCharCode(64 + i)}
+                  </div>
+                ))}
+                <div className="w-10 h-10 rounded-full border-2 border-[#030303] bg-indigo-600 flex items-center justify-center text-[10px] text-white font-bold">
+                  +15
+                </div>
+             </div>
+             <p className="text-slate-500 text-sm font-semibold tracking-tight">Used by the world's <br/> top problem writers.</p>
+          </div>
+        </motion.div>
+
+        {/* RIGHT SIDE: The Login Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.4 }}
+          className="relative group"
+        >
+          {/* Card Outer Glow */}
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-[2.5rem] blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
+          
+          <div className="relative bg-[#0A0A0A]/80 border border-white/10 backdrop-blur-3xl rounded-[2rem] p-10 shadow-2xl">
+            <div className="flex items-center justify-between mb-10">
+               <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-lg">
+                  <BookOpen className="text-black" size={24} strokeWidth={2.5} />
+               </div>
+               <div className="text-right text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                  Secure Access Node
                </div>
             </div>
-          ) : (
-            <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-5">
-              <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-slate-700 font-bold text-sm border border-slate-200 shadow-sm">
-                        {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
-                    </div>
-                    <div>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Authenticating</p>
-                        <p className="text-sm font-bold text-slate-900 leading-none mt-0.5">{users.find(u => u.id === selectedLoginId)?.name}</p>
-                    </div>
-                </div>
-                <button onClick={() => { setSelectedLoginId(''); setLoginPassword(''); setLoginError(''); }} className="text-xs text-slate-400 hover:text-indigo-600 font-bold px-2 py-1">Back</button>
-              </div>
-              
-              <div className="relative">
-                <input 
-                  type="password"
-                  placeholder="ACCESS KEY"
-                  value={loginPassword}
-                  onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  className="w-full px-4 py-3.5 border border-slate-200 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300 text-center tracking-[0.2em] text-sm shadow-inner font-mono"
-                  autoFocus
-                />
-              </div>
 
-              {loginError && <motion.p initial={{opacity:0}} animate={{opacity:1}} className="text-red-500 text-xs text-center font-semibold bg-red-50 py-2 rounded-lg border border-red-100">{loginError}</motion.p>}
-              
-              <Button onClick={handleLogin} className="w-full py-3 text-sm shadow-lg shadow-indigo-100 mt-2">INITIALIZE SESSION</Button>
-            </motion.div>
-          )}
+            {!selectedLoginId ? (
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold text-white tracking-tight mb-6">Select Identity</h3>
+                <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2 custom-scrollbar-dark">
+                  {users.map((user) => (
+                    <motion.button
+                      whileHover={{ x: 10, backgroundColor: "rgba(255,255,255,0.05)" }}
+                      key={user.id}
+                      onClick={() => setSelectedLoginId(user.id)}
+                      className="w-full p-4 rounded-2xl border border-white/5 bg-white/5 flex items-center justify-between transition-all group/item"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold border border-indigo-500/20">
+                          {user.name.charAt(0)}
+                        </div>
+                        <span className="text-slate-200 font-bold group-hover/item:text-white">{user.name}</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover/item:text-indigo-400" />
+                    </motion.button>
+                  ))}
+                </div>
+                <button onClick={handleGuestLogin} className="w-full py-4 text-xs font-bold text-slate-500 hover:text-indigo-400 transition-colors uppercase tracking-widest">
+                  Enter Observation Deck
+                </button>
+              </div>
+            ) : (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                <div className="flex items-center gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                   <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-lg">
+                      {users.find(u => u.id === selectedLoginId)?.name.charAt(0)}
+                   </div>
+                   <div>
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Authenticating</p>
+                      <h4 className="text-white font-bold text-lg">{users.find(u => u.id === selectedLoginId)?.name}</h4>
+                   </div>
+                   <button onClick={() => setSelectedLoginId('')} className="ml-auto p-2 text-slate-500 hover:text-white transition-colors">
+                      <X size={20} />
+                   </button>
+                </div>
+
+                <div className="space-y-2">
+                  <input 
+                    type="password"
+                    placeholder="Enter Access Key"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                    className="w-full px-6 py-5 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-center tracking-[0.4em] font-mono shadow-inner"
+                    autoFocus
+                  />
+                  {loginError && <p className="text-red-400 text-[10px] font-bold uppercase text-center pt-2 tracking-widest">{loginError}</p>}
+                </div>
+
+                <Button 
+                  onClick={handleLogin} 
+                  className="w-full py-5 !bg-white !text-black hover:!bg-indigo-50 rounded-2xl font-black text-sm uppercase tracking-widest shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                >
+                  Confirm Authorization
+                </Button>
+              </motion.div>
+            )}
+          </div>
         </motion.div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   const activeQuota = getActiveQuota();
   // Get override or default

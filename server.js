@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
@@ -73,7 +74,7 @@ const initDB = async () => {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         author_id UUID REFERENCES users(id),
         quota_id UUID REFERENCES quotas(id),
-        round_id UUID REFERENCES rounds(id),
+        round_id UUID REFERENCES rounds(id), -- Kept for legacy compatibility/primary display
         title TEXT NOT NULL,
         statement TEXT NOT NULL,
         solution TEXT,
@@ -88,6 +89,7 @@ const initDB = async () => {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- New: Many-to-Many Join Table for Rounds
       CREATE TABLE IF NOT EXISTS problem_rounds (
         problem_id UUID REFERENCES problems(id) ON DELETE CASCADE,
         round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
@@ -137,7 +139,14 @@ const initDB = async () => {
         `);
     }
 
-    // REMOVED THE STATUS RESET LOGIC FROM HERE TO ENSURE DATA PERSISTENCE
+    // --- MIGRATION: Update Statuses for New Workflow ---
+    // 1. Ensure problems in rounds are marked 'accepted'
+    await client.query("UPDATE problems SET status = 'accepted' WHERE id IN (SELECT problem_id FROM problem_rounds)");
+    
+    // 2. Ensure problems NOT in rounds but 'approved' (legacy Pool) are moved to 'pending' (Waitlist)
+    //    We only do this for problems that are 'approved' and have NO round entries.
+    //    This effectively resets the pool so the Director must verify everything via Waitlist.
+    await client.query("UPDATE problems SET status = 'pending' WHERE status = 'approved' AND id NOT IN (SELECT problem_id FROM problem_rounds)");
 
     // --- MIGRATION: Update Role Constraint to include 'director' and 'guest' ---
     try {
@@ -188,7 +197,7 @@ const initDB = async () => {
 // --- Middleware: Verify JWT ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
   if (!token) return res.sendStatus(401);
 
@@ -243,12 +252,18 @@ app.post('/auth/guest-login', async (req, res) => {
 app.post('/auth/register', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Ensure role is valid
     const safeRole = ['admin', 'director', 'writer'].includes(role) ? role : 'writer';
+
+    // Return all fields needed for the frontend User interface
     const result = await pool.query(
       'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, role, voting_power, custom_targets',
       [name, email, hashedPassword, safeRole]
     );
+    
     const u = result.rows[0];
     res.json({
         id: u.id,
@@ -266,16 +281,23 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    
+    // Allow login by name (for the UI list selection) OR email
     let result;
     if (email.includes('@')) {
         result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     } else {
+        // Fallback for ID login if passed
         result = await pool.query('SELECT * FROM users WHERE id = $1', [email]);
     }
+    
     const user = result.rows[0];
+
     if (!user) return res.status(400).json({ error: 'User not found' });
+
     if (await bcrypt.compare(password, user.password_hash)) {
       const token = jwt.sign({ id: user.id, role: user.role, power: user.voting_power }, process.env.JWT_SECRET);
+      
       res.json({ accessToken: token, user: { 
         id: user.id, 
         name: user.name, 
@@ -295,6 +317,7 @@ app.post('/auth/login', async (req, res) => {
 // --- Routes: Users ---
 
 app.get('/api/users', async (req, res) => {
+  // Made public to populate the Login "Select User" list
   try {
     const result = await pool.query("SELECT id, name, role, voting_power, custom_targets FROM users WHERE role != 'guest' ORDER BY name");
     const users = result.rows.map(u => ({
@@ -303,7 +326,7 @@ app.get('/api/users', async (req, res) => {
         role: u.role,
         votingPower: u.voting_power,
         customTargets: u.custom_targets || {},
-        password: ''
+        password: '' // Don't send hashes
     }));
     res.json(users);
   } catch (err) {
@@ -314,13 +337,19 @@ app.get('/api/users', async (req, res) => {
 
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  
   const { id } = req.params;
   const { name, password, votingPower, customTargets, role } = req.body;
+  
   try {
+    // Permission Check: Sub-Director Limitations
     if (req.user.role === 'director') {
+        // 1. Cannot modify password
         if (password && password.trim() !== '') {
             return res.status(403).json({ error: "Directors cannot modify passwords" });
         }
+        
+        // 2. Cannot modify Admins
         const targetCheck = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
         if (targetCheck.rows.length > 0 && targetCheck.rows[0].role === 'admin') {
              return res.status(403).json({ error: "Directors cannot modify Admins" });
@@ -331,19 +360,25 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     let params = [name, votingPower, customTargets];
     let paramIndex = 4;
 
+    // Update Password (if allowed and present)
     if (password && password.trim() !== '') {
         const hashedPassword = await bcrypt.hash(password, 10);
         query += `, password_hash = $${paramIndex++}`;
         params.push(hashedPassword);
     }
+    
+    // Update Role (Admin only)
     if (role && req.user.role === 'admin') {
          query += `, role = $${paramIndex++}`;
          params.push(role);
     }
+
     query += ` WHERE id = $${paramIndex}`;
     params.push(id);
+    
     await pool.query(query, params);
 
+    // FIX: Propagate Voting Power Changes
     if (votingPower !== undefined) {
         await pool.query('UPDATE votes SET vote_value = $1 WHERE user_id = $2', [votingPower, id]);
         await pool.query(`
@@ -356,6 +391,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
           WHERE id IN (SELECT problem_id FROM votes WHERE user_id = $1)
         `, [id]);
     }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -365,10 +401,13 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
 
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+    
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         const userId = req.params.id;
+
+        // Permission Check: Director cannot delete Admin or Director
         if (req.user.role === 'director') {
              const targetCheck = await client.query('SELECT role FROM users WHERE id = $1', [userId]);
              const targetRole = targetCheck.rows[0]?.role;
@@ -377,6 +416,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
                  return res.status(403).json({ error: "Directors can only delete Writers" });
              }
         }
+
         await client.query('DELETE FROM votes WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM comments WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM votes WHERE problem_id IN (SELECT id FROM problems WHERE author_id = $1)', [userId]);
@@ -397,7 +437,11 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // --- Routes: Problems ---
 
 app.get('/api/problems', authenticateToken, async (req, res) => {
-  if (req.user.role === 'guest') return res.json([]);
+  // Guests should NOT see problems
+  if (req.user.role === 'guest') {
+    return res.json([]);
+  }
+
   try {
     const result = await pool.query(`
       SELECT p.*, u.name as author_name, 
@@ -408,13 +452,14 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       LEFT JOIN users u ON p.author_id = u.id
       ORDER BY p.score DESC
     `);
+    
     const problems = result.rows.map(row => ({
       ...row,
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
-      quotaId: row.quota_id,
-      roundId: row.round_id,
-      roundIds: row.round_ids || [],
+      quotaId: row.quota_id, // Ensure we send this
+      roundId: row.round_id, // Legacy/Primary round
+      roundIds: row.round_ids || [], // New: Many-to-Many
       difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
       topics: row.topics || [],
       status: row.status || 'pending',
@@ -427,6 +472,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       version: row.version,
       commentCount: parseInt(row.comment_count || '0')
     }));
+
     res.json(problems);
   } catch (err) {
     console.error(err);
@@ -437,11 +483,14 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
     const { title, statement, quotaId, difficulty, topics, imageData, solution, answerKey } = req.body;
+    
     const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
+    
     const result = await pool.query(
       'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1) RETURNING *',
       [req.user.id, quotaId, title, statement, diffVal, topics || [], 'pending', imageData, solution, answerKey]
     );
+
     res.json({ ...result.rows[0], isAcceptable: true });
   } catch (err) {
     console.error(err);
@@ -451,38 +500,75 @@ app.post('/api/problems', authenticateToken, async (req, res) => {
 
 app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+  const updates = req.body; // Expect partial updates
   const userId = req.user.id;
   const userRole = req.user.role;
+
   try {
+    // 1. Verify ownership or admin status
     const check = await pool.query('SELECT author_id FROM problems WHERE id = $1', [id]);
     if (check.rows.length === 0) return res.status(404).json({ error: 'Problem not found' });
+    
     const authorId = check.rows[0].author_id;
     if (authorId !== userId && userRole !== 'admin' && userRole !== 'director') {
       return res.status(403).json({ error: 'Not authorized to edit this problem' });
     }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        
+        // Handle Round Assignment Special Case (Many-to-Many)
         if (updates.roundId !== undefined) {
              const newRoundId = updates.roundId;
+             
+             // If assigning to a round (not null/undefined)
              if (newRoundId) {
+                // Check if already in this round
                 const exists = await client.query('SELECT * FROM problem_rounds WHERE problem_id = $1 AND round_id = $2', [id, newRoundId]);
                 if (exists.rows.length === 0) {
+                     // Get max index
                      const maxIdxRes = await client.query('SELECT MAX(order_index) as m FROM problem_rounds WHERE round_id = $1', [newRoundId]);
                      const nextIdx = (maxIdxRes.rows[0].m || 0) + 1;
                      await client.query('INSERT INTO problem_rounds (problem_id, round_id, order_index) VALUES ($1, $2, $3)', [id, newRoundId, nextIdx]);
                 }
+                // Update legacy column for display compatibility
                 await client.query('UPDATE problems SET round_id = $1 WHERE id = $2', [newRoundId, id]);
              } else if (newRoundId === null) {
+                 // Explicit null means remove from round? 
+                 // NOTE: Front end sends { roundId: null } when removing from *specific* round context usually.
+                 // But for simplicity, if frontend sends roundId, we update legacy.
+                 // For removing, we should use a specific endpoint or handle it carefully.
+                 // We will update the legacy column to null. 
                  await client.query('UPDATE problems SET round_id = NULL WHERE id = $1', [id]);
+                 // We do NOT delete from problem_rounds here because we don't know WHICH round to remove from 
+                 // without more context, unless we clear ALL.
+                 // Use separate logic/endpoint for removing from round.
              }
         }
+        
+        // 2. Dynamic Update Query Construction for problems table
         const setClauses = [];
         const values = [];
         let idx = 1;
+
+        // Whitelist allowed fields to prevent arbitrary column injection
         const allowedFields = ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData', 'status', 'version'];
-        const dbMapping = { title: 'title', statement: 'statement', solution: 'solution', answerKey: 'answer_key', difficulty: 'difficulty', topics: 'topics', imageData: 'image_data', status: 'status' };
+        
+        // Mapping frontend camelCase to DB snake_case
+        const dbMapping = {
+            title: 'title',
+            statement: 'statement',
+            solution: 'solution',
+            answerKey: 'answer_key',
+            difficulty: 'difficulty',
+            topics: 'topics',
+            imageData: 'image_data',
+            status: 'status'
+            // version is handled specially
+        };
+
+        // Build SET clauses
         for (const key of Object.keys(updates)) {
             if (allowedFields.includes(key) && key !== 'version') {
                  const dbCol = dbMapping[key];
@@ -492,20 +578,30 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
                  }
             }
         }
+
         if (setClauses.length > 0) {
+            // Handle Version Increment
             setClauses.push(`version = version + 1`);
+
             let query = `UPDATE problems SET ${setClauses.join(', ')} WHERE id = $${idx++}`;
             values.push(id);
+
+            // Optimistic locking check (if version provided)
             if (updates.version !== undefined) {
                  query += ` AND version = $${idx++}`;
                  values.push(updates.version);
             }
+
             query += ` RETURNING *`;
             await client.query(query, values);
         }
+
         await client.query('COMMIT');
+        
+        // Fetch fresh
         const fresh = await pool.query('SELECT * FROM problems WHERE id = $1', [id]);
         res.json({ success: true, problem: fresh.rows[0] });
+
     } catch(e) {
         await client.query('ROLLBACK');
         throw e;
@@ -518,16 +614,26 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// New Route: Remove problem from a specific round
 app.delete('/api/problems/:id/round/:roundId', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id, roundId } = req.params;
+    
     try {
         await pool.query('DELETE FROM problem_rounds WHERE problem_id = $1 AND round_id = $2', [id, roundId]);
+        
+        // Update legacy column if it matches
         await pool.query('UPDATE problems SET round_id = NULL WHERE id = $1 AND round_id = $2', [id, roundId]);
+        
+        // If it's still in other rounds, maybe update round_id to one of them?
+        // For now, keep it simple. Legacy round_id just shows "one of" the rounds.
+        
+        // Status update logic: If no rounds left, set to 'approved' (pool)
         const check = await pool.query('SELECT count(*) FROM problem_rounds WHERE problem_id = $1', [id]);
         if (parseInt(check.rows[0].count) === 0) {
             await pool.query("UPDATE problems SET status = 'approved' WHERE id = $1", [id]);
         }
+        
         res.json({ success: true });
     } catch(e) {
         console.error(e);
@@ -535,46 +641,76 @@ app.delete('/api/problems/:id/round/:roundId', authenticateToken, async (req, re
     }
 });
 
+
+// New Route: Bulk Import Parsing
 app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
     try {
         const { text, defaultTopics, defaultDifficulty } = req.body;
         if (!text) return res.status(400).json({ error: "No text provided" });
+
         const problems = [];
+        let currentProblem = null;
+        
+        // Strategy 1: Look for explicit blocks
         const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
         let match;
+        
+        // Helper to extract metadata
         const extractMetadata = (content) => {
             let cleanContent = content;
             let solution = "";
             let answer = "";
+            
             const solMatch = content.match(/\\begin\{solution\}([\s\S]*?)\\end\{solution\}/);
             if (solMatch) {
                 solution = solMatch[1].trim();
                 cleanContent = cleanContent.replace(solMatch[0], '');
             }
+            
             const ansMatch = content.match(/\\answer\{(.*?)\}/);
             if (ansMatch) {
                 answer = ansMatch[1].trim();
                 cleanContent = cleanContent.replace(ansMatch[0], '');
             }
+            
             return { statement: cleanContent.trim(), solution, answer };
         };
+
         while ((match = blockRegex.exec(text)) !== null) {
             const raw = match[1];
             const { statement, solution, answer } = extractMetadata(raw);
-            problems.push({ title: `Imported Problem ${problems.length + 1}`, statement, solution, answerKey: answer, topics: defaultTopics || [], difficulty: defaultDifficulty || 3 });
+            
+            problems.push({
+                title: `Imported Problem ${problems.length + 1}`,
+                statement: statement,
+                solution: solution,
+                answerKey: answer,
+                topics: defaultTopics || [],
+                difficulty: defaultDifficulty || 3
+            });
         }
+
+        // Strategy 2: If no blocks, look for \item
         if (problems.length === 0) {
             const items = text.split(/\\item\s/);
             if (items.length > 1) {
-                items.shift();
+                items.shift(); // remove preamble
                 items.forEach((item, idx) => {
                     const { statement, solution, answer } = extractMetadata(item);
                     if (statement.length > 5) {
-                         problems.push({ title: `Imported Problem ${idx + 1}`, statement, solution, answerKey: answer, topics: defaultTopics || [], difficulty: defaultDifficulty || 3 });
+                         problems.push({
+                            title: `Imported Problem ${idx + 1}`,
+                            statement: statement,
+                            solution: solution,
+                            answerKey: answer,
+                            topics: defaultTopics || [],
+                            difficulty: defaultDifficulty || 3
+                        });
                     }
                 });
             }
         }
+
         res.json({ problems });
     } catch (e) {
         console.error(e);
@@ -582,11 +718,17 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
     }
 });
 
+// New Route: Update Status (Admin Only)
 app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  
   const { id } = req.params;
   const { status } = req.body;
-  if (!['pending', 'approved', 'accepted'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  if (!['pending', 'approved', 'accepted'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
   try {
     await pool.query('UPDATE problems SET status = $1 WHERE id = $2', [status, id]);
     res.json({ success: true, status });
@@ -596,22 +738,40 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
+// New Route: Reorder Round (Admin Only) - Sets status to 'accepted' and updates order_index
 app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-  const { problems, roundId } = req.body;
+  
+  const { problems, roundId } = req.body; // Array of problem IDs in desired order, and the Round ID
+  
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
+      
+      // For each problem ID in the list, update its order_index in the join table
+      // If roundId is provided, update problem_rounds. 
+      // Fallback to updating problems table if only legacy mode, but we should enforce roundId
+      
       if (roundId) {
           for (let i = 0; i < problems.length; i++) {
-              await client.query('UPDATE problem_rounds SET order_index = $1 WHERE problem_id = $2 AND round_id = $3', [i, problems[i], roundId]);
-              await client.query('UPDATE problems SET order_index = $1 WHERE id = $2 AND round_id = $3', [i, problems[i], roundId]);
+              await client.query(
+                  'UPDATE problem_rounds SET order_index = $1 WHERE problem_id = $2 AND round_id = $3',
+                  [i, problems[i], roundId]
+              );
+              // Also update main table order_index if this is the "primary" round (legacy compat)
+              // Just simpler to update it always, though it might get overwritten by other round reorders.
+              await client.query(
+                  'UPDATE problems SET order_index = $1 WHERE id = $2 AND round_id = $3',
+                   [i, problems[i], roundId]
+              );
           }
       } else {
+          // Legacy behavior
            for (let i = 0; i < problems.length; i++) {
               await client.query('UPDATE problems SET order_index = $1 WHERE id = $2', [i, problems[i]]);
           }
       }
+      
       await client.query('COMMIT');
       res.json({ success: true });
   } catch (e) {
@@ -625,6 +785,7 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
 
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
   if (req.user.role === 'guest') return res.sendStatus(403);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -632,7 +793,9 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const userRes = await client.query('SELECT voting_power FROM users WHERE id = $1', [userId]);
     const currentPower = userRes.rows.length > 0 ? (userRes.rows[0].voting_power || 1) : 1;
+
     const check = await client.query('SELECT vote_value FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
+    
     if (check.rows.length > 0) {
       const previousValue = check.rows[0].vote_value;
       await client.query('DELETE FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
@@ -641,6 +804,7 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
       await client.query('INSERT INTO votes (user_id, problem_id, vote_value) VALUES ($1, $2, $3)', [userId, id, currentPower]);
       await client.query('UPDATE problems SET score = score + $1 WHERE id = $2', [currentPower, id]);
     }
+
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
@@ -652,11 +816,26 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
   }
 });
 
+// --- Comments Routes ---
+
 app.get('/api/problems/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(`SELECT c.id, c.text, c.created_at, u.id as user_id, u.name as user_name FROM comments c JOIN users u ON c.user_id = u.id WHERE c.problem_id = $1 ORDER BY c.created_at ASC`, [id]);
-    const comments = result.rows.map(r => ({ id: r.id, text: r.text, createdAt: new Date(r.created_at).getTime(), userId: r.user_id, userName: r.user_name }));
+    const result = await pool.query(
+      `SELECT c.id, c.text, c.created_at, u.id as user_id, u.name as user_name 
+       FROM comments c 
+       JOIN users u ON c.user_id = u.id 
+       WHERE c.problem_id = $1 
+       ORDER BY c.created_at ASC`,
+      [id]
+    );
+    const comments = result.rows.map(r => ({
+      id: r.id,
+      text: r.text,
+      createdAt: new Date(r.created_at).getTime(),
+      userId: r.user_id,
+      userName: r.user_name
+    }));
     res.json(comments);
   } catch (e) {
     console.error(e);
@@ -670,16 +849,29 @@ app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { text } = req.body;
     if (!text || !text.trim()) return res.status(400).json({error: "Empty comment"});
-    const result = await pool.query('INSERT INTO comments (problem_id, user_id, text) VALUES ($1, $2, $3) RETURNING id, created_at', [id, req.user.id, text]);
-    res.json({ id: result.rows[0].id, userId: req.user.id, userName: req.user.name, text, createdAt: new Date(result.rows[0].created_at).getTime() });
+    
+    const result = await pool.query(
+      'INSERT INTO comments (problem_id, user_id, text) VALUES ($1, $2, $3) RETURNING id, created_at',
+      [id, req.user.id, text]
+    );
+    
+    res.json({
+      id: result.rows[0].id,
+      userId: req.user.id,
+      userName: req.user.name,
+      text,
+      createdAt: new Date(result.rows[0].created_at).getTime()
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Failed to post comment" });
   }
 });
 
+// --- Admin: Reset All Votes ---
 app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
+  
   const client = await pool.connect();
   try {
       await client.query('BEGIN');
@@ -696,20 +888,42 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   }
 });
 
+// --- Routes: Quotas ---
+
 app.get('/api/quotas', authenticateToken, async (req, res) => {
   const result = await pool.query('SELECT id, name, target_count as target, vote_target, instructions, due_date FROM quotas');
-  const quotas = result.rows.map(q => ({ id: q.id, name: q.name, target: q.target, voteTarget: q.vote_target || 3, instructions: q.instructions, dueDate: q.due_date ? new Date(q.due_date).getTime() : null }));
+  const quotas = result.rows.map(q => ({
+      id: q.id,
+      name: q.name,
+      target: q.target,
+      voteTarget: q.vote_target || 3,
+      instructions: q.instructions,
+      dueDate: q.due_date ? new Date(q.due_date).getTime() : null
+  }));
   res.json(quotas);
 });
 
 app.post('/api/quotas', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  
   const { name, target, voteTarget, instructions, dueDate } = req.body;
+  
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
-    const result = await pool.query('INSERT INTO quotas (name, target_count, vote_target, instructions, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *', [name, target, voteTarget || 3, instructions, dateVal]);
+    const vt = voteTarget || 3;
+    const result = await pool.query(
+      'INSERT INTO quotas (name, target_count, vote_target, instructions, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, target, vt, instructions, dateVal]
+    );
     const row = result.rows[0];
-    res.json({ id: row.id, name: row.name, target: row.target_count, voteTarget: row.vote_target, instructions: row.instructions, dueDate: row.due_date ? new Date(row.due_date).getTime() : null });
+    res.json({
+        id: row.id,
+        name: row.name,
+        target: row.target_count,
+        voteTarget: row.vote_target,
+        instructions: row.instructions,
+        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Creation failed' });
@@ -722,19 +936,43 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
   const { name, target, voteTarget, instructions, dueDate } = req.body;
   try {
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
-    const result = await pool.query('UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5 WHERE id = $6 RETURNING *', [name, target, voteTarget || 3, instructions, dateVal, id]);
+    const vt = voteTarget || 3;
+    const result = await pool.query(
+      'UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5 WHERE id = $6 RETURNING *',
+      [name, target, vt, instructions, dateVal, id]
+    );
     const row = result.rows[0];
-    res.json({ id: row.id, name: row.name, target: row.target_count, voteTarget: row.vote_target, instructions: row.instructions, dueDate: row.due_date ? new Date(row.due_date).getTime() : null });
+    res.json({
+        id: row.id,
+        name: row.name,
+        target: row.target_count,
+        voteTarget: row.vote_target,
+        instructions: row.instructions,
+        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
   }
 });
 
+// --- Routes: Rounds ---
+
 app.get('/api/rounds', authenticateToken, async (req, res) => {
     try {
-        const result = await pool.query(`SELECT r.*, (SELECT COUNT(*)::int FROM problem_rounds WHERE round_id = r.id) as problem_count FROM rounds r ORDER BY r.created_at DESC`);
-        res.json(result.rows.map(r => ({ id: r.id, name: r.name, tag: r.tag, description: r.description, createdAt: new Date(r.created_at).getTime(), problemCount: parseInt(r.problem_count || '0') })));
+        const result = await pool.query(`
+            SELECT r.*, (SELECT COUNT(*)::int FROM problem_rounds WHERE round_id = r.id) as problem_count 
+            FROM rounds r 
+            ORDER BY r.created_at DESC
+        `);
+        res.json(result.rows.map(r => ({
+            id: r.id,
+            name: r.name,
+            tag: r.tag,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime(),
+            problemCount: parseInt(r.problem_count || '0')
+        })));
     } catch (e) {
         console.error(e);
         res.status(500).json({error: "Fetch rounds failed"});
@@ -747,36 +985,61 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('INSERT INTO rounds (name, description, tag) VALUES ($1, $2, $3) RETURNING *', [name, description, tag]);
         const r = result.rows[0];
-        res.json({ id: r.id, name: r.name, tag: r.tag, description: r.description, createdAt: new Date(r.created_at).getTime(), problemCount: 0 });
+        res.json({
+            id: r.id,
+            name: r.name,
+            tag: r.tag,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime(),
+            problemCount: 0
+        });
     } catch (e) {
         console.error(e);
         res.status(500).json({error: "Create round failed"});
     }
 });
 
+// Update Round
 app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
     const { name, description, tag } = req.body;
     try {
-        const result = await pool.query('UPDATE rounds SET name = $1, description = $2, tag = $3 WHERE id = $4 RETURNING *', [name, description, tag, id]);
+        const result = await pool.query(
+            'UPDATE rounds SET name = $1, description = $2, tag = $3 WHERE id = $4 RETURNING *',
+            [name, description, tag, id]
+        );
         if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
         const r = result.rows[0];
-        res.json({ id: r.id, name: r.name, tag: r.tag, description: r.description, createdAt: new Date(r.created_at).getTime() });
+        // We need to fetch count again or just return previous
+        res.json({
+            id: r.id,
+            name: r.name,
+            tag: r.tag,
+            description: r.description,
+            createdAt: new Date(r.created_at).getTime(),
+            // problemCount is missing here but usually update doesn't need it immediately or can refetch
+        });
     } catch (e) {
         console.error(e);
         res.status(500).json({error: "Update round failed"});
     }
 });
 
+// Delete Round
 app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        // Unassign problems first from main table (legacy)
         await client.query('UPDATE problems SET round_id = NULL, status = \'approved\' WHERE round_id = $1', [id]);
+        
+        // Delete from join table
         await client.query('DELETE FROM problem_rounds WHERE round_id = $1', [id]);
+        
+        // Delete round
         await client.query('DELETE FROM rounds WHERE id = $1', [id]);
         await client.query('COMMIT');
         res.json({ success: true });
@@ -789,10 +1052,12 @@ app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// All other GET requests not handled before will return the React app
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// Initialize DB then Start Server
 initDB().then(() => {
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
