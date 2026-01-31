@@ -200,7 +200,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                 <div className="mt-3">
                      <MathText 
                         text={problem.statement} 
-                        className={`font-serif text-slate-800 text-sm leading-relaxed whitespace-pre-wrap ${!isExpanded && 'line-clamp-2 text-slate-600'}`} 
+                        className= "font-serif text-slate-800 text-sm leading-relaxed whitespace-pre-wrap" 
                     />
                 </div>
             </div>

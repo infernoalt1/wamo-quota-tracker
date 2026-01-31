@@ -1396,44 +1396,45 @@ tex += `\\end{longtable}
       };
 
       return (
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`bg-white rounded-xl border-l-4 ${hasChanges ? 'border-l-indigo-500' : 'border-l-amber-400'} border-y border-r border-slate-200 p-5 shadow-sm hover:shadow-md transition-all`}
-          >
-              <div className="flex flex-col md:flex-row justify-between items-start gap-3">
-                  <div className="flex-1 w-full">
-                      <input 
-                          className="font-bold text-slate-900 text-base w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none transition-colors placeholder-slate-400 py-1"
-                          value={formData.title}
-                          onChange={e => setFormData({...formData, title: e.target.value})}
-                      />
-                      <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                          <span>ID: {p.authorId.substring(0,6)}...</span>
-                          <span className="text-slate-300">•</span>
-                          <span>{new Date(p.createdAt).toLocaleDateString()}</span>
-                      </div>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-100 self-end md:self-auto">
-                       <div className="flex flex-col items-center">
-                           <span className="text-[8px] font-bold text-slate-400 uppercase">Diff</span>
-                           <input 
-                              type="number" 
-                              step="0.5"
-                              className="w-10 text-xs p-1 border border-slate-200 rounded bg-white text-center font-bold text-slate-800 outline-none focus:border-indigo-500" 
-                              value={formData.difficulty} 
-                              onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
-                           />
-                       </div>
-                       <Button size="sm" onClick={approve} className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200 h-8 text-xs px-3 shadow-sm">
-                           Approve
-                       </Button>
-                       <button onClick={() => setIsExpanded(!isExpanded)} className="text-slate-400 hover:text-slate-600 p-1">
-                           {isExpanded ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
-                       </button>
-                  </div>
-              </div>
+           <motion.div 
+          className={`bg-white rounded-xl border-l-4 ${hasChanges ? 'border-l-indigo-500' : 'border-l-amber-400'} border-y border-r border-slate-200 p-5 shadow-sm hover:shadow-md transition-all`}
+        >
+            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                <div className="flex-1 w-full">
+                    <input 
+                        className="font-bold text-slate-900 text-lg w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 outline-none transition-colors py-1"
+                        value={formData.title}
+                        onChange={e => setFormData({...formData, title: e.target.value})}
+                    />
+                    {/* FULL STATEMENT - No more line-clamp */}
+                    <div className="mt-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm font-serif text-slate-700 leading-relaxed shadow-inner">
+                        <MathText text={formData.statement} />
+                        
+                        {/* IMAGES RESTORED IN WAITLIST */}
+                        {p.imageData && (
+                            <div className="mt-4 rounded-lg overflow-hidden border border-slate-200 bg-white inline-block">
+                                <img src={p.imageData} alt="Attachment" className="max-h-64 w-auto object-contain" />
+                            </div>
+                        )}
+                    </div>
+                </div>
 
+                <div className="flex flex-col items-end gap-3 shrink-0">
+                     {/* WIDER DIFFICULTY BOX */}
+                     <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 w-32 flex flex-col items-center">
+                         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Difficulty</span>
+                         <input 
+                            type="number" step="0.5"
+                            className="w-full text-base p-1 bg-white border border-slate-200 rounded-lg text-center font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500" 
+                            value={formData.difficulty} 
+                            onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
+                         />
+                     </div>
+                     <Button size="sm" onClick={approve} className="w-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200 shadow-sm">
+                         Approve
+                     </Button>
+                </div>
+            </div>
               <AnimatePresence>
               {isExpanded && (
                   <motion.div 
@@ -1684,7 +1685,7 @@ tex += `\\end{longtable}
     <div className="min-h-screen bg-[#F8F9FA] text-slate-900 flex flex-col md:flex-row font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
       
       {/* Sidebar Navigation - Compact */}
-      <aside className="w-full md:w-64 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-30 shadow-sm">
+      <aside className="fixed md:sticky top-0 left-0 w-full md:w-64 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-30 shadow-sm">
         <div className="p-5 border-b border-slate-100 flex items-center gap-3">
             <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white shadow-sm">
                 <BookOpen className="w-4 h-4" strokeWidth={2.5} />
@@ -1751,7 +1752,7 @@ tex += `\\end{longtable}
           )}
         </nav>
 
-        <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+        <div className="mt-auto p-3 border-t border-slate-100 bg-slate-50/50">
           <div className="flex items-center gap-3 mb-3 px-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : currentUser.role === 'guest' ? 'bg-amber-500' : 'bg-slate-700'}`}>
                {isGuest ? <UserIcon className="w-4 h-4" /> : currentUser.name.charAt(0)}
@@ -2656,7 +2657,19 @@ tex += `\\end{longtable}
                                 return (
                                     <tr key={u.id} className="hover:bg-slate-50/50">
                                         <td className="px-4 py-3 font-medium text-slate-900">
-                                            {isEdit ? <input className="w-full p-1 border rounded text-xs" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} /> : (
+                                            {isEdit ? ( 
+                                                <div className="flex flex-col gap-1">
+                                                    <input className="w-full p-1 border rounded text-xs" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} />
+                                                    <select 
+                                                        className="w-full p-1 border rounded text-[10px] bg-slate-50 font-bold text-indigo-600"
+                                                        value={editUserForm.role}
+                                                        onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
+                                                    >
+                                                        <option value="writer">Writer</option>
+                                                        <option value="director">Director</option>
+                                                    </select>
+                                                </div>
+                                                ) : (
                                                 <div className="flex items-center gap-1.5">
                                                     {u.name}
                                                     {u.role === 'admin' && <Crown className="w-3 h-3 text-purple-500"/>}
@@ -2673,28 +2686,17 @@ tex += `\\end{longtable}
                                         <td className="px-4 py-3">
                                             {isEdit ? <input type="number" className="w-12 p-1 border rounded text-xs" value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target} onChange={e => updateUserTarget(u.id, parseInt(e.target.value))} /> : <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded">{uTarget}</span>}
                                         </td>
-                                        <td className="px-4 py-3">
-                                            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex">
-                                                <div className="bg-indigo-500 h-full" style={{ width: `${Math.min((uCount / uTarget) * 100, 100)}%` }}></div>
+                                        <td className="px-4 py-3 min-w-[160px]">
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Writing</span> <span>{u.submittedCount}/{uTarget}</span></div>
+                                                    <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-indigo-500 h-full shadow-[0_0_8px_rgba(99,102,241,0.5)]" style={{ width: `${Math.min((u.submittedCount / uTarget) * 100, 100)}%` }}></div></div>
+                                                </div>
+                                                <div>
+                                                    <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Voting</span> <span>{u.voteCount}/{voteTarget}</span></div>
+                                                    <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-emerald-500 h-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${Math.min(((u.voteCount || 0) / voteTarget) * 100, 100)}%` }}></div></div>
+                                                </div>
                                             </div>
-                                            <div className="text-[10px] text-slate-400 mt-0.5 text-right">{uCount} / {uTarget}</div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            {isEdit ? (
-                                                <div className="flex gap-1">
-                                                    <button onClick={() => saveUser(u.id)} className="text-emerald-600 hover:bg-emerald-50 p-1 rounded"><Save className="w-3.5 h-3.5"/></button>
-                                                    <button onClick={() => setEditingUserId(null)} className="text-slate-400 hover:bg-slate-50 p-1 rounded"><X className="w-3.5 h-3.5"/></button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex gap-1">
-                                                    {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin')) && (
-                                                        <button onClick={() => startEditUser(u)} className="text-slate-400 hover:text-indigo-600 p-1 rounded hover:bg-slate-100"><Pencil className="w-3.5 h-3.5"/></button>
-                                                    )}
-                                                    {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role === 'writer')) && (
-                                                        <button onClick={() => deleteUser(u.id)} className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-slate-100"><Trash2 className="w-3.5 h-3.5"/></button>
-                                                    )}
-                                                </div>
-                                            )}
                                         </td>
                                     </tr>
                                 )
