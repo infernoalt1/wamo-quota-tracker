@@ -1547,198 +1547,173 @@ tex += `\\end{longtable}
 
   if (!currentUser) {
     return (
-      <div className="relative min-h-screen w-full bg-[#F2F4F8] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
+      <div className="relative min-h-screen w-full bg-[#Eef0f5] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
         
-        {/* --- LAYER 1: AMBIENT MESH GRADIENTS --- */}
+        {/* --- LAYER 1: AMBIENT OPTICAL BACKGROUND --- */}
         <div className="absolute inset-0 z-0 overflow-hidden">
+           {/* Deep atmospheric glow */}
+          <motion.div 
+            animate={{ scale: [1, 1.1, 1], opacity: [0.4, 0.6, 0.4] }}
+            transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-indigo-50/50 to-[#Eef0f5]"
+          />
+          
+          {/* Moving Orbs - Sharper/Vivid for Contrast */}
           <motion.div 
             animate={{ 
-              scale: [1, 1.2, 1],
-              rotate: [0, 10, -10, 0],
-              x: [0, 50, -50, 0]
+              x: [0, 40, -40, 0],
+              y: [0, -30, 30, 0],
+              rotate: [0, 5, -5, 0]
             }}
             transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className="absolute -top-[20%] -left-[10%] w-[80vw] h-[80vw] bg-purple-200/40 rounded-full blur-[120px] mix-blend-multiply"
+            className="absolute top-[10%] left-[20%] w-[40vw] h-[40vw] bg-purple-300/30 rounded-full blur-[80px] mix-blend-multiply"
           />
           <motion.div 
             animate={{ 
-              scale: [1.2, 1, 1.2],
-              x: [0, -50, 50, 0],
-              y: [0, 30, -30, 0]
+              x: [0, -40, 40, 0],
+              y: [0, 40, -40, 0]
             }}
             transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-            className="absolute top-[20%] -right-[10%] w-[60vw] h-[60vw] bg-indigo-200/40 rounded-full blur-[100px] mix-blend-multiply"
+            className="absolute bottom-[10%] right-[10%] w-[40vw] h-[40vw] bg-blue-300/30 rounded-full blur-[80px] mix-blend-multiply"
           />
-          <div className="absolute inset-0 bg-white/40 backdrop-blur-[100px]" />
         </div>
 
-        {/* --- LAYER 2: ARCHITECTURAL TYPOGRAPHY --- */}
+        {/* --- LAYER 2: STRUCTURAL TYPOGRAPHY --- */}
         <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none select-none overflow-hidden">
-          <motion.h1 
-            initial={{ opacity: 0, y: 100 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 1.5, ease: "easeOut" }}
-            className="text-[25vw] font-black leading-none text-white tracking-tighter mix-blend-overlay opacity-60"
-            style={{ textShadow: '0 20px 60px rgba(100,100,255,0.1)' }}
-          >
+          <h1 className="text-[25vw] font-black leading-none text-white tracking-tighter opacity-40 mix-blend-overlay blur-[2px]"
+              style={{ textShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
             WAMO
-          </motion.h1>
+          </h1>
         </div>
 
-        {/* --- LAYER 3: THE "NEURO-LINK" CABLE (SVG ANIMATION) --- */}
-        <svg className="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible">
+        {/* --- LAYER 3: KINETIC CABLE --- */}
+        <svg className="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible opacity-60">
           <motion.path
             d="M -100 600 C 400 600, 400 200, 800 200 S 1400 400, 2000 100"
             fill="none"
             stroke="url(#gradient-line)"
-            strokeWidth="12"
+            strokeWidth="8"
             strokeLinecap="round"
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
             transition={{ duration: 2.5, ease: "easeInOut" }}
           />
-          <motion.path
-            d="M -100 600 C 400 600, 400 200, 800 200 S 1400 400, 2000 100"
-            fill="none"
-            stroke="rgba(99, 102, 241, 0.2)"
-            strokeWidth="25"
-            className="blur-xl"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.5, 0.3] }}
-            transition={{ duration: 3, delay: 1 }}
-          />
           <defs>
             <linearGradient id="gradient-line" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#C084FC" />
-              <stop offset="50%" stopColor="#6366F1" />
-              <stop offset="100%" stopColor="#3B82F6" />
+              <stop offset="0%" stopColor="#A78BFA" />
+              <stop offset="100%" stopColor="#60A5FA" />
             </linearGradient>
           </defs>
         </svg>
 
-        {/* --- LAYER 4: FLOATING OBJECTS --- */}
-        <motion.div
-          animate={{ y: [0, -20, 0], rotate: [0, 5, 0] }}
-          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute left-[15%] top-[20%] z-20 hidden lg:block"
-        >
-          <div className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-2xl border border-white/40 shadow-xl flex items-center justify-center transform -rotate-12">
-              <span className="text-4xl text-indigo-600/50">∑</span>
-          </div>
-        </motion.div>
-        
-        <motion.div
-          animate={{ y: [0, 30, 0], rotate: [0, -10, 0] }}
-          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className="absolute right-[15%] bottom-[20%] z-20 hidden lg:block"
-        >
-          <div className="w-32 h-32 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full shadow-2xl flex items-center justify-center opacity-90">
-               <Command className="text-white w-12 h-12" />
-          </div>
-        </motion.div>
-
-        {/* --- LAYER 5: THE MAIN GLASS INTERFACE --- */}
-        <div className="relative z-30 w-full max-w-md px-6">
+        {/* --- LAYER 4: SPATIAL INTERFACE (The Card) --- */}
+        <div className="relative z-30 w-full max-w-[420px] px-6">
           <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            initial={{ opacity: 0, y: 40, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.8, ease: "circOut" }}
-            className="relative"
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }} // "Apple-like" easing
+            className="relative group perspective-1000"
           >
-            {/* Frosted Glass Card */}
-            <div className="relative bg-white/60 backdrop-blur-2xl rounded-[32px] p-8 md:p-12 shadow-[0_40px_100px_-15px_rgba(0,0,0,0.1)] border border-white/50 overflow-hidden">
+            {/* The "Optical Glass" Container */}
+            <div className="relative bg-white/40 backdrop-blur-[50px] rounded-[32px] p-10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.12)] border border-white/60 overflow-hidden ring-1 ring-white/40">
               
-              {/* Iridescent Top Glow */}
-              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 opacity-50" />
+              {/* Lighting: White Gradient Sheen (Top-Left Reflection) */}
+              <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-white/80 via-white/10 to-transparent opacity-70 z-0" />
               
-              <div className="mb-10 text-center">
-                <motion.div 
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
-                  className="w-16 h-16 bg-white rounded-2xl mx-auto shadow-lg flex items-center justify-center mb-6 relative group"
-                >
-                  <div className="absolute inset-0 bg-indigo-500/20 blur-lg rounded-2xl group-hover:blur-xl transition-all" />
-                  <Sparkles className="text-indigo-600 relative z-10 w-8 h-8 fill-indigo-100" />
-                </motion.div>
-                
-                <h2 className="text-3xl font-black text-slate-800 tracking-tight mb-2">
-                  Welcome Back
-                </h2>
-                <p className="text-slate-500 font-medium">
-                  Enter your credentials to access the laboratory.
-                </p>
-              </div>
+              {/* Noise Texture Overlay (Subtle Grain) */}
+              <div className="absolute inset-0 opacity-[0.03] z-0 pointer-events-none" 
+                   style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }} 
+              />
 
-              <form onSubmit={handleLogin} className="space-y-5">
-                
-                {/* Name Input */}
-                <div className="space-y-2 group">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Full Name</label>
-                  <div className="relative">
-                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
-                    <input
-                      type="text"
-                      value={loginNameInput}
-                      onChange={(e) => setLoginNameInput(e.target.value)}
-                      placeholder="Alice Noether"
-                      className="w-full bg-white/50 border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-slate-800 font-semibold placeholder:text-slate-300 outline-none focus:border-indigo-500/50 focus:bg-white focus:shadow-[0_0_20px_rgba(99,102,241,0.1)] transition-all duration-300"
-                    />
-                  </div>
-                </div>
-
-                {/* Password Input */}
-                <div className="space-y-2 group">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Access Key</label>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 group-focus-within:text-indigo-500 transition-colors" />
-                    <input
-                      type="password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-white/50 border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-slate-800 font-semibold placeholder:text-slate-300 outline-none focus:border-indigo-500/50 focus:bg-white focus:shadow-[0_0_20px_rgba(99,102,241,0.1)] transition-all duration-300"
-                    />
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="submit"
-                  disabled={isLoggingIn}
-                  className="w-full mt-4 bg-[#0A0A0A] text-white h-14 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 shadow-xl shadow-slate-900/10 relative overflow-hidden group"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  <span className="relative z-10 flex items-center gap-2">
-                    {isLoggingIn ? 'Authenticating...' : 'Enter WAMO'}
-                    {!isLoggingIn && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
-                  </span>
-                </motion.button>
-                
-                {loginError && (
+              <div className="relative z-10">
+                <div className="mb-8 text-center">
                   <motion.div 
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-xs font-bold text-center"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.2 }}
+                    className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-blue-600 rounded-2xl mx-auto shadow-lg shadow-indigo-500/30 flex items-center justify-center mb-5"
                   >
-                    {loginError}
+                    <Sparkles className="text-white w-7 h-7" strokeWidth={2} />
                   </motion.div>
-                )}
-
-                <div className="text-center pt-2">
-                   <button type="button" onClick={handleGuestLogin} className="text-xs font-bold text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
-                       Enter as Guest
-                   </button>
+                  
+                  <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
+                    Welcome Back
+                  </h2>
+                  <p className="text-slate-600 text-sm font-medium leading-relaxed">
+                    Identify yourself to access the <br/> WAMO problem database.
+                  </p>
                 </div>
-              </form>
+
+                <form onSubmit={handleLogin} className="space-y-5">
+                  
+                  {/* Etched Name Input */}
+                  <div className="space-y-1.5 group">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Identity</label>
+                    <div className="relative">
+                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 group-focus-within:text-indigo-600 transition-colors z-20" />
+                      <input
+                        type="text"
+                        value={loginNameInput}
+                        onChange={(e) => setLoginNameInput(e.target.value)}
+                        placeholder="Full Name"
+                        className="w-full bg-slate-100/50 backdrop-blur-sm border border-white/20 rounded-xl py-3.5 pl-11 pr-4 text-slate-900 text-sm font-semibold placeholder:text-slate-400 outline-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.03)] focus:bg-white focus:shadow-[0_0_0_2px_rgba(99,102,241,0.2),inset_0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-300 relative z-10"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Etched Password Input */}
+                  <div className="space-y-1.5 group">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 group-focus-within:text-indigo-600 transition-colors z-20" />
+                      <input
+                        type="password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-slate-100/50 backdrop-blur-sm border border-white/20 rounded-xl py-3.5 pl-11 pr-4 text-slate-900 text-sm font-semibold placeholder:text-slate-400 outline-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.03)] focus:bg-white focus:shadow-[0_0_0_2px_rgba(99,102,241,0.2),inset_0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-300 relative z-10"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3D Pill Button */}
+                  <motion.button
+                    whileHover={{ scale: 1.02, y: -1 }}
+                    whileTap={{ scale: 0.98, y: 0 }}
+                    type="submit"
+                    disabled={isLoggingIn}
+                    className="w-full mt-6 bg-gradient-to-r from-indigo-600 to-blue-600 text-white h-12 rounded-full font-bold text-sm tracking-wide flex items-center justify-center gap-2 shadow-[0_10px_20px_-5px_rgba(79,70,229,0.35)] hover:shadow-[0_15px_25px_-5px_rgba(79,70,229,0.45)] transition-all duration-300 relative overflow-hidden group"
+                  >
+                    <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <span className="relative z-10 flex items-center gap-2">
+                      {isLoggingIn ? 'Authenticating...' : 'Enter System'}
+                      {!isLoggingIn && <ArrowRight className="w-4 h-4" />}
+                    </span>
+                  </motion.button>
+                  
+                  {loginError && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="text-red-500 text-xs font-bold text-center pt-2"
+                    >
+                      {loginError}
+                    </motion.div>
+                  )}
+
+                  <div className="text-center pt-1">
+                     <button type="button" onClick={handleGuestLogin} className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest hover:underline decoration-indigo-200 underline-offset-4">
+                         Enter as Guest
+                     </button>
+                  </div>
+                </form>
+              </div>
             </div>
             
-            {/* Footer Text */}
-            <div className="mt-8 text-center">
-               <p className="text-slate-400 text-xs font-medium tracking-wide">
-                  WAMO TRACKER v3.0 <span className="mx-2">•</span> SECURE CONNECTION
+            {/* Bottom Technical Label */}
+            <div className="mt-6 text-center opacity-60">
+               <p className="text-slate-500 text-[10px] font-mono tracking-widest uppercase">
+                  Secure Node • v3.0.1
                </p>
             </div>
           </motion.div>
