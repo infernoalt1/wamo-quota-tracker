@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { parseBulkLatex, isValidStatus } from './utils.ts';
 
 dotenv.config();
 
@@ -648,69 +649,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
         const { text, defaultTopics, defaultDifficulty } = req.body;
         if (!text) return res.status(400).json({ error: "No text provided" });
 
-        const problems = [];
-        let currentProblem = null;
-        
-        // Strategy 1: Look for explicit blocks
-        const blockRegex = /\\begin\{problem\}([\s\S]*?)\\end\{problem\}/g;
-        let match;
-        
-        // Helper to extract metadata
-        const extractMetadata = (content) => {
-            let cleanContent = content;
-            let solution = "";
-            let answer = "";
-            
-            const solMatch = content.match(/\\begin\{solution\}([\s\S]*?)\\end\{solution\}/);
-            if (solMatch) {
-                solution = solMatch[1].trim();
-                cleanContent = cleanContent.replace(solMatch[0], '');
-            }
-            
-            const ansMatch = content.match(/\\answer\{(.*?)\}/);
-            if (ansMatch) {
-                answer = ansMatch[1].trim();
-                cleanContent = cleanContent.replace(ansMatch[0], '');
-            }
-            
-            return { statement: cleanContent.trim(), solution, answer };
-        };
-
-        while ((match = blockRegex.exec(text)) !== null) {
-            const raw = match[1];
-            const { statement, solution, answer } = extractMetadata(raw);
-            
-            problems.push({
-                title: `Imported Problem ${problems.length + 1}`,
-                statement: statement,
-                solution: solution,
-                answerKey: answer,
-                topics: defaultTopics || [],
-                difficulty: defaultDifficulty || 3
-            });
-        }
-
-        // Strategy 2: If no blocks, look for \item
-        if (problems.length === 0) {
-            const items = text.split(/\\item\s/);
-            if (items.length > 1) {
-                items.shift(); // remove preamble
-                items.forEach((item, idx) => {
-                    const { statement, solution, answer } = extractMetadata(item);
-                    if (statement.length > 5) {
-                         problems.push({
-                            title: `Imported Problem ${idx + 1}`,
-                            statement: statement,
-                            solution: solution,
-                            answerKey: answer,
-                            topics: defaultTopics || [],
-                            difficulty: defaultDifficulty || 3
-                        });
-                    }
-                });
-            }
-        }
-
+        const problems = parseBulkLatex(text, defaultTopics, defaultDifficulty);
         res.json({ problems });
     } catch (e) {
         console.error(e);
@@ -725,7 +664,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!['pending', 'approved', 'accepted'].includes(status)) {
+  if (!isValidStatus(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
 
