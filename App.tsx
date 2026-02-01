@@ -1622,7 +1622,7 @@ tex += `\\end{longtable}
                   WAMO<span className="text-violet-600">.OS</span>
                 </h2>
                 <p className="text-slate-500 font-medium text-sm tracking-wide mt-1">
-                  SECURE ACCESS TERMINAL
+                  PROBLEM GATEWAY
                 </p>
               </motion.div>
 
@@ -1649,8 +1649,8 @@ tex += `\\end{longtable}
                             type="text"
                             value={loginNameInput}
                             onChange={(e) => setLoginNameInput(e.target.value)}
-                            placeholder="OPERATOR ID"
-                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-wide uppercase"
+                            placeholder="FULL NAME"
+                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-wide"
                          />
                       </motion.div>
                    </div>
@@ -1676,7 +1676,7 @@ tex += `\\end{longtable}
                             type="password"
                             value={loginPassword}
                             onChange={(e) => setLoginPassword(e.target.value)}
-                            placeholder="ACCESS KEY"
+                            placeholder="PASSWORD"
                             className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-widest"
                          />
                       </motion.div>
@@ -1726,7 +1726,7 @@ tex += `\\end{longtable}
 
                 <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="text-center">
                    <button type="button" onClick={handleGuestLogin} className="text-xs font-bold text-slate-400 hover:text-violet-600 transition-colors uppercase tracking-widest hover:underline underline-offset-4">
-                       Guest Observation Mode
+                       Continue as Guest
                    </button>
                 </motion.div>
               </form>
