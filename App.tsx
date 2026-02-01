@@ -1547,177 +1547,213 @@ tex += `\\end{longtable}
 
   if (!currentUser) {
     return (
-      <div className="relative min-h-screen w-full bg-[#Eef0f5] flex items-center justify-center overflow-hidden font-sans selection:bg-indigo-500/30">
+      <div className="relative min-h-screen w-full bg-[#f0f2f5] flex items-center justify-center overflow-hidden font-sans">
         
-        {/* --- LAYER 1: AMBIENT OPTICAL BACKGROUND --- */}
-        <div className="absolute inset-0 z-0 overflow-hidden">
-           {/* Deep atmospheric glow */}
-          <motion.div 
-            animate={{ scale: [1, 1.1, 1], opacity: [0.4, 0.6, 0.4] }}
-            transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-indigo-50/50 to-[#Eef0f5]"
-          />
-          
-          {/* Moving Orbs - Sharper/Vivid for Contrast */}
-          <motion.div 
-            animate={{ 
-              x: [0, 40, -40, 0],
-              y: [0, -30, 30, 0],
-              rotate: [0, 5, -5, 0]
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className="absolute top-[10%] left-[20%] w-[40vw] h-[40vw] bg-purple-300/30 rounded-full blur-[80px] mix-blend-multiply"
-          />
-          <motion.div 
-            animate={{ 
-              x: [0, -40, 40, 0],
-              y: [0, 40, -40, 0]
-            }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-            className="absolute bottom-[10%] right-[10%] w-[40vw] h-[40vw] bg-blue-300/30 rounded-full blur-[80px] mix-blend-multiply"
-          />
+        {/* --- 1. LIVING BACKGROUND ORBS --- */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+           {/* Orb 1: Violet Pulse */}
+           <motion.div 
+             animate={{ 
+               x: [0, 100, -50, 0], 
+               y: [0, -50, 50, 0],
+               scale: [1, 1.2, 0.9, 1]
+             }}
+             transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+             className="absolute top-0 left-0 w-[50vw] h-[50vw] bg-violet-300/40 rounded-full blur-[100px] mix-blend-multiply"
+           />
+           {/* Orb 2: Cyan Drift */}
+           <motion.div 
+             animate={{ 
+               x: [0, -70, 30, 0], 
+               y: [0, 80, -20, 0],
+               scale: [1, 1.1, 1]
+             }}
+             transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
+             className="absolute bottom-0 right-0 w-[45vw] h-[45vw] bg-cyan-300/40 rounded-full blur-[100px] mix-blend-multiply"
+           />
+           {/* Orb 3: Pink Ambient */}
+           <motion.div 
+             animate={{ 
+               x: [0, 40, -40, 0], 
+               y: [0, -40, 40, 0],
+             }}
+             transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+             className="absolute top-[40%] left-[30%] w-[30vw] h-[30vw] bg-pink-300/30 rounded-full blur-[80px] mix-blend-multiply"
+           />
         </div>
 
-        {/* --- LAYER 2: STRUCTURAL TYPOGRAPHY --- */}
-        <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none select-none overflow-hidden">
-          <h1 className="text-[25vw] font-black leading-none text-white tracking-tighter opacity-40 mix-blend-overlay blur-[2px]"
-              style={{ textShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
-            WAMO
-          </h1>
-        </div>
-
-        {/* --- LAYER 3: KINETIC CABLE --- */}
-        <svg className="absolute inset-0 w-full h-full z-10 pointer-events-none overflow-visible opacity-60">
-          <motion.path
-            d="M -100 600 C 400 600, 400 200, 800 200 S 1400 400, 2000 100"
-            fill="none"
-            stroke="url(#gradient-line)"
-            strokeWidth="8"
-            strokeLinecap="round"
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 2.5, ease: "easeInOut" }}
-          />
-          <defs>
-            <linearGradient id="gradient-line" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#A78BFA" />
-              <stop offset="100%" stopColor="#60A5FA" />
-            </linearGradient>
-          </defs>
-        </svg>
-
-        {/* --- LAYER 4: SPATIAL INTERFACE (The Card) --- */}
-        <div className="relative z-30 w-full max-w-[420px] px-6">
+        {/* --- 2. LEVITATING CONTAINER --- */}
+        <motion.div 
+          animate={{ y: [0, -10, 0] }}
+          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          className="relative z-10 w-full max-w-[440px] px-6"
+        >
+          {/* --- 3. THE HYPER-GLASS CARD --- */}
           <motion.div
-            initial={{ opacity: 0, y: 40, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }} // "Apple-like" easing
-            className="relative group perspective-1000"
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: { opacity: 0, y: 50, scale: 0.9 },
+              visible: { 
+                opacity: 1, y: 0, scale: 1,
+                transition: { duration: 0.8, ease: "easeOut", staggerChildren: 0.15, delayChildren: 0.4 }
+              }
+            }}
+            className="relative bg-white/40 backdrop-blur-2xl rounded-3xl p-10 overflow-hidden border border-white/60 shadow-[0_0_40px_-10px_rgba(124,58,237,0.3)] ring-1 ring-white/50"
           >
-            {/* The "Optical Glass" Container */}
-            <div className="relative bg-white/40 backdrop-blur-[50px] rounded-[32px] p-10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.12)] border border-white/60 overflow-hidden ring-1 ring-white/40">
+            
+            {/* SHIMMER EFFECT: Diagonal sweep */}
+            <motion.div
+              initial={{ x: "-150%" }}
+              animate={{ x: "150%" }}
+              transition={{ repeat: Infinity, duration: 4, ease: "easeInOut", repeatDelay: 3 }}
+              className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/40 to-transparent -skew-x-12 pointer-events-none z-0"
+            />
+            
+            {/* Content Container (z-index above shimmer) */}
+            <div className="relative z-10">
               
-              {/* Lighting: White Gradient Sheen (Top-Left Reflection) */}
-              <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-white/80 via-white/10 to-transparent opacity-70 z-0" />
-              
-              {/* Noise Texture Overlay (Subtle Grain) */}
-              <div className="absolute inset-0 opacity-[0.03] z-0 pointer-events-none" 
-                   style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }} 
-              />
-
-              <div className="relative z-10">
-                <div className="mb-8 text-center">
-                  <motion.div 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.2 }}
-                    className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-blue-600 rounded-2xl mx-auto shadow-lg shadow-indigo-500/30 flex items-center justify-center mb-5"
-                  >
-                    <Sparkles className="text-white w-7 h-7" strokeWidth={2} />
-                  </motion.div>
-                  
-                  <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
-                    Welcome Back
-                  </h2>
-                  <p className="text-slate-600 text-sm font-medium leading-relaxed">
-                    Identify yourself to access the <br/> WAMO problem database.
-                  </p>
+              {/* LOGO DROP IN */}
+              <motion.div variants={{ hidden: { y: -50, opacity: 0 }, visible: { y: 0, opacity: 1 } }} className="text-center mb-8">
+                <div className="w-16 h-16 bg-gradient-to-br from-violet-500 to-fuchsia-500 rounded-2xl mx-auto shadow-lg shadow-violet-500/40 flex items-center justify-center mb-4 transform rotate-3">
+                  <Sparkles className="text-white w-8 h-8" />
                 </div>
+                <h2 className="text-3xl font-black text-slate-800 tracking-tighter">
+                  WAMO<span className="text-violet-600">.OS</span>
+                </h2>
+                <p className="text-slate-500 font-medium text-sm tracking-wide mt-1">
+                  SECURE ACCESS TERMINAL
+                </p>
+              </motion.div>
 
-                <form onSubmit={handleLogin} className="space-y-5">
-                  
-                  {/* Etched Name Input */}
-                  <div className="space-y-1.5 group">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Identity</label>
-                    <div className="relative">
-                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 group-focus-within:text-indigo-600 transition-colors z-20" />
-                      <input
-                        type="text"
-                        value={loginNameInput}
-                        onChange={(e) => setLoginNameInput(e.target.value)}
-                        placeholder="Full Name"
-                        className="w-full bg-slate-100/50 backdrop-blur-sm border border-white/20 rounded-xl py-3.5 pl-11 pr-4 text-slate-900 text-sm font-semibold placeholder:text-slate-400 outline-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.03)] focus:bg-white focus:shadow-[0_0_0_2px_rgba(99,102,241,0.2),inset_0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-300 relative z-10"
+              <form onSubmit={handleLogin} className="space-y-6">
+                
+                {/* INPUT 1: NAME */}
+                <motion.div variants={{ hidden: { x: -20, opacity: 0 }, visible: { x: 0, opacity: 1 } }}>
+                   <div className="relative group">
+                      <motion.div 
+                        className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-violet-500 rounded-xl opacity-0 group-focus-within:opacity-100 blur transition-opacity duration-300" 
+                        layoutId="glow-1"
                       />
-                    </div>
-                  </div>
+                      <motion.div 
+                        whileFocus={{ scale: 1.02 }}
+                        className="relative bg-white/60 border-2 border-transparent group-focus-within:border-white/50 rounded-xl flex items-center shadow-inner transition-all duration-300"
+                      >
+                         <motion.div 
+                           className="pl-4 text-slate-400 group-focus-within:text-violet-600 transition-colors"
+                           animate={loginNameInput ? { rotate: [0, 10, 0] } : {}}
+                         >
+                           <UserIcon className="w-5 h-5" />
+                         </motion.div>
+                         <input
+                            type="text"
+                            value={loginNameInput}
+                            onChange={(e) => setLoginNameInput(e.target.value)}
+                            placeholder="OPERATOR ID"
+                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-wide uppercase"
+                         />
+                      </motion.div>
+                   </div>
+                </motion.div>
 
-                  {/* Etched Password Input */}
-                  <div className="space-y-1.5 group">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 group-focus-within:text-indigo-600 transition-colors z-20" />
-                      <input
-                        type="password"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full bg-slate-100/50 backdrop-blur-sm border border-white/20 rounded-xl py-3.5 pl-11 pr-4 text-slate-900 text-sm font-semibold placeholder:text-slate-400 outline-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.03)] focus:bg-white focus:shadow-[0_0_0_2px_rgba(99,102,241,0.2),inset_0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-300 relative z-10"
+                {/* INPUT 2: PASSWORD */}
+                <motion.div variants={{ hidden: { x: -20, opacity: 0 }, visible: { x: 0, opacity: 1 } }}>
+                   <div className="relative group">
+                      <motion.div 
+                        className="absolute inset-0 bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-xl opacity-0 group-focus-within:opacity-100 blur transition-opacity duration-300"
+                        layoutId="glow-2"
                       />
-                    </div>
-                  </div>
+                      <motion.div 
+                        whileFocus={{ scale: 1.02 }}
+                        className="relative bg-white/60 border-2 border-transparent group-focus-within:border-white/50 rounded-xl flex items-center shadow-inner transition-all duration-300"
+                      >
+                         <motion.div 
+                           className="pl-4 text-slate-400 group-focus-within:text-fuchsia-600 transition-colors"
+                         >
+                           <Lock className="w-5 h-5" />
+                         </motion.div>
+                         <input
+                            type="password"
+                            value={loginPassword}
+                            onChange={(e) => setLoginPassword(e.target.value)}
+                            placeholder="ACCESS KEY"
+                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-widest"
+                         />
+                      </motion.div>
+                   </div>
+                </motion.div>
 
-                  {/* 3D Pill Button */}
+                {/* HYPER-BUTTON */}
+                <motion.div variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}>
                   <motion.button
-                    whileHover={{ scale: 1.02, y: -1 }}
-                    whileTap={{ scale: 0.98, y: 0 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     type="submit"
                     disabled={isLoggingIn}
-                    className="w-full mt-6 bg-gradient-to-r from-indigo-600 to-blue-600 text-white h-12 rounded-full font-bold text-sm tracking-wide flex items-center justify-center gap-2 shadow-[0_10px_20px_-5px_rgba(79,70,229,0.35)] hover:shadow-[0_15px_25px_-5px_rgba(79,70,229,0.45)] transition-all duration-300 relative overflow-hidden group"
+                    className="w-full relative h-14 rounded-xl overflow-hidden group shadow-[0_10px_20px_rgba(124,58,237,0.4)]"
                   >
-                    <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <span className="relative z-10 flex items-center gap-2">
-                      {isLoggingIn ? 'Authenticating...' : 'Enter System'}
-                      {!isLoggingIn && <ArrowRight className="w-4 h-4" />}
-                    </span>
+                     {/* Moving Gradient Background */}
+                     <div className="absolute inset-0 bg-gradient-to-r from-violet-600 via-fuchsia-500 to-cyan-500 bg-[length:200%_100%] animate-gradient-x" />
+                     
+                     <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black tracking-wider uppercase text-sm">
+                        {isLoggingIn ? (
+                            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
+                            </motion.div>
+                        ) : (
+                          <>
+                             <span>Initialize</span>
+                             <motion.div 
+                               className="group-hover:translate-x-1 transition-transform"
+                             >
+                                <ArrowRight className="w-5 h-5" strokeWidth={3} />
+                             </motion.div>
+                          </>
+                        )}
+                     </div>
                   </motion.button>
-                  
-                  {loginError && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="text-red-500 text-xs font-bold text-center pt-2"
-                    >
-                      {loginError}
-                    </motion.div>
-                  )}
+                </motion.div>
 
-                  <div className="text-center pt-1">
-                     <button type="button" onClick={handleGuestLogin} className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest hover:underline decoration-indigo-200 underline-offset-4">
-                         Enter as Guest
-                     </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-            
-            {/* Bottom Technical Label */}
-            <div className="mt-6 text-center opacity-60">
-               <p className="text-slate-500 text-[10px] font-mono tracking-widest uppercase">
-                  Secure Node • v3.0.1
-               </p>
+                {loginError && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="flex items-center justify-center gap-2 text-red-500 font-bold text-xs uppercase tracking-wider bg-red-50 py-2 rounded-lg border border-red-100"
+                  >
+                     <AlertCircle className="w-4 h-4" /> {loginError}
+                  </motion.div>
+                )}
+
+                <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="text-center">
+                   <button type="button" onClick={handleGuestLogin} className="text-xs font-bold text-slate-400 hover:text-violet-600 transition-colors uppercase tracking-widest hover:underline underline-offset-4">
+                       Guest Observation Mode
+                   </button>
+                </motion.div>
+              </form>
             </div>
           </motion.div>
-        </div>
+
+          {/* SYSTEM FOOTER */}
+          <motion.div 
+             initial={{ opacity: 0 }} 
+             animate={{ opacity: 0.5 }} 
+             transition={{ delay: 1.5, duration: 1 }}
+             className="text-center mt-8 font-mono text-[10px] text-slate-400 uppercase tracking-[0.2em]"
+          >
+             System Ready • Grid: 34-X • V.3.2.0
+          </motion.div>
+        </motion.div>
+
+        <style jsx global>{`
+          @keyframes gradient-x {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          .animate-gradient-x {
+            animation: gradient-x 3s ease infinite;
+          }
+        `}</style>
       </div>
     );
   }
