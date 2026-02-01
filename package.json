@@ -1,15 +1,17 @@
 {
-  "name": "probfair-fullstack",
+  "name": "wamo-quota-tracker",
   "version": "1.0.0",
   "type": "module",
-  "description": "Full stack implementation of ProbFair",
+  "description": "Math problem submission and contest composition platform",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.js",
     "start:server": "node server.js",
-    "dev:full": "concurrently \"npm run start:server\" \"npm run dev\""
+    "dev:full": "concurrently \"npm run start:server\" \"npm run dev\"",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "dependencies": {
     "@types/react-dom": "^19.0.3",
