@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WAMO Quota Tracker - Math Contest Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+    <style>
+      :root {
+        --bg-grid-color: rgba(0, 0, 0, 0.04);
+      }
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #F8F9FA;
+        color: #0f172a;
+        background-image:
+          linear-gradient(var(--bg-grid-color) 1px, transparent 1px),
+          linear-gradient(90deg, var(--bg-grid-color) 1px, transparent 1px);
+        background-size: 32px 32px;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      
+      /* Refined Scrollbar */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 3px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+
+      /* KaTeX override */
+      .katex {
+        color: inherit !important;
+        font-size: 1.0em !important;
+      }
+      
+      /* Glass Panel Utility */
+      .glass-panel {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(226, 232, 240, 1);
+      }
+      
+      /* Input autofill fix */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover, 
+      input:-webkit-autofill:focus, 
+      input:-webkit-autofill:active{
+          -webkit-box-shadow: 0 0 0 30px white inset !important;
+      }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "katex": "https://esm.sh/katex@^0.16.28",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "path": "https://esm.sh/path@^0.12.7",
+    "url": "https://esm.sh/url@^0.11.4",
+    "dotenv": "https://esm.sh/dotenv@^17.2.3",
+    "pg": "https://esm.sh/pg@^8.17.2",
+    "cors": "https://esm.sh/cors@^2.8.6",
+    "jsonwebtoken": "https://esm.sh/jsonwebtoken@^9.0.3",
+    "express": "https://esm.sh/express@^5.2.1",
+    "bcrypt": "https://esm.sh/bcrypt@^6.0.0",
+    "framer-motion": "https://esm.sh/framer-motion@^11.0.3"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
