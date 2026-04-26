@@ -17,7 +17,7 @@ import {
   ShieldAlert,
   BadgeCheck,
   Pencil,
-  Save,
+  Save, 
   X,
   Trash2,
   Lock,
@@ -58,7 +58,9 @@ import {
   History,
   Menu,
   Activity,
-  Briefcase
+  Briefcase,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 // --- STAGGER ANIMATIONS ---
@@ -225,6 +227,7 @@ export default function App() {
   const [selectedLoginId, setSelectedLoginId] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState(false);
 
@@ -1626,6 +1629,257 @@ tex += `\\end{longtable}
          // Logic to maintain scroll
       }
   }, [problems]);
+
+  if (!currentUser) {
+    return (
+      <div className="relative min-h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-900">
+        <style>{`
+          @keyframes wamo-symbol-fade { 0%, 100% { opacity: 0.04; } 50% { opacity: 0.095; } }
+          @keyframes wamo-line-fade { 0%, 100% { stroke-opacity: 0.16; } 50% { stroke-opacity: 0.58; } }
+          @keyframes wamo-trace { 0% { stroke-dashoffset: 200; opacity: 0.16; } 42% { opacity: 0.74; } 100% { stroke-dashoffset: 0; opacity: 0.16; } }
+          @keyframes wamo-node { 0%, 100% { opacity: 0.45; transform: scale(1); } 50% { opacity: 1; transform: scale(1.2); } }
+          .wamo-watermark {
+            display: none; position: absolute; z-index: 1; pointer-events: none;
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: rgba(15, 23, 42, 0.06); line-height: 1;
+            animation: wamo-symbol-fade 7s ease-in-out infinite; user-select: none;
+          }
+          .wamo-edge {
+            display: none; position: absolute; z-index: 2; pointer-events: none; color: #64748b;
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11px; letter-spacing: 0.02em;
+          }
+          .wamo-trace { stroke-dasharray: 200; animation: wamo-trace 8s linear infinite; }
+          .wamo-pulse-line { animation: wamo-line-fade 6s ease-in-out infinite; }
+          .wamo-pulse-node { transform-box: fill-box; transform-origin: center; animation: wamo-node 4s ease-in-out infinite; }
+          .wamo-password-input::-ms-reveal,
+          .wamo-password-input::-ms-clear {
+            display: none;
+          }
+          .wamo-password-input::-webkit-credentials-auto-fill-button,
+          .wamo-password-input::-webkit-caps-lock-indicator,
+          .wamo-password-input::-webkit-textfield-decoration-container {
+            visibility: hidden;
+            pointer-events: none;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .wamo-video { display: none; }
+            .wamo-watermark, .wamo-trace, .wamo-pulse-line, .wamo-pulse-node { animation: none !important; }
+          }
+        `}</style>
+
+        <video
+          className="wamo-video absolute inset-0 z-0 h-full w-full object-cover opacity-95 [filter:saturate(.85)_contrast(.95)_brightness(1.05)]"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+        >
+          <source src="/assets/bg-math.mp4" type="video/mp4" />
+        </video>
+
+        <div className="absolute inset-0 z-[1] pointer-events-none bg-[radial-gradient(ellipse_55%_60%_at_50%_50%,rgba(255,255,255,0.92)_0%,rgba(255,255,255,0.78)_30%,rgba(255,255,255,0.35)_55%,rgba(255,255,255,0.05)_75%,rgba(255,255,255,0)_100%)]" />
+        <div className="absolute inset-0 z-[1] pointer-events-none bg-[linear-gradient(180deg,rgba(248,250,252,0.45)_0%,rgba(248,250,252,0)_18%,rgba(248,250,252,0)_82%,rgba(248,250,252,0.55)_100%)]" />
+
+        <div className="wamo-watermark left-[10%] top-[12%] hidden text-[120px] -rotate-[8deg] md:block">sum</div>
+        <div className="wamo-watermark left-[8%] top-[70%] hidden text-[96px] md:block [animation-delay:1.5s]">pi</div>
+        <div className="wamo-watermark right-[14%] top-[18%] hidden text-[110px] md:block [animation-delay:3s]">int</div>
+        <div className="wamo-watermark bottom-[14%] right-[10%] hidden text-[130px] rotate-[5deg] md:block [animation-delay:4.5s]">dx</div>
+        <div className="wamo-watermark left-[4%] top-[48%] hidden text-[72px] lg:block">f(x)</div>
+        <div className="wamo-watermark right-[5%] top-[52%] hidden text-[80px] lg:block">theta</div>
+
+        <div className="wamo-edge left-4 top-5 hidden sm:block md:left-8 md:top-7" aria-hidden="true">
+          <svg width="200" height="140" viewBox="0 0 200 140" fill="none">
+            <line x1="20" y1="120" x2="180" y2="120" stroke="#94a3b8" strokeWidth="1" />
+            <line x1="20" y1="120" x2="20" y2="10" stroke="#94a3b8" strokeWidth="1" />
+            <g stroke="#94a3b8" strokeWidth="1" opacity="0.6">
+              <line x1="60" y1="118" x2="60" y2="122" />
+              <line x1="100" y1="118" x2="100" y2="122" />
+              <line x1="140" y1="118" x2="140" y2="122" />
+              <line x1="18" y1="80" x2="22" y2="80" />
+              <line x1="18" y1="40" x2="22" y2="40" />
+            </g>
+            <path d="M 20 115 Q 70 30, 180 25" stroke="#2563eb" strokeWidth="1.4" fill="none" strokeLinecap="round" className="wamo-trace" />
+            <circle cx="60" cy="92" r="3.5" fill="#2563eb" className="wamo-pulse-node" />
+            <circle cx="100" cy="62" r="3.5" fill="#7c3aed" className="wamo-pulse-node [animation-delay:1.4s]" />
+            <circle cx="140" cy="40" r="3.5" fill="#2563eb" className="wamo-pulse-node [animation-delay:2.8s]" />
+            <text x="184" y="124" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">x</text>
+            <text x="14" y="14" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">y</text>
+          </svg>
+          <div className="mt-1.5 opacity-70">f(x) = 1/2x^2 + 3</div>
+        </div>
+
+        <div className="wamo-edge right-4 top-5 hidden text-right sm:block md:right-8 md:top-7" aria-hidden="true">
+          <div className="leading-7 text-slate-400">div E = rho / eps0</div>
+          <div className="leading-7 text-slate-400 opacity-70">curl B = mu0J + mu0eps0 dE/dt</div>
+          <div className="mt-2 text-slate-400">WAMO | 2026</div>
+          <svg width="160" height="60" viewBox="0 0 160 60" fill="none" className="ml-auto mt-2.5">
+            <line x1="10" y1="50" x2="120" y2="14" stroke="#7c3aed" strokeWidth="1.4" className="wamo-trace wamo-pulse-line" />
+            <polygon points="120,14 110,15 116,22" fill="#7c3aed" />
+            <circle cx="10" cy="50" r="3" fill="#7c3aed" className="wamo-pulse-node [animation-delay:.6s]" />
+            <circle cx="120" cy="14" r="3" fill="#2563eb" className="wamo-pulse-node [animation-delay:2s]" />
+            <text x="125" y="18" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">v</text>
+          </svg>
+        </div>
+
+        <div className="wamo-edge bottom-8 left-8 hidden md:block" aria-hidden="true">
+          <svg width="220" height="140" viewBox="0 0 220 140" fill="none">
+            <g stroke="#94a3b8" strokeWidth="1" fill="none">
+              <line x1="30" y1="100" x2="90" y2="50" className="wamo-pulse-line" />
+              <line x1="90" y1="50" x2="160" y2="80" className="wamo-pulse-line [animation-delay:1s]" />
+              <line x1="160" y1="80" x2="200" y2="30" className="wamo-pulse-line [animation-delay:2s]" />
+              <line x1="30" y1="100" x2="160" y2="80" className="wamo-pulse-line [animation-delay:1.6s]" />
+              <line x1="90" y1="50" x2="200" y2="30" className="wamo-pulse-line [animation-delay:2.4s]" />
+              <line x1="30" y1="100" x2="120" y2="120" className="wamo-pulse-line [animation-delay:.8s]" />
+              <line x1="160" y1="80" x2="120" y2="120" className="wamo-pulse-line [animation-delay:3s]" />
+            </g>
+            <circle cx="30" cy="100" r="3.5" fill="#2563eb" className="wamo-pulse-node [animation-delay:.3s]" />
+            <circle cx="90" cy="50" r="3.5" fill="#7c3aed" className="wamo-pulse-node [animation-delay:1.2s]" />
+            <circle cx="160" cy="80" r="3.5" fill="#2563eb" className="wamo-pulse-node [animation-delay:2.1s]" />
+            <circle cx="200" cy="30" r="3.5" fill="#7c3aed" className="wamo-pulse-node [animation-delay:.9s]" />
+            <circle cx="120" cy="120" r="3.5" fill="#2563eb" className="wamo-pulse-node [animation-delay:1.8s]" />
+          </svg>
+          <div className="mt-1 opacity-70">G = (V, E) | |V| = 5</div>
+        </div>
+
+        <div className="wamo-edge bottom-8 right-8 hidden text-right md:block" aria-hidden="true">
+          <svg width="200" height="140" viewBox="0 0 200 140" fill="none">
+            <circle cx="110" cy="80" r="55" stroke="#94a3b8" strokeWidth="1.2" fill="none" className="wamo-trace" />
+            <polygon points="110,30 162,108 58,108" stroke="#2563eb" strokeWidth="1.4" fill="none" className="wamo-pulse-line" />
+            <line x1="110" y1="30" x2="110" y2="108" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
+            <circle cx="110" cy="30" r="3" fill="#2563eb" className="wamo-pulse-node [animation-delay:.4s]" />
+            <circle cx="162" cy="108" r="3" fill="#7c3aed" className="wamo-pulse-node [animation-delay:1.6s]" />
+            <circle cx="58" cy="108" r="3" fill="#2563eb" className="wamo-pulse-node [animation-delay:2.6s]" />
+            <path d="M 105 103 L 105 108 L 110 108" stroke="#94a3b8" strokeWidth="1" fill="none" opacity="0.6" />
+            <text x="100" y="22" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">A</text>
+            <text x="166" y="118" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">B</text>
+            <text x="44" y="118" fontFamily="JetBrains Mono" fontSize="9" fill="#94a3b8">C</text>
+          </svg>
+          <div className="mt-1 opacity-70">ABC | R = 55</div>
+        </div>
+
+        <div className="relative z-[5] grid min-h-screen w-full place-items-center p-6">
+          <div className="relative w-full max-w-[420px]">
+            <motion.div
+              className="rounded-[24px] border border-slate-200 bg-white/80 p-7 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_1px_2px_rgba(15,23,42,0.04),0_12px_28px_-8px_rgba(15,23,42,0.10),0_32px_64px_-24px_rgba(15,23,42,0.18)] backdrop-blur-[18px] backdrop-saturate-150 sm:p-10"
+              initial={{ opacity: 0, y: 28 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="mb-[22px] flex flex-col items-center gap-3.5">
+                <div className="grid h-[72px] w-[72px] place-items-center overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_4px_12px_-4px_rgba(31,107,58,0.25)]">
+                  <img src="/assets/wamo-logo.webp" alt="WAMO logo" className="h-full w-full object-contain" />
+                </div>
+              </div>
+
+              <h1 className="mb-1.5 text-center text-[26px] font-semibold tracking-tight text-slate-900">Welcome back</h1>
+              <p className="mb-7 text-center text-sm leading-6 text-slate-500">Track your submissions & progress</p>
+
+              <form onSubmit={handleLogin} className="space-y-4" noValidate>
+                <div>
+                  <label htmlFor="login-full-name" className="mb-1.5 block text-[13px] font-medium text-slate-900">Full Name</label>
+                  <div className="relative">
+                    <UserIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <input
+                      id="login-full-name"
+                      type="text"
+                      value={loginNameInput}
+                      onChange={(e) => {
+                        setLoginNameInput(e.target.value);
+                        if (loginError) setLoginError('');
+                      }}
+                      placeholder="Your full name"
+                      autoComplete="username"
+                      required
+                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-[#fbfcfe] pl-10 pr-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/10"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="login-password" className="mb-1.5 block text-[13px] font-medium text-slate-900">Password</label>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <input
+                      id="login-password"
+                      type={showLoginPassword ? 'text' : 'password'}
+                      value={loginPassword}
+                      onChange={(e) => {
+                        setLoginPassword(e.target.value);
+                        if (loginError) setLoginError('');
+                      }}
+                      placeholder="Access key"
+                      autoComplete="current-password"
+                      required
+                      className="wamo-password-input h-[46px] w-full rounded-xl border border-slate-200 bg-[#fbfcfe] pl-10 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((value) => !value)}
+                      aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-2.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-900/5 hover:text-slate-900"
+                    >
+                      {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <AnimatePresence>
+                  {loginError && (
+                    <motion.div
+                      key="login-error"
+                      initial={{ opacity: 0, y: -4, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5 text-[12px] font-medium text-red-600">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        {loginError}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <motion.button
+                  type="submit"
+                  disabled={isLoggingIn || usersLoading}
+                  whileTap={{ scale: 0.99 }}
+                  className="mt-3 inline-flex h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-semibold tracking-[0.005em] text-white shadow-[0_1px_0_rgba(255,255,255,0.18)_inset,0_1px_2px_rgba(37,99,235,0.25),0_6px_18px_-6px_rgba(37,99,235,0.55)] transition hover:bg-blue-700 active:translate-y-px disabled:cursor-progress disabled:opacity-70"
+                >
+                  {isLoggingIn ? (
+                    <>
+                      <motion.span
+                        className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white"
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
+                      />
+                      <span>Signing in</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{usersLoading ? 'Loading users' : 'Sign in'}</span>
+                      {!usersLoading && <ArrowRight className="h-4 w-4" />}
+                    </>
+                  )}
+                </motion.button>
+
+              </form>
+
+              {usersError && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700">
+                  User list could not load. Please refresh and try again.
+                </div>
+              )}
+            </motion.div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (
