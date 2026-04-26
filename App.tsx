@@ -946,6 +946,23 @@ export default function App() {
         console.error("Failed to update status");
      }
   };
+
+  const handleDeleteProblem = async (problem: Problem) => {
+    if (!window.confirm(`Delete "${problem.title}"? This will permanently remove the problem, its votes, comments, and any round assignments.`)) {
+      return;
+    }
+
+    const previousProblems = problems;
+    setProblems(problems.filter(p => p.id !== problem.id));
+
+    try {
+      await api.deleteProblem(problem.id);
+    } catch (e) {
+      console.error("Failed to delete problem", e);
+      setProblems(previousProblems);
+      alert("Delete failed.");
+    }
+  };
   
   // Inline Update in Composer
   const handleComposerUpdate = async (problemId: string, updates: Partial<Problem>) => {
@@ -2156,6 +2173,7 @@ tex += `\\end{longtable}
                                 currentUserRole={currentUser.role}
                                 onUpvote={handleToggleVote}
                                 onEdit={handleStartEdit}
+                                onDelete={handleDeleteProblem}
                                 onStatusChange={handleStatusChange}
                                 votingPower={currentUser.votingPower}
                                 defaultExpanded={false}
@@ -2180,8 +2198,8 @@ tex += `\\end{longtable}
                 // --- COMPOSER: LANDING / SELECTION ---
                 <div className="max-w-5xl mx-auto w-full pt-6">
                     <header className="mb-10 text-center">
-                        <motion.h1 variants={itemVar} className="text-3xl font-bold text-slate-900 mb-2 tracking-tight">Round Editor</motion.h1>
-                        <motion.p variants={itemVar} className="text-slate-500 text-sm">Configure rounds and assign problems.</motion.p>
+                        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-3xl font-bold text-slate-900 mb-2 tracking-tight">Round Editor</motion.h1>
+                        <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }} className="text-slate-500 text-sm">Configure rounds and assign problems.</motion.p>
                     </header>
                     
                     {isCreatingRound ? (
@@ -2234,9 +2252,7 @@ tex += `\\end{longtable}
                             </motion.button>
                             
                             {rounds.map(r => {
-                                const rProbCount = r.problemCount !== undefined 
-                                   ? r.problemCount 
-                                   : problems.filter(p => p.roundIds && p.roundIds.includes(r.id)).length;
+                                const rProbCount = problems.filter(p => p.roundIds && p.roundIds.includes(r.id)).length;
                                 return (
                                     <motion.div 
                                         initial={{ opacity: 0, y: 12 }}
@@ -2850,6 +2866,7 @@ tex += `\\end{longtable}
                         currentUserRole={currentUser.role}
                         onUpvote={handleToggleVote}
                         onEdit={handleStartEdit}
+                        onDelete={handleDeleteProblem}
                         onStatusChange={handleStatusChange}
                         votingPower={currentUser.votingPower}
                         defaultExpanded={false}

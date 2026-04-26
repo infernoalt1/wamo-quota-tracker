@@ -154,6 +154,16 @@ export const api = {
         throw new Error(err.error || 'Update problem failed');
     }
   },
+
+  deleteProblem: async (problemId: string): Promise<void> => {
+    if (USE_MOCK_BACKEND) return;
+
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}`, {
+      method: 'DELETE',
+      headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error('Delete problem failed');
+  },
   
   updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
     if (USE_MOCK_BACKEND) return; 

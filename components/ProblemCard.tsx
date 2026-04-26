@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Problem, ProblemStatus, Comment } from '../types';
-import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle, Image as ImageIcon, MessageSquare, ChevronDown, ChevronUp, Send, RotateCcw } from 'lucide-react';
+import { MoreHorizontal, Calendar, ThumbsUp, Target, Pencil, CheckCircle, AlertCircle, Image as ImageIcon, MessageSquare, ChevronDown, ChevronUp, Send, RotateCcw, Trash2 } from 'lucide-react';
 import { MathText } from './MathText';
 import { Button } from './Button';
 import { api } from '../api';
@@ -14,6 +14,7 @@ interface ProblemCardProps {
   currentUserRole: string;
   onUpvote: (problemId: string) => void;
   onEdit: (problem: Problem) => void;
+  onDelete?: (problem: Problem) => void;
   onStatusChange?: (problemId: string, status: ProblemStatus) => void;
   votingPower: number;
   defaultExpanded?: boolean;
@@ -27,6 +28,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   currentUserRole,
   onUpvote,
   onEdit,
+  onDelete,
   onStatusChange,
   votingPower,
   defaultExpanded = false
@@ -185,6 +187,16 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                                 className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-md hover:bg-slate-100 transition-colors ml-1"
                             >
                                 <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+
+                        {isAdmin && onDelete && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDelete(problem); }}
+                                className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors ml-1"
+                                title="Delete problem"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
                             </button>
                         )}
                          

@@ -635,6 +635,39 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.delete('/api/problems/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'director') {
+    return res.sendStatus(403);
+  }
+
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const exists = await client.query('SELECT id FROM problems WHERE id = $1', [id]);
+    if (exists.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    await client.query('DELETE FROM votes WHERE problem_id = $1', [id]);
+    await client.query('DELETE FROM comments WHERE problem_id = $1', [id]);
+    await client.query('DELETE FROM problem_rounds WHERE problem_id = $1', [id]);
+    await client.query('DELETE FROM problems WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Delete problem failed' });
+  } finally {
+    client.release();
+  }
+});
+
 // New Route: Remove problem from a specific round
 app.delete('/api/problems/:id/round/:roundId', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
