@@ -59,7 +59,17 @@ const initDB = async () => {
         instructions TEXT,
         due_date TIMESTAMP WITH TIME ZONE,
         is_active BOOLEAN DEFAULT FALSE,
+        quota_type TEXT NOT NULL DEFAULT 'formal',
+        assignment_mode TEXT NOT NULL DEFAULT 'global',
+        is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS quota_assignments (
+        quota_id UUID REFERENCES quotas(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        custom_target INTEGER,
+        PRIMARY KEY (quota_id, user_id)
       );
 
       CREATE TABLE IF NOT EXISTS rounds (
@@ -128,6 +138,16 @@ const initDB = async () => {
       
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_type TEXT NOT NULL DEFAULT 'formal';
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS assignment_mode TEXT NOT NULL DEFAULT 'global';
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+      CREATE TABLE IF NOT EXISTS quota_assignments (
+        quota_id UUID REFERENCES quotas(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        custom_target INTEGER,
+        PRIMARY KEY (quota_id, user_id)
+      );
     `);
 
     // --- MIGRATION: Backfill problem_rounds from legacy round_id if empty ---
@@ -178,13 +198,14 @@ const initDB = async () => {
       console.log('--- Guest Account Created ---');
     }
 
-    // Seed Initial Quota if not exists
-    const quotaCheck = await client.query("SELECT * FROM quotas");
-    if (quotaCheck.rows.length === 0) {
-       await client.query(
-         "INSERT INTO quotas (name, target_count, vote_target, instructions, is_active) VALUES ($1, $2, $3, $4, $5)",
-         ['General Submission', 5, 3, 'Standard middle school math contest problems.', true]
-       );
+    // Seed General Quota if none exists
+    const generalQuotaCheck = await client.query("SELECT * FROM quotas WHERE quota_type = 'general' LIMIT 1");
+    if (generalQuotaCheck.rows.length === 0) {
+      await client.query(
+        "INSERT INTO quotas (name, target_count, vote_target, instructions, is_active, quota_type, assignment_mode, is_enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        ['General Submissions', 0, 0, 'Submit problems freely, outside of any formal quota cycle.', true, 'general', 'global', true]
+      );
+      console.log('--- General Submissions quota created ---');
     }
     
     client.release();
@@ -891,68 +912,175 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
 // --- Routes: Quotas ---
 
 app.get('/api/quotas', authenticateToken, async (req, res) => {
-  const result = await pool.query('SELECT id, name, target_count as target, vote_target, instructions, due_date FROM quotas');
-  const quotas = result.rows.map(q => ({
+  try {
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'director';
+    let result;
+
+    if (isAdmin) {
+      // Admins see all enabled quotas plus each quota's assigned user IDs
+      result = await pool.query(`
+        SELECT q.*,
+          array_agg(qa.user_id) FILTER (WHERE qa.user_id IS NOT NULL) as assigned_user_ids
+        FROM quotas q
+        LEFT JOIN quota_assignments qa ON qa.quota_id = q.id
+        WHERE q.is_enabled = TRUE
+        GROUP BY q.id
+        ORDER BY q.quota_type ASC, q.created_at DESC
+      `);
+    } else {
+      // Writers only see quotas they are eligible for:
+      //   - all enabled general quotas
+      //   - all enabled global formal quotas
+      //   - enabled selected-mode quotas where they have an assignment row
+      result = await pool.query(`
+        SELECT DISTINCT q.*,
+          NULL::uuid[] as assigned_user_ids
+        FROM quotas q
+        WHERE q.is_enabled = TRUE AND (
+          q.quota_type = 'general'
+          OR (q.quota_type = 'formal' AND q.assignment_mode = 'global')
+          OR (q.quota_type = 'formal' AND q.assignment_mode = 'selected'
+              AND EXISTS (
+                SELECT 1 FROM quota_assignments qa
+                WHERE qa.quota_id = q.id AND qa.user_id = $1
+              ))
+        )
+        ORDER BY q.quota_type ASC, q.created_at DESC
+      `, [req.user.id]);
+    }
+
+    const quotas = result.rows.map(q => ({
       id: q.id,
       name: q.name,
-      target: q.target,
+      target: q.target_count,
       voteTarget: q.vote_target || 3,
       instructions: q.instructions,
-      dueDate: q.due_date ? new Date(q.due_date).getTime() : null
-  }));
-  res.json(quotas);
+      dueDate: q.due_date ? new Date(q.due_date).getTime() : null,
+      quotaType: q.quota_type || 'formal',
+      assignmentMode: q.assignment_mode || 'global',
+      isEnabled: q.is_enabled !== false,
+      assignedUserIds: q.assigned_user_ids || []
+    }));
+    res.json(quotas);
+  } catch (err) {
+    console.error('Failed to fetch quotas:', err);
+    res.status(500).json({ error: 'Failed to fetch quotas' });
+  }
 });
 
 app.post('/api/quotas', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-  
-  const { name, target, voteTarget, instructions, dueDate } = req.body;
-  
+
+  const { name, target, voteTarget, instructions, dueDate, quotaType, assignmentMode, isEnabled, assignedUserIds } = req.body;
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const qt = quotaType || 'formal';
+    const am = assignmentMode || 'global';
+    const enabled = isEnabled !== false;
     const vt = voteTarget || 3;
-    const result = await pool.query(
-      'INSERT INTO quotas (name, target_count, vote_target, instructions, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [name, target, vt, instructions, dateVal]
+    const tgt = (qt === 'general') ? 0 : (target || 5);
+
+    const result = await client.query(
+      `INSERT INTO quotas (name, target_count, vote_target, instructions, due_date, quota_type, assignment_mode, is_enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [name, tgt, vt, instructions, dateVal, qt, am, enabled]
     );
     const row = result.rows[0];
+
+    // Insert per-user assignments for 'selected' mode
+    const ids = Array.isArray(assignedUserIds) ? assignedUserIds : [];
+    if (am === 'selected' && ids.length > 0) {
+      for (const uid of ids) {
+        await client.query(
+          'INSERT INTO quota_assignments (quota_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [row.id, uid]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
     res.json({
-        id: row.id,
-        name: row.name,
-        target: row.target_count,
-        voteTarget: row.vote_target,
-        instructions: row.instructions,
-        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+      id: row.id,
+      name: row.name,
+      target: row.target_count,
+      voteTarget: row.vote_target,
+      instructions: row.instructions,
+      dueDate: row.due_date ? new Date(row.due_date).getTime() : null,
+      quotaType: row.quota_type,
+      assignmentMode: row.assignment_mode,
+      isEnabled: row.is_enabled,
+      assignedUserIds: ids
     });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Creation failed' });
+  } finally {
+    client.release();
   }
 });
 
 app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   const { id } = req.params;
-  const { name, target, voteTarget, instructions, dueDate } = req.body;
+  const { name, target, voteTarget, instructions, dueDate, quotaType, assignmentMode, isEnabled, assignedUserIds } = req.body;
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const dateVal = dueDate ? new Date(dueDate).toISOString() : null;
+    const qt = quotaType || 'formal';
+    const am = assignmentMode || 'global';
+    const enabled = isEnabled !== false;
     const vt = voteTarget || 3;
-    const result = await pool.query(
-      'UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5 WHERE id = $6 RETURNING *',
-      [name, target, vt, instructions, dateVal, id]
+    const tgt = (qt === 'general') ? 0 : (target || 5);
+
+    const result = await client.query(
+      `UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5,
+       quota_type = $6, assignment_mode = $7, is_enabled = $8
+       WHERE id = $9 RETURNING *`,
+      [name, tgt, vt, instructions, dateVal, qt, am, enabled, id]
     );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quota not found' });
+    }
     const row = result.rows[0];
+
+    // Replace assignments for 'selected' mode
+    await client.query('DELETE FROM quota_assignments WHERE quota_id = $1', [id]);
+    const ids = Array.isArray(assignedUserIds) ? assignedUserIds : [];
+    if (am === 'selected' && ids.length > 0) {
+      for (const uid of ids) {
+        await client.query(
+          'INSERT INTO quota_assignments (quota_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [id, uid]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
     res.json({
-        id: row.id,
-        name: row.name,
-        target: row.target_count,
-        voteTarget: row.vote_target,
-        instructions: row.instructions,
-        dueDate: row.due_date ? new Date(row.due_date).getTime() : null
+      id: row.id,
+      name: row.name,
+      target: row.target_count,
+      voteTarget: row.vote_target,
+      instructions: row.instructions,
+      dueDate: row.due_date ? new Date(row.due_date).getTime() : null,
+      quotaType: row.quota_type,
+      assignmentMode: row.assignment_mode,
+      isEnabled: row.is_enabled,
+      assignedUserIds: ids
     });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Update failed' });
+  } finally {
+    client.release();
   }
 });
 

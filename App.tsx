@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment } from './types';
+import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
 import { api } from './api';
 import { motion, AnimatePresence, Variants, useAnimation } from 'framer-motion';
-import { ArrowRight, Lock, User, Sparkles, Command } from 'lucide-react';
 import { 
   PlusCircle, 
   LayoutDashboard, 
@@ -260,6 +259,16 @@ export default function App() {
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'writer' | 'director'>('writer');
+
+  // Quota management state
+  const [isCreatingQuota, setIsCreatingQuota] = useState(false);
+  const [newQuotaForm, setNewQuotaForm] = useState<Partial<Quota> & { assignedUserIds: string[] }>({
+    name: '', target: 5, voteTarget: 3, instructions: '', quotaType: 'formal',
+    assignmentMode: 'global', isEnabled: true, assignedUserIds: []
+  });
+  const [expandedQuotaProgressId, setExpandedQuotaProgressId] = useState<string | null>(null);
+  // Which quota is selected for the submission form
+  const [selectedSubmissionQuotaId, setSelectedSubmissionQuotaId] = useState<string>('');
   
   // Round Create New State
   const [newRoundName, setNewRoundName] = useState('');
@@ -393,6 +402,20 @@ export default function App() {
         refreshData();
     }
   }, [currentUser]);
+
+  // Auto-select a default submission quota when quotas load or user changes
+  useEffect(() => {
+    if (quotas.length === 0 || !currentUser) return;
+    const formals = quotas.filter(q =>
+      q.isEnabled && q.quotaType === 'formal' &&
+      (q.assignmentMode === 'global' || q.assignedUserIds?.includes(currentUser.id))
+    );
+    const general = quotas.find(q => q.isEnabled && q.quotaType === 'general');
+    const allEligible = [...formals, ...(general ? [general] : [])];
+    if (allEligible.length > 0 && !allEligible.find(q => q.id === selectedSubmissionQuotaId)) {
+      setSelectedSubmissionQuotaId(formals[0]?.id || general?.id || '');
+    }
+  }, [quotas, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update Users submitted & voted count locally based on ACTIVE QUOTA
   useEffect(() => {
@@ -554,6 +577,13 @@ export default function App() {
     }
   };
 
+  const cancelCreateRound = () => {
+    setIsCreatingRound(false);
+    setNewRoundName('');
+    setNewRoundTag('');
+    setNewRoundDesc('');
+  };
+
   const editRound = async () => {
       if (!composerSelectedRoundId || !editRoundForm.name) return;
       try {
@@ -601,13 +631,50 @@ export default function App() {
         target: editQuotaForm.target || 5,
         voteTarget: editQuotaForm.voteTarget || 3,
         instructions: editQuotaForm.instructions || '',
-        dueDate: editQuotaForm.dueDate || null
+        dueDate: editQuotaForm.dueDate || null,
+        quotaType: editQuotaForm.quotaType || 'formal',
+        assignmentMode: editQuotaForm.assignmentMode || 'global',
+        isEnabled: editQuotaForm.isEnabled !== false,
+        assignedUserIds: editQuotaForm.assignedUserIds || []
       });
       await refreshData();
       setEditingQuotaId(null);
     } catch (e) {
       console.error("Failed to update quota");
     }
+  };
+
+  const createNewQuota = async () => {
+    if (!newQuotaForm.name?.trim()) return;
+    try {
+      await api.createQuota({
+        name: newQuotaForm.name,
+        target: newQuotaForm.target || 5,
+        voteTarget: newQuotaForm.voteTarget || 3,
+        instructions: newQuotaForm.instructions || '',
+        dueDate: newQuotaForm.dueDate || null,
+        quotaType: newQuotaForm.quotaType || 'formal',
+        assignmentMode: newQuotaForm.assignmentMode || 'global',
+        isEnabled: true,
+        assignedUserIds: newQuotaForm.assignedUserIds || []
+      });
+      await refreshData();
+      setIsCreatingQuota(false);
+      setNewQuotaForm({ name: '', target: 5, voteTarget: 3, instructions: '', quotaType: 'formal', assignmentMode: 'global', isEnabled: true, assignedUserIds: [] });
+    } catch (e) {
+      console.error("Failed to create quota", e);
+    }
+  };
+
+  const getQuotaProgressData = (q: Quota) => {
+    const eligibleUsers = q.assignmentMode === 'global'
+      ? users.filter(u => u.role !== 'guest')
+      : users.filter(u => q.assignedUserIds?.includes(u.id));
+    return eligibleUsers.map(u => {
+      const submitted = problems.filter(p => p.authorId === u.id && p.quotaId === q.id).length;
+      const target = u.customTargets?.[q.id] || q.target;
+      return { user: u, submitted, target };
+    }).sort((a, b) => b.submitted - a.submitted);
   };
 
   const switchQuota = (id: string) => {
@@ -620,13 +687,14 @@ export default function App() {
 
   const addUser = async () => {
     if (!newUserName.trim() || !newUserPassword.trim()) return;
+    const roleToCreate = currentUser?.role !== 'admin' ? 'writer' : newUserRole;
     try {
         const newUser = await api.createUser({
           name: newUserName.trim(),
           password: newUserPassword.trim(),
-          role: newUserRole,
+          role: roleToCreate,
           submittedCount: 0,
-          votingPower: newUserRole === 'director' ? 5 : 1, // Auto-set higher power for directors 
+          votingPower: roleToCreate === 'director' ? 5 : 1,
           customTargets: {}
         });
         setUsers([...users, newUser]);
@@ -770,7 +838,7 @@ export default function App() {
           answerKey,
           difficulty: parseFloat(difficulty),
           topics: selectedTopics,
-          quotaId: activeQuotaId,
+          quotaId: selectedSubmissionQuotaId || activeQuotaId,
           imageData: imageData || undefined,
           version: editingProblemVersion // Pass version for check
       };
@@ -819,7 +887,7 @@ export default function App() {
           try {
               await api.submitProblem({
                   ...p,
-                  quotaId: activeQuotaId,
+                  quotaId: selectedSubmissionQuotaId || activeQuotaId,
                   authorId: currentUser?.id,
                   authorName: currentUser?.name
               });
@@ -1544,194 +1612,217 @@ tex += `\\end{longtable}
 
   if (!currentUser) {
     return (
-      <div className="relative min-h-screen w-full bg-[#f0f2f5] flex items-center justify-center overflow-hidden font-sans">
-        
-        {/* --- 1. LIVING BACKGROUND ORBS (CSS-animated, no JS loop) --- */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-           <motion.div className="absolute top-0 left-0 w-[50vw] h-[50vw] bg-violet-300/40 rounded-full blur-[80px]" style={{ animation: 'orbFloat1 15s linear infinite', willChange: 'transform' }} />
-           <motion.div className="absolute bottom-0 right-0 w-[45vw] h-[45vw] bg-cyan-300/40 rounded-full blur-[80px]" style={{ animation: 'orbFloat2 18s linear infinite', willChange: 'transform' }} />
-           <motion.div className="absolute top-[40%] left-[30%] w-[30vw] h-[30vw] bg-pink-300/30 rounded-full blur-[60px]" style={{ animation: 'orbFloat3 20s linear infinite', willChange: 'transform' }} />
-        </div>
+      <div className="min-h-screen w-full flex items-center justify-center overflow-hidden relative font-sans" style={{ background: '#0b1120' }}>
 
-        {/* --- 2. CARD CONTAINER --- */}
-        <motion.div className="relative z-10 w-full max-w-[440px] px-6">
-          {/* --- 3. THE HYPER-GLASS CARD --- */}
+        {/* Dot grid texture */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px)',
+            backgroundSize: '28px 28px',
+          }}
+        />
+
+        {/* Radial vignette — draws eye to center */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 75% 75% at 50% 50%, transparent 20%, rgba(0,0,0,0.55) 100%)' }}
+        />
+
+        {/* Subtle indigo center bloom */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 55% 50% at 50% 52%, rgba(79,70,229,0.07) 0%, transparent 100%)' }}
+        />
+
+        {/* Slow horizontal scan line — "system active" signal */}
+        <motion.div
+          className="absolute left-0 right-0 pointer-events-none"
+          style={{ height: '1px', background: 'linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.35) 50%, transparent 100%)' }}
+          initial={{ top: '108%' }}
+          animate={{ top: '-8%' }}
+          transition={{ duration: 55, repeat: Infinity, ease: 'linear', repeatDelay: 18 }}
+        />
+
+        {/* Main content */}
+        <div className="relative z-10 w-full max-w-[400px] px-6">
+
+          {/* Brand header — above the card */}
           <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={{
-              hidden: { opacity: 0, y: 50, scale: 0.9 },
-              visible: { 
-                opacity: 1, y: 0, scale: 1,
-                transition: { duration: 0.8, ease: "easeOut", staggerChildren: 0.15, delayChildren: 0.4 }
-              }
-            }}
-            className="relative bg-white/40 backdrop-blur-2xl rounded-3xl p-10 overflow-hidden border border-white/60 shadow-[0_0_40px_-10px_rgba(124,58,237,0.3)] ring-1 ring-white/50"
+            className="text-center mb-7"
+            initial={{ opacity: 0, y: -14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           >
-            
-            {/* SHIMMER EFFECT: Diagonal sweep */}
-            <motion.div
-              initial={{ x: "-150%" }}
-              animate={{ x: "150%" }}
-              transition={{ repeat: Infinity, duration: 3, ease: "easeInOut", repeatDelay: 10 }}
-              className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/40 to-transparent -skew-x-12 pointer-events-none z-0"
-            />
-            
-            {/* Content Container (z-index above shimmer) */}
-            <div className="relative z-10">
-              
-              {/* LOGO DROP IN */}
-              <motion.div variants={{ hidden: { y: -50, opacity: 0 }, visible: { y: 0, opacity: 1 } }} className="text-center mb-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-violet-500 to-fuchsia-500 rounded-2xl mx-auto shadow-lg shadow-violet-500/40 flex items-center justify-center mb-4 transform rotate-3">
-                  <Sparkles className="text-white w-8 h-8" />
-                </div>
-                <h2 className="text-3xl font-black text-slate-800 tracking-tighter">
-                  WAMO<span className="text-violet-600">.OS</span>
-                </h2>
-                <p className="text-slate-500 font-medium text-sm tracking-wide mt-1">
-                  PROBLEM GATEWAY
-                </p>
+            <div className="inline-flex items-center gap-2 mb-3">
+              <div className="w-4 h-px bg-indigo-500/70" />
+              <span className="text-[10px] font-mono text-indigo-400/80 uppercase tracking-[0.28em]">Competition Management System</span>
+              <div className="w-4 h-px bg-indigo-500/70" />
+            </div>
+            <h1 className="text-[52px] font-black text-white tracking-tighter leading-none select-none">
+              WAMO
+            </h1>
+          </motion.div>
+
+          {/* Login card */}
+          <motion.div
+            className="bg-white rounded-xl overflow-hidden"
+            style={{ boxShadow: '0 48px 80px -20px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.04)' }}
+            initial={{ opacity: 0, y: 32 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+          >
+            {/* Indigo accent stripe */}
+            <div style={{ height: '2px', background: 'linear-gradient(90deg, #4f46e5 0%, #818cf8 100%)' }} />
+
+            <div className="p-8">
+
+              {/* Card heading */}
+              <motion.div
+                className="mb-6"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.28, duration: 0.35 }}
+              >
+                <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">Sign in</h2>
+                <p className="text-[13px] text-slate-500 mt-0.5">Enter your credentials to continue</p>
               </motion.div>
 
-              <form onSubmit={handleLogin} className="space-y-6">
-                
-                {/* INPUT 1: NAME */}
-                <motion.div variants={{ hidden: { x: -20, opacity: 0 }, visible: { x: 0, opacity: 1 } }}>
-                   <div className="relative group">
-                      <motion.div
-                        className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-violet-500 rounded-xl opacity-0 group-focus-within:opacity-100 blur transition-opacity duration-300"
-                      />
-                      <motion.div 
-                        whileFocus={{ scale: 1.02 }}
-                        className="relative bg-white/60 border-2 border-transparent group-focus-within:border-white/50 rounded-xl flex items-center shadow-inner transition-all duration-300"
-                      >
-                         <motion.div
-                           className="pl-4 text-slate-400 group-focus-within:text-violet-600 transition-colors"
-                         >
-                           <UserIcon className="w-5 h-5" />
-                         </motion.div>
-                         <input
-                            type="text"
-                            value={loginNameInput}
-                            onChange={(e) => setLoginNameInput(e.target.value)}
-                            placeholder="FULL NAME"
-                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-wide"
-                         />
-                      </motion.div>
-                   </div>
+              <form onSubmit={handleLogin} className="space-y-4">
+
+                {/* Name input */}
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.34, duration: 0.35 }}
+                >
+                  <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">
+                    Full Name
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors duration-150 pointer-events-none">
+                      <UserIcon className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      value={loginNameInput}
+                      onChange={(e) => setLoginNameInput(e.target.value)}
+                      placeholder="Your full name"
+                      autoComplete="username"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/10 transition-all duration-150"
+                    />
+                  </div>
                 </motion.div>
 
-                {/* INPUT 2: PASSWORD */}
-                <motion.div variants={{ hidden: { x: -20, opacity: 0 }, visible: { x: 0, opacity: 1 } }}>
-                   <div className="relative group">
-                      <motion.div
-                        className="absolute inset-0 bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-xl opacity-0 group-focus-within:opacity-100 blur transition-opacity duration-300"
-                      />
-                      <motion.div 
-                        whileFocus={{ scale: 1.02 }}
-                        className="relative bg-white/60 border-2 border-transparent group-focus-within:border-white/50 rounded-xl flex items-center shadow-inner transition-all duration-300"
-                      >
-                         <motion.div 
-                           className="pl-4 text-slate-400 group-focus-within:text-fuchsia-600 transition-colors"
-                         >
-                           <Lock className="w-5 h-5" />
-                         </motion.div>
-                         <input
-                            type="password"
-                            value={loginPassword}
-                            onChange={(e) => setLoginPassword(e.target.value)}
-                            placeholder="PASSWORD"
-                            className="w-full bg-transparent py-4 px-3 text-slate-800 font-bold placeholder:text-slate-400/70 outline-none text-sm tracking-widest"
-                         />
-                      </motion.div>
-                   </div>
+                {/* Password input */}
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.41, duration: 0.35 }}
+                >
+                  <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-widest mb-1.5">
+                    Password
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors duration-150 pointer-events-none">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="Access key"
+                      autoComplete="current-password"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-mono placeholder:font-sans placeholder:text-slate-400 outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/10 transition-all duration-150"
+                    />
+                  </div>
                 </motion.div>
 
-                {/* HYPER-BUTTON */}
-                <motion.div variants={{ hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } }}>
+                {/* Error message */}
+                <AnimatePresence>
+                  {loginError && (
+                    <motion.div
+                      key="login-error"
+                      initial={{ opacity: 0, y: -4, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 text-red-600 text-[12px] font-medium bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
+                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                        {loginError}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Submit button */}
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.48, duration: 0.35 }}
+                  className="pt-1"
+                >
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
                     type="submit"
                     disabled={isLoggingIn}
-                    className="w-full relative h-14 rounded-xl overflow-hidden group shadow-[0_10px_20px_rgba(124,58,237,0.4)]"
+                    whileHover={{ scale: 1.012 }}
+                    whileTap={{ scale: 0.982 }}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white text-sm font-semibold rounded-lg transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                     {/* Moving Gradient Background */}
-                     <div className="absolute inset-0 bg-gradient-to-r from-violet-600 via-fuchsia-500 to-cyan-500 bg-[length:200%_100%] animate-gradient-x" />
-                     
-                     <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black tracking-wider uppercase text-sm">
-                        {isLoggingIn ? (
-                            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
-                            </motion.div>
-                        ) : (
-                          <>
-                             <span>Initialize</span>
-                             <motion.div 
-                               className="group-hover:translate-x-1 transition-transform"
-                             >
-                                <ArrowRight className="w-5 h-5" strokeWidth={3} />
-                             </motion.div>
-                          </>
-                        )}
-                     </div>
+                    {isLoggingIn ? (
+                      <motion.div
+                        className="w-[18px] h-[18px] border-2 border-white/20 border-t-white rounded-full"
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
+                      />
+                    ) : (
+                      <>
+                        <span>Sign In</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
                   </motion.button>
                 </motion.div>
 
-                {loginError && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className="flex items-center justify-center gap-2 text-red-500 font-bold text-xs uppercase tracking-wider bg-red-50 py-2 rounded-lg border border-red-100"
-                  >
-                     <AlertCircle className="w-4 h-4" /> {loginError}
-                  </motion.div>
-                )}
+                {/* Divider */}
+                <div className="flex items-center gap-3 py-0.5">
+                  <div className="flex-1 h-px bg-slate-100" />
+                  <span className="text-[11px] text-slate-400 select-none">or</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
 
-                <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="text-center">
-                   <button type="button" onClick={handleGuestLogin} className="text-xs font-bold text-slate-400 hover:text-violet-600 transition-colors uppercase tracking-widest hover:underline underline-offset-4">
-                       Continue as Guest
-                   </button>
-                </motion.div>
+                {/* Guest login */}
+                <motion.button
+                  type="button"
+                  onClick={handleGuestLogin}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.55, duration: 0.35 }}
+                  whileTap={{ scale: 0.99 }}
+                  className="w-full py-2.5 text-[13px] text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-lg font-medium transition-all duration-150"
+                >
+                  Continue as Guest
+                </motion.button>
+
               </form>
             </div>
           </motion.div>
 
-          {/* SYSTEM FOOTER */}
-          <motion.div 
-             initial={{ opacity: 0 }} 
-             animate={{ opacity: 0.5 }} 
-             transition={{ delay: 1.5, duration: 1 }}
-             className="text-center mt-8 font-mono text-[10px] text-slate-400 uppercase tracking-[0.2em]"
+          {/* Footer */}
+          <motion.div
+            className="text-center mt-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.72, duration: 0.4 }}
           >
-             System Ready • Grid: 34-X • V.3.2.0
+            <span className="text-[10px] font-mono tracking-[0.22em] uppercase" style={{ color: 'rgba(255,255,255,0.14)' }}>
+              WAMO System · v3.2
+            </span>
           </motion.div>
-        </motion.div>
 
-        <style jsx global>{`
-          @keyframes gradient-x {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-          }
-          .animate-gradient-x {
-            animation: gradient-x 3s ease infinite;
-          }
-          @keyframes orbFloat1 {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            33%       { transform: translate(80px, -40px) scale(1.1); }
-            66%       { transform: translate(-40px, 40px) scale(0.92); }
-          }
-          @keyframes orbFloat2 {
-            0%, 100% { transform: translate(0, 0) scale(1); }
-            40%       { transform: translate(-60px, 60px) scale(1.08); }
-            70%       { transform: translate(25px, -15px) scale(1); }
-          }
-          @keyframes orbFloat3 {
-            0%, 100% { transform: translate(0, 0); }
-            50%       { transform: translate(35px, -35px); }
-          }
-        `}</style>
+        </div>
       </div>
     );
   }
@@ -1752,6 +1843,14 @@ tex += `\\end{longtable}
   
   const isDirector = currentUser.role === 'admin' || currentUser.role === 'director';
   const isGuest = currentUser.role === 'guest';
+
+  // Quota eligibility derived state
+  const myFormalQuotas = quotas.filter(q =>
+    q.isEnabled && q.quotaType === 'formal' &&
+    (q.assignmentMode === 'global' || q.assignedUserIds?.includes(currentUser.id))
+  );
+  const generalQuota = quotas.find(q => q.isEnabled && q.quotaType === 'general') ?? null;
+  const eligibleQuotas = [...myFormalQuotas, ...(generalQuota ? [generalQuota] : [])];
 
   // --- Composer Data ---
   const composerSelectedRound = rounds.find(r => r.id === composerSelectedRoundId);
@@ -1930,70 +2029,120 @@ tex += `\\end{longtable}
                 </motion.h1>
              </div>
 
-             {/* Quota Card */}
-             <motion.div variants={itemVar} className="col-span-12 md:col-span-8 bg-white border border-slate-200 rounded-xl p-6 shadow-sm relative overflow-hidden group">
-                 <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 pointer-events-none -mr-16 -mt-16 group-hover:opacity-75 transition-opacity"></div>
-                 <div className="relative z-10">
-                     <div className="flex justify-between items-start mb-4">
-                         <div>
-                             <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">Active Cycle</span>
-                             <h2 className="text-3xl font-bold text-slate-900 mt-3 tracking-tight">{activeQuota.name}</h2>
-                         </div>
-                         {activeQuota.dueDate && (
-                             <div className="flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100">
-                                 <Clock className="w-3.5 h-3.5" />
-                                 {getFormatDate(activeQuota.dueDate)}
-                             </div>
-                         )}
-                     </div>
-                     <p className="text-slate-600 text-sm leading-relaxed max-w-2xl">{activeQuota.instructions}</p>
+             {/* My Quotas Grid */}
+             <div className="col-span-12">
+               <motion.div variants={itemVar}>
+                 <div className="flex items-center justify-between mb-3">
+                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My Quotas</span>
+                   {isDirector && (
+                     <button onClick={() => setView('admin')} className="text-xs text-indigo-600 hover:underline font-medium">Manage →</button>
+                   )}
                  </div>
-             </motion.div>
 
-             {/* Stats Column */}
-             <div className="col-span-12 md:col-span-4 grid grid-rows-2 gap-4">
-                 <motion.div variants={itemVar} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-                     <div className="flex justify-between items-center">
-                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Submissions</span>
-                         <Pencil className="w-4 h-4 text-indigo-500" />
-                     </div>
-                     <div className="mt-2">
-                         <div className="flex items-end gap-2">
-                             <span className="text-3xl font-bold text-slate-900 leading-none">{submissionCount}</span>
-                             <span className="text-sm text-slate-400 font-medium mb-1">/ {submissionTarget}</span>
+                 {myFormalQuotas.length === 0 && !generalQuota ? (
+                   <div className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-8 text-center">
+                     <p className="text-slate-400 text-sm">No quotas assigned yet.</p>
+                     {isDirector && (
+                       <button onClick={() => setView('admin')} className="mt-2 text-indigo-600 text-xs font-bold hover:underline">Set up quotas →</button>
+                     )}
+                   </div>
+                 ) : (
+                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                     {myFormalQuotas.map(q => {
+                       const myCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === q.id).length;
+                       const myTarget = currentUser.customTargets?.[q.id] || q.target;
+                       const pct = myTarget > 0 ? Math.min((myCount / myTarget) * 100, 100) : 0;
+                       const myVotes = problems.filter(p => p.quotaId === q.id && p.votedBy?.includes(currentUser.id)).length;
+                       const votePct = q.voteTarget > 0 ? Math.min((myVotes / q.voteTarget) * 100, 100) : 0;
+                       const isActive = activeQuotaId === q.id;
+                       let statusLabel = 'Not started';
+                       let statusCls = 'text-slate-400 bg-slate-50 border-slate-200';
+                       if (myCount > 0 && myCount < myTarget) { statusLabel = 'In progress'; statusCls = 'text-indigo-600 bg-indigo-50 border-indigo-200'; }
+                       if (myTarget > 0 && myCount >= myTarget) { statusLabel = 'Complete'; statusCls = 'text-emerald-600 bg-emerald-50 border-emerald-200'; }
+                       if (myTarget > 0 && myCount > myTarget) { statusLabel = 'Exceeded'; statusCls = 'text-purple-600 bg-purple-50 border-purple-200'; }
+                       return (
+                         <div
+                           key={q.id}
+                           onClick={() => switchQuota(q.id)}
+                           className={`bg-white border rounded-xl p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${isActive ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-indigo-200'}`}
+                         >
+                           <div className="flex justify-between items-start mb-2">
+                             <h4 className="font-bold text-slate-900 text-sm leading-tight flex-1 truncate mr-2">{q.name}</h4>
+                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap ${statusCls}`}>{statusLabel}</span>
+                           </div>
+                           {q.instructions && <p className="text-[11px] text-slate-400 mb-3 line-clamp-1">{q.instructions}</p>}
+                           {q.dueDate && (
+                             <div className="flex items-center gap-1 text-[10px] text-amber-600 mb-3">
+                               <Clock className="w-3 h-3" /> {getFormatDate(q.dueDate)}
+                             </div>
+                           )}
+                           <div className="space-y-2">
+                             <div>
+                               <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase mb-1">
+                                 <span>Submissions</span><span>{myCount} / {myTarget}</span>
+                               </div>
+                               <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                 <div className={`h-full rounded-full transition-all duration-500 ${myTarget > 0 && myCount >= myTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} />
+                               </div>
+                             </div>
+                             {q.voteTarget > 0 && (
+                               <div>
+                                 <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase mb-1">
+                                   <span>Votes</span><span>{myVotes} / {q.voteTarget}</span>
+                                 </div>
+                                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                   <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${votePct}%` }} />
+                                 </div>
+                               </div>
+                             )}
+                           </div>
                          </div>
-                         <div className="h-1.5 w-full bg-slate-100 rounded-full mt-3 overflow-hidden">
-                             <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${subPercent}%` }}></div>
-                         </div>
-                     </div>
-                 </motion.div>
+                       );
+                     })}
 
-                 <motion.div variants={itemVar} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-                     <div className="flex justify-between items-center">
-                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Voting</span>
-                         <ThumbsUp className="w-4 h-4 text-emerald-500" />
-                     </div>
-                     <div className="mt-2">
-                         <div className="flex items-end gap-2">
-                             <span className="text-3xl font-bold text-slate-900 leading-none">{userVoteCount}</span>
-                             <span className="text-sm text-slate-400 font-medium mb-1">/ {voteTarget}</span>
+                     {generalQuota && (
+                       <div
+                         className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-5 shadow-sm cursor-pointer hover:border-indigo-200 hover:shadow-md transition-all flex flex-col justify-between"
+                         onClick={() => { setSelectedSubmissionQuotaId(generalQuota.id); resetForm(); setView('submit'); }}
+                       >
+                         <div>
+                           <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center mb-3">
+                             <FolderOpen className="w-4 h-4 text-slate-500" />
+                           </div>
+                           <h4 className="font-bold text-slate-700 text-sm">{generalQuota.name}</h4>
+                           <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{generalQuota.instructions || 'Free submissions — no quota required.'}</p>
                          </div>
-                         <div className="h-1.5 w-full bg-slate-100 rounded-full mt-3 overflow-hidden">
-                             <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${votePercent}%` }}></div>
+                         <div className="mt-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                           {problems.filter(p => p.authorId === currentUser.id && p.quotaId === generalQuota.id).length} submitted
                          </div>
-                     </div>
-                 </motion.div>
+                       </div>
+                     )}
+                   </div>
+                 )}
+               </motion.div>
              </div>
 
              {/* User's Problems List */}
              <div className="col-span-12 mt-4">
                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-slate-800">Your Contributions</h3>
+                   <div className="flex items-center gap-3">
+                     <h3 className="text-lg font-bold text-slate-800">Your Contributions</h3>
+                     {eligibleQuotas.length > 1 && (
+                       <select
+                         className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-600 outline-none"
+                         value={activeQuotaId}
+                         onChange={e => switchQuota(e.target.value)}
+                       >
+                         {myFormalQuotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                         {generalQuota && <option value={generalQuota.id}>{generalQuota.name}</option>}
+                       </select>
+                     )}
+                   </div>
                     <Button size="sm" variant="ghost" onClick={() => { resetForm(); setView('submit'); }} className="text-xs">
                        <PlusCircle className="w-3.5 h-3.5" /> Create New
                     </Button>
                  </div>
-                 
+
                  <div className="grid gap-4">
                     <AnimatePresence>
                     {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length > 0 ? (
@@ -2061,15 +2210,22 @@ tex += `\\end{longtable}
                                    className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-900 outline-none h-24 resize-none focus:ring-2 focus:ring-indigo-500"
                                />
                                <div className="flex gap-3 pt-2">
-                                  <Button variant="secondary" onClick={() => setIsCreatingRound(false)} className="flex-1">Cancel</Button>
-                                  <Button onClick={addRound} disabled={!newRoundName.trim()} className="flex-1">Create</Button>
-                                </div>
-                           </div>
-                        </motion.div>
-                    ) : (
-                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                  <Button variant="secondary" onClick={cancelCreateRound} className="flex-1">Cancel</Button>
+                                   <Button onClick={addRound} disabled={!newRoundName.trim()} className="flex-1">Create</Button>
+                                 </div>
+                            </div>
+                         </motion.div>
+                     ) : (
+                        <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="grid md:grid-cols-2 lg:grid-cols-3 gap-4"
+                        >
                             <motion.button 
-                               variants={itemVar}
+                               initial={{ opacity: 0, scale: 0.98 }}
+                               animate={{ opacity: 1, scale: 1 }}
+                               transition={{ duration: 0.2 }}
                                onClick={() => setIsCreatingRound(true)}
                                className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center gap-3 h-48 cursor-pointer hover:bg-slate-100 hover:border-slate-300 transition-colors text-slate-400 hover:text-indigo-600 group"
                             >
@@ -2083,7 +2239,9 @@ tex += `\\end{longtable}
                                    : problems.filter(p => p.roundIds && p.roundIds.includes(r.id)).length;
                                 return (
                                     <motion.div 
-                                        variants={itemVar}
+                                        initial={{ opacity: 0, y: 12 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.2 }}
                                         whileHover={{ y: -2 }}
                                         key={r.id}
                                         onClick={() => setComposerSelectedRoundId(r.id)}
@@ -2105,7 +2263,7 @@ tex += `\\end{longtable}
                                     </motion.div>
                                 );
                             })}
-                        </div>
+                        </motion.div>
                     )}
                 </div>
               ) : (
@@ -2427,6 +2585,41 @@ tex += `\\end{longtable}
             ) : (
             <motion.div variants={itemVar} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-8 space-y-6">
+                {/* Quota Selector — hidden when editing an existing problem */}
+                {!editingProblemId && eligibleQuotas.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Submitting To</label>
+                    {eligibleQuotas.length === 1 ? (
+                      <div className="px-4 py-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        {eligibleQuotas[0].quotaType === 'general'
+                          ? <FolderOpen className="w-4 h-4 text-slate-400" />
+                          : <Target className="w-4 h-4 text-indigo-500" />}
+                        {eligibleQuotas[0].name}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {eligibleQuotas.map(q => (
+                          <button
+                            key={q.id}
+                            type="button"
+                            onClick={() => setSelectedSubmissionQuotaId(q.id)}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-all flex items-center gap-1.5 ${
+                              selectedSubmissionQuotaId === q.id
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                            }`}
+                          >
+                            {q.quotaType === 'general'
+                              ? <FolderOpen className="w-3.5 h-3.5" />
+                              : <Target className="w-3.5 h-3.5" />}
+                            {q.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Title */}
                 <div className="space-y-2">
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Title</label>
@@ -2686,51 +2879,259 @@ tex += `\\end{longtable}
                 </div>
              </div>
              
-             <div className="grid md:grid-cols-2 gap-6">
-                 {/* Quota Management */}
-                 <motion.div variants={itemVar} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-full flex flex-col">
-                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
-                        <Activity className="w-4 h-4 text-indigo-500" /> Cycles
-                     </h3>
-                     <div className="flex-1 space-y-3 overflow-y-auto max-h-[300px] custom-scrollbar pr-1">
-                        {quotas.map(q => (
-                            <div key={q.id} className={`p-4 rounded-lg border transition-all ${activeQuotaId === q.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100'}`}>
-                                {editingQuotaId === q.id ? (
-                                    <div className="space-y-3">
-                                        <input className="w-full p-2 border border-indigo-200 rounded text-sm outline-none" value={editQuotaForm.name} onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})} placeholder="Name" />
-                                        <div className="flex gap-2">
-                                            <input type="number" className="w-16 p-2 border border-indigo-200 rounded text-sm" value={editQuotaForm.target} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} placeholder="Qt" />
-                                            <input type="number" className="w-16 p-2 border border-indigo-200 rounded text-sm" value={editQuotaForm.voteTarget} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} placeholder="Vt" />
-                                            <input type="date" className="flex-1 p-2 border border-indigo-200 rounded text-sm" value={editQuotaForm.dueDate ? new Date(editQuotaForm.dueDate).toISOString().split('T')[0] : ''} onChange={e => setEditQuotaForm({...editQuotaForm, dueDate: e.target.valueAsNumber})} />
-                                        </div>
-                                        <input className="w-full p-2 border border-indigo-200 rounded text-sm outline-none" value={editQuotaForm.instructions} onChange={e => setEditQuotaForm({...editQuotaForm, instructions: e.target.value})} placeholder="Instructions" />
-                                        <div className="flex justify-end gap-2">
-                                            <Button size="sm" variant="ghost" onClick={cancelEditQuota}>Cancel</Button>
-                                            <Button size="sm" onClick={saveQuota}>Save</Button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex justify-between items-center">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-bold text-slate-900 text-sm">{q.name}</span>
-                                                {activeQuotaId === q.id && <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-bold">ACTIVE</span>}
-                                            </div>
-                                            <div className="text-xs text-slate-500 mt-1">
-                                                Target: {q.target} • Vote: {q.voteTarget || 3}
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-1">
-                                            <button onClick={() => startEditQuota(q)} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded"><Pencil className="w-3.5 h-3.5"/></button>
-                                            {activeQuotaId !== q.id && <button onClick={() => switchQuota(q.id)} className="text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100">ACTIVATE</button>}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                     </div>
-                 </motion.div>
+             {/* ── QUOTA MANAGER ── */}
+             <motion.div variants={itemVar} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+               <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                 <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm uppercase tracking-wide">
+                   <Activity className="w-4 h-4 text-indigo-500" /> Quota Manager
+                 </h3>
+                 <Button size="sm" onClick={() => { setIsCreatingQuota(true); setExpandedQuotaProgressId(null); }} className="gap-1.5 text-xs">
+                   <PlusCircle className="w-3.5 h-3.5" /> New Quota
+                 </Button>
+               </div>
 
+               {/* Create new quota form */}
+               {isCreatingQuota && (
+                 <div className="p-5 border-b border-slate-100 bg-slate-50/60 space-y-4">
+                   <h4 className="font-bold text-slate-700 text-xs uppercase tracking-wide">Create Quota</h4>
+                   <div className="grid md:grid-cols-2 gap-4">
+                     <input className="p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:border-indigo-500" placeholder="Quota name" value={newQuotaForm.name || ''} onChange={e => setNewQuotaForm({...newQuotaForm, name: e.target.value})} />
+                     <input className="p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:border-indigo-500" placeholder="Instructions (optional)" value={newQuotaForm.instructions || ''} onChange={e => setNewQuotaForm({...newQuotaForm, instructions: e.target.value})} />
+                   </div>
+                   {/* Type selector */}
+                   <div className="flex gap-2">
+                     <span className="text-[10px] font-bold text-slate-400 uppercase self-center mr-1">Type</span>
+                     {(['formal', 'general'] as QuotaType[]).map(t => (
+                       <button key={t} type="button" onClick={() => setNewQuotaForm({...newQuotaForm, quotaType: t})}
+                         className={`px-3 py-1.5 text-xs font-bold rounded border capitalize ${newQuotaForm.quotaType === t ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                         {t}
+                       </button>
+                     ))}
+                   </div>
+                   {newQuotaForm.quotaType === 'formal' && (
+                     <>
+                       {/* Assignment mode */}
+                       <div className="flex gap-2 items-center">
+                         <span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Assign</span>
+                         {(['global', 'selected'] as AssignmentMode[]).map(m => (
+                           <button key={m} type="button" onClick={() => setNewQuotaForm({...newQuotaForm, assignmentMode: m, assignedUserIds: []})}
+                             className={`px-3 py-1.5 text-xs font-bold rounded border ${newQuotaForm.assignmentMode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
+                             {m === 'global' ? 'Everyone' : 'Selected Users'}
+                           </button>
+                         ))}
+                       </div>
+                       {newQuotaForm.assignmentMode === 'selected' && (
+                         <div className="flex flex-wrap gap-2 p-3 bg-white border border-slate-200 rounded-lg max-h-36 overflow-y-auto custom-scrollbar">
+                           {users.filter(u => u.role !== 'guest').map(u => {
+                             const checked = newQuotaForm.assignedUserIds?.includes(u.id) ?? false;
+                             return (
+                               <label key={u.id} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer text-xs font-medium transition-all ${checked ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                                 <input type="checkbox" checked={checked} onChange={() => {
+                                   const ids = newQuotaForm.assignedUserIds || [];
+                                   setNewQuotaForm({...newQuotaForm, assignedUserIds: checked ? ids.filter(i => i !== u.id) : [...ids, u.id]});
+                                 }} className="accent-indigo-600 w-3 h-3" />
+                                 {u.name}
+                               </label>
+                             );
+                           })}
+                         </div>
+                       )}
+                       <div className="flex gap-3">
+                         <div>
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
+                           <input type="number" min="1" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.target || 5} onChange={e => setNewQuotaForm({...newQuotaForm, target: parseInt(e.target.value)})} />
+                         </div>
+                         <div>
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
+                           <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.voteTarget || 3} onChange={e => setNewQuotaForm({...newQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                         </div>
+                         <div className="flex-1">
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
+                           <input type="date" className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none" value={newQuotaForm.dueDate ? new Date(newQuotaForm.dueDate).toISOString().split('T')[0] : ''} onChange={e => setNewQuotaForm({...newQuotaForm, dueDate: e.target.valueAsNumber || null})} />
+                         </div>
+                       </div>
+                     </>
+                   )}
+                   <div className="flex justify-end gap-2 pt-1">
+                     <Button size="sm" variant="ghost" onClick={() => setIsCreatingQuota(false)}>Cancel</Button>
+                     <Button size="sm" onClick={createNewQuota} disabled={!newQuotaForm.name?.trim()}>Create Quota</Button>
+                   </div>
+                 </div>
+               )}
+
+               {/* Quota list */}
+               <div className="divide-y divide-slate-100">
+                 {quotas.length === 0 && (
+                   <div className="p-8 text-center text-slate-400 text-sm">No quotas yet.</div>
+                 )}
+                 {quotas.map(q => {
+                   const isEdit = editingQuotaId === q.id;
+                   const isExpanded = expandedQuotaProgressId === q.id;
+                   const progressData = isExpanded ? getQuotaProgressData(q) : [];
+                   const totalAssigned = q.assignmentMode === 'global'
+                     ? users.filter(u => u.role !== 'guest').length
+                     : (q.assignedUserIds?.length || 0);
+                   const totalSubmitted = problems.filter(p => p.quotaId === q.id).length;
+                   return (
+                     <div key={q.id}>
+                       {isEdit ? (
+                         <div className="p-5 bg-slate-50 space-y-3">
+                           <div className="grid md:grid-cols-2 gap-3">
+                             <input className="p-2 border border-indigo-200 rounded text-sm outline-none bg-white" value={editQuotaForm.name || ''} onChange={e => setEditQuotaForm({...editQuotaForm, name: e.target.value})} placeholder="Name" />
+                             <input className="p-2 border border-indigo-200 rounded text-sm outline-none bg-white" value={editQuotaForm.instructions || ''} onChange={e => setEditQuotaForm({...editQuotaForm, instructions: e.target.value})} placeholder="Instructions" />
+                           </div>
+                           {/* Type */}
+                           <div className="flex gap-2 items-center">
+                             <span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Type</span>
+                             {(['formal', 'general'] as QuotaType[]).map(t => (
+                               <button key={t} type="button" onClick={() => setEditQuotaForm({...editQuotaForm, quotaType: t})}
+                                 className={`px-3 py-1 text-xs font-bold rounded border capitalize ${editQuotaForm.quotaType === t ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                 {t}
+                               </button>
+                             ))}
+                             <label className="ml-auto flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
+                               <input type="checkbox" checked={editQuotaForm.isEnabled !== false} onChange={e => setEditQuotaForm({...editQuotaForm, isEnabled: e.target.checked})} className="accent-indigo-600" />
+                               Enabled
+                             </label>
+                           </div>
+                           {editQuotaForm.quotaType === 'formal' && (
+                             <>
+                               <div className="flex gap-2 items-center">
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Assign</span>
+                                 {(['global', 'selected'] as AssignmentMode[]).map(m => (
+                                   <button key={m} type="button" onClick={() => setEditQuotaForm({...editQuotaForm, assignmentMode: m, assignedUserIds: []})}
+                                     className={`px-3 py-1 text-xs font-bold rounded border ${editQuotaForm.assignmentMode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                     {m === 'global' ? 'Everyone' : 'Selected Users'}
+                                   </button>
+                                 ))}
+                               </div>
+                               {editQuotaForm.assignmentMode === 'selected' && (
+                                 <div className="flex flex-wrap gap-2 p-3 bg-white border border-slate-200 rounded-lg max-h-36 overflow-y-auto custom-scrollbar">
+                                   {users.filter(u => u.role !== 'guest').map(u => {
+                                     const checked = editQuotaForm.assignedUserIds?.includes(u.id) ?? false;
+                                     return (
+                                       <label key={u.id} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer text-xs font-medium transition-all ${checked ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                                         <input type="checkbox" checked={checked} onChange={() => {
+                                           const ids = editQuotaForm.assignedUserIds || [];
+                                           setEditQuotaForm({...editQuotaForm, assignedUserIds: checked ? ids.filter(i => i !== u.id) : [...ids, u.id]});
+                                         }} className="accent-indigo-600 w-3 h-3" />
+                                         {u.name}
+                                       </label>
+                                     );
+                                   })}
+                                 </div>
+                               )}
+                               <div className="flex gap-3">
+                                 <div>
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
+                                   <input type="number" min="1" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.target || 5} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
+                                 </div>
+                                 <div>
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
+                                   <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.voteTarget || 3} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                                 </div>
+                                 <div className="flex-1">
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
+                                   <input type="date" className="w-full p-2 border border-indigo-200 rounded text-sm bg-white outline-none" value={editQuotaForm.dueDate ? new Date(editQuotaForm.dueDate).toISOString().split('T')[0] : ''} onChange={e => setEditQuotaForm({...editQuotaForm, dueDate: e.target.valueAsNumber || null})} />
+                                 </div>
+                               </div>
+                             </>
+                           )}
+                           <div className="flex justify-end gap-2">
+                             <Button size="sm" variant="ghost" onClick={cancelEditQuota}>Cancel</Button>
+                             <Button size="sm" onClick={saveQuota}>Save</Button>
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="px-5 py-4 flex items-center gap-4 hover:bg-slate-50/50 transition-colors">
+                           <div className="flex-1 min-w-0">
+                             <div className="flex items-center gap-2 flex-wrap">
+                               <span className="font-semibold text-slate-900 text-sm">{q.name}</span>
+                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ${q.quotaType === 'general' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-indigo-50 text-indigo-600 border-indigo-200'}`}>
+                                 {q.quotaType}
+                               </span>
+                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-slate-50 text-slate-500 border-slate-200 uppercase">
+                                 {q.assignmentMode === 'global' ? 'Global' : `${q.assignedUserIds?.length || 0} users`}
+                               </span>
+                               {activeQuotaId === q.id && (
+                                 <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-bold">FOCUSED</span>
+                               )}
+                               {!q.isEnabled && (
+                                 <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-bold">DISABLED</span>
+                               )}
+                             </div>
+                             <div className="text-[10px] text-slate-400 mt-0.5 flex gap-3">
+                               {q.quotaType === 'formal' && <span>Target: {q.target} • Votes: {q.voteTarget}</span>}
+                               <span>{totalSubmitted} submissions</span>
+                               {q.assignmentMode !== 'global' && <span>{totalAssigned} assigned</span>}
+                               {q.dueDate && <span className="text-amber-600">Due {getFormatDate(q.dueDate)}</span>}
+                             </div>
+                           </div>
+                           <div className="flex items-center gap-1 shrink-0">
+                             <button onClick={() => setExpandedQuotaProgressId(isExpanded ? null : q.id)}
+                               className={`p-1.5 rounded transition-colors text-xs font-bold flex items-center gap-1 border ${isExpanded ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:text-indigo-600 hover:border-indigo-200'}`}
+                               title="View progress">
+                               <BarChart2 className="w-3.5 h-3.5" />
+                             </button>
+                             <button onClick={() => { startEditQuota(q); setExpandedQuotaProgressId(null); }}
+                               className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors border border-transparent hover:border-indigo-100"
+                               title="Edit quota">
+                               <Pencil className="w-3.5 h-3.5" />
+                             </button>
+                             {activeQuotaId !== q.id && (
+                               <button onClick={() => switchQuota(q.id)}
+                                 className="text-[9px] font-bold text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded border border-transparent hover:border-indigo-100 transition-colors">
+                                 FOCUS
+                               </button>
+                             )}
+                           </div>
+                         </div>
+                       )}
+
+                       {/* Per-user progress view */}
+                       {isExpanded && !isEdit && (
+                         <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-4">
+                           <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-3">
+                             User Progress — {q.name}
+                           </h5>
+                           {progressData.length === 0 ? (
+                             <p className="text-xs text-slate-400 italic">No users assigned.</p>
+                           ) : (
+                             <div className="space-y-2">
+                               {progressData.map(({ user: u, submitted, target }) => {
+                                 const pct = target > 0 ? Math.min((submitted / target) * 100, 100) : 0;
+                                 let badge = 'Not started'; let badgeCls = 'text-slate-400 bg-slate-100';
+                                 if (submitted > 0 && submitted < target) { badge = 'In progress'; badgeCls = 'text-indigo-600 bg-indigo-50'; }
+                                 if (target > 0 && submitted >= target) { badge = 'Complete'; badgeCls = 'text-emerald-600 bg-emerald-50'; }
+                                 if (target > 0 && submitted > target) { badge = 'Exceeded'; badgeCls = 'text-purple-600 bg-purple-50'; }
+                                 return (
+                                   <div key={u.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-slate-100">
+                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0 ${u.role === 'admin' ? 'bg-purple-500' : u.role === 'director' ? 'bg-indigo-500' : 'bg-slate-500'}`}>
+                                       {u.name.charAt(0)}
+                                     </div>
+                                     <span className="text-xs font-semibold text-slate-800 w-28 truncate">{u.name}</span>
+                                     <div className="flex-1">
+                                       <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                         <div className={`h-full rounded-full transition-all ${target > 0 && submitted >= target ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} />
+                                       </div>
+                                     </div>
+                                     <span className="text-[10px] font-mono text-slate-500 w-12 text-right">{submitted}/{target}</span>
+                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${badgeCls}`}>{badge}</span>
+                                   </div>
+                                 );
+                               })}
+                             </div>
+                           )}
+                         </div>
+                       )}
+                     </div>
+                   );
+                 })}
+               </div>
+             </motion.div>
+
+             {/* ── NEW USER + USER TABLE row ── */}
+             <div className="grid md:grid-cols-2 gap-6">
                  {/* Add User */}
                  <motion.div variants={itemVar} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
@@ -2741,10 +3142,31 @@ tex += `\\end{longtable}
                         <input className="w-full p-3 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none focus:border-indigo-500" placeholder="Password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} />
                         <div className="flex gap-2">
                             <button onClick={() => setNewUserRole('writer')} className={`flex-1 py-2 text-xs font-bold rounded border ${newUserRole === 'writer' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200'}`}>Writer</button>
-                            <button onClick={() => setNewUserRole('director')} className={`flex-1 py-2 text-xs font-bold rounded border ${newUserRole === 'director' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200'}`}>Director</button>
+                            {currentUser.role === 'admin' && (
+                                <button onClick={() => setNewUserRole('director')} className={`flex-1 py-2 text-xs font-bold rounded border ${newUserRole === 'director' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200'}`}>Director</button>
+                            )}
                         </div>
                         <Button onClick={addUser} disabled={!newUserName || !newUserPassword} className="w-full">Create Account</Button>
                     </div>
+                 </motion.div>
+
+                 {/* Quota Focus Selector (for pool/contributions filtering) */}
+                 <motion.div variants={itemVar} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
+                   <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
+                     <Target className="w-4 h-4 text-indigo-500" /> Active Focus
+                   </h3>
+                   <p className="text-xs text-slate-500 mb-3">The focused quota is used for pool filtering and contribution stats.</p>
+                   <div className="space-y-2">
+                     {quotas.map(q => (
+                       <button key={q.id} onClick={() => switchQuota(q.id)}
+                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-all ${activeQuotaId === q.id ? 'bg-indigo-50 border-indigo-200 text-indigo-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                         <span className="truncate">{q.name}</span>
+                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ml-2 shrink-0 ${q.quotaType === 'general' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-indigo-50 text-indigo-600 border-indigo-200'}`}>
+                           {q.quotaType}
+                         </span>
+                       </button>
+                     ))}
+                   </div>
                  </motion.div>
              </div>
 
@@ -2777,13 +3199,14 @@ tex += `\\end{longtable}
                                             {isEdit ? ( 
                                                 <div className="flex flex-col gap-1">
                                                     <input className="w-full p-1 border rounded text-xs" value={editUserForm.name} onChange={e => setEditUserForm({...editUserForm, name: e.target.value})} />
-                                                    <select 
+                                                    <select
                                                         className="w-full p-1 border rounded text-[10px] bg-slate-50 font-bold text-indigo-600"
                                                         value={editUserForm.role}
                                                         onChange={e => setEditUserForm({...editUserForm, role: e.target.value as any})}
                                                     >
                                                         <option value="writer">Writer</option>
                                                         <option value="director">Director</option>
+                                                        {currentUser.role === 'admin' && <option value="admin">Admin</option>}
                                                     </select>
                                                 </div>
                                                 ) : (
@@ -2836,19 +3259,19 @@ tex += `\\end{longtable}
                                         ) : (
                                             /* REMOVED OPACITY CLASSES BELOW */
                                             <div className="flex justify-end gap-1">
-                                                {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role !== 'admin')) && (
-                                                    <button 
-                                                        onClick={() => startEditUser(u)} 
+                                                {currentUser.role === 'admin' && (
+                                                    <button
+                                                        onClick={() => startEditUser(u)}
                                                         className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100"
                                                         title="Edit User"
                                                     >
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
                                                 )}
-                                                
-                                                {(currentUser.role === 'admin' || (currentUser.role === 'director' && u.role === 'writer')) && (
-                                                    <button 
-                                                        onClick={() => deleteUser(u.id)} 
+
+                                                {currentUser.role === 'admin' && u.role !== 'admin' && (
+                                                    <button
+                                                        onClick={() => deleteUser(u.id)}
                                                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
                                                         title="Delete User"
                                                     >

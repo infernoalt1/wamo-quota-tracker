@@ -247,9 +247,9 @@ export const api = {
     return res.json();
   },
 
-  createQuota: async (quota: Partial<Quota>): Promise<Quota> => {
+  createQuota: async (quota: Partial<Quota> & { assignedUserIds?: string[] }): Promise<Quota> => {
       if (USE_MOCK_BACKEND) return mockApi.addQuota(quota);
-      
+
       const res = await fetch(`${API_BASE_URL}/api/quotas`, {
         method: 'POST',
         headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -258,9 +258,9 @@ export const api = {
       if (!res.ok) throw new Error('Failed to create quota');
       return res.json();
   },
-  
-  updateQuota: async (quota: Quota): Promise<void> => {
-    if (USE_MOCK_BACKEND) return mockApi.updateQuota(quota);
+
+  updateQuota: async (quota: Partial<Quota> & { id: string; assignedUserIds?: string[] }): Promise<void> => {
+    if (USE_MOCK_BACKEND) return mockApi.updateQuota(quota as Quota);
 
     const res = await fetch(`${API_BASE_URL}/api/quotas/${quota.id}`, {
       method: 'PUT',
@@ -317,7 +317,11 @@ export const api = {
 // --- HELPER: Auth Header ---
 function getAuthHeader() {
     const token = localStorage.getItem('token');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
+    const headers: Record<string, string> = {};
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
 }
 
 // --- MOCK IMPLEMENTATION (LOCAL STORAGE) ---
