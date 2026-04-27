@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode } from './types';
+import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode, Notification, NotificationType } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
+import { Avatar } from './components/Avatar';
 import { api } from './api';
 import { motion, AnimatePresence, Variants, useAnimation } from 'framer-motion';
 import { 
@@ -110,24 +111,114 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, badge }
 );
 
 const TOPICS: Topic[] = ['Algebra', 'Geometry', 'Combinatorics', 'Number Theory'];
+const TOPIC_LABELS: Record<Topic, string> = {
+  Algebra: 'A',
+  Geometry: 'G',
+  Combinatorics: 'C',
+  'Number Theory': 'N'
+};
+const TOPIC_CHIP_CLASSES: Record<Topic, string> = {
+  Algebra: 'bg-blue-50 text-blue-700 border-blue-200',
+  Geometry: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  Combinatorics: 'bg-orange-50 text-orange-700 border-orange-200',
+  'Number Theory': 'bg-purple-50 text-purple-700 border-purple-200'
+};
+const DIFFICULTY_MIN = 0.5;
+const DIFFICULTY_MAX = 10;
+const DIFFICULTY_QUICK_VALUES = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
 
-const AOPS_SCALE_INFO = (
-    <div className="text-[10px] text-slate-500 space-y-1.5 mt-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
-        <p className="font-bold text-slate-800 text-xs">AoPS Competition Ratings Scale (Estimate)</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <p><span className="text-indigo-600 font-bold">1:</span> Beginner</p>
-            <p><span className="text-indigo-600 font-bold">2:</span> Motivated Beginner</p>
-            <p><span className="text-indigo-600 font-bold">3:</span> Early Intermediate</p>
-            <p><span className="text-indigo-600 font-bold">4:</span> Intermediate</p>
-            <p><span className="text-indigo-600 font-bold">5:</span> Difficult AIME</p>
-            <p><span className="text-indigo-600 font-bold">6:</span> Intro Olympiad</p>
-            <p><span className="text-indigo-600 font-bold">7:</span> Tough Olympiad</p>
-            <p><span className="text-indigo-600 font-bold">8:</span> High Olympiad</p>
-            <p><span className="text-indigo-600 font-bold">9:</span> Expert</p>
-            <p><span className="text-indigo-600 font-bold">10:</span> World Class</p>
-        </div>
-    </div>
-);
+const DIFFICULTY_GUIDE = [
+  { value: 0.5, label: 'Easiest', summary: 'Easiest AMC 8 1-5, MATHCOUNTS School Sprint 1-20, easier middle-school word problems, easier Math Kangaroo, MOEMS E.', references: 'Basic elementary-middle school techniques; usually one direct idea.', exampleTitle: '2003 AMC 8 Problem 1', exampleText: `Jamie counted the number of edges of a cube, Jimmy counted the numbers of corners, and Judy counted the number of faces. They then added the three numbers. What was the resulting sum?` },
+  { value: 1.0, label: 'Beginner', summary: 'MOEMS M, MATHCOUNTS School Sprint 20-30/Target, Chapter Sprint 10-20, easier AMC 8 1-10, easier AMC 10 5-10, AMC 12 1-5.', references: 'Standard middle-school techniques with moderate word-problem setup.', exampleTitle: '2021 Spring AMC 10B Problem 1', exampleText: `How many integer values of $x$ satisfy $|x| < 3\\pi$?` },
+  { value: 1.5, label: 'Strong Beginner', summary: 'AMC 8 11-20, moderately challenging AMC 10 1-10, AMC 12 1-5, and harder middle-school contest problems.', references: 'School-level knowledge used in a less routine way.', exampleTitle: '2020 AMC 8 Problem 19', exampleText: `A number is called flippy if its digits alternate between two distinct digits. For example, $2020$ and $37373$ are flippy, but $3883$ and $123123$ are not. How many five-digit flippy numbers are divisible by $15$?` },
+  { value: 2.0, label: 'Motivated Beginner', summary: 'AMC 8 21-25, MATHCOUNTS Chapter Sprint 21-30/Target 6-8, States/Nationals, AMC 10 11-15, AMC 12 5-10, easiest AIME 1-3.', references: 'Harder beginner problems with real contest strategy.', exampleTitle: '2021 Spring AMC 10B Problem 18', exampleText: `A fair $6$-sided die is repeatedly rolled until an odd number appears. What is the probability that every even number appears at least once before the first occurrence of an odd number?` },
+  { value: 2.5, label: 'Advanced Beginner', summary: 'Harder AMC 8 21-25, harder MATHCOUNTS States, AMC 10 16-20, AMC 12 11-15, usual AIME 1-3.', references: 'Hardest beginner tier; often needs organization or a useful representation.', exampleTitle: '2013 AMC 12A Problem 16', exampleText: `$A$, $B$, $C$ are three piles of rocks. The mean weight of the rocks in $A$ is $40$ pounds, the mean weight of the rocks in $B$ is $50$ pounds, the mean weight of the rocks in the combined piles $A$ and $B$ is $43$ pounds, and the mean weight of the rocks in the combined piles $A$ and $C$ is $44$ pounds. What is the greatest possible integer value for the mean in pounds of the rocks in the combined piles $B$ and $C$?` },
+  { value: 3.0, label: 'Early Intermediate', summary: 'Harder MATHCOUNTS National questions, easiest AMC 10 21-25, easier AMC 12 15-20, harder AIME 1-3, easier AIME 4-6.', references: 'Creative thinking beyond direct application.', exampleTitle: '2018 AMC 10A Problem 24', exampleText: `Triangle $ABC$ with $AB=50$ and $AC=10$ has area $120$. Let $D$ be the midpoint of $\\overline{AB}$, and let $E$ be the midpoint of $\\overline{AC}$. The angle bisector of $\\angle BAC$ intersects $\\overline{DE}$ and $\\overline{BC}$ at $F$ and $G$, respectively. What is the area of quadrilateral $FDBG$?` },
+  { value: 3.5, label: 'Early Intermediate+', summary: 'Upper AMC and mid-AIME transition problems, often AIME II or late AMC style.', references: 'Layered algebra, geometry, or casework with a hidden simplification.', exampleTitle: '2017 AIME II Problem 7', exampleText: `Find the number of integer values of $k$ in the closed interval $[-500,500]$ for which the equation $\\log(kx)=2\\log(x+2)$ has exactly one real solution.` },
+  { value: 4.0, label: 'Intermediate', summary: 'AMC 12 21-25, medium-hard AIME 4-6, easy-medium AIME 7-10.', references: 'Strong contest technique and sustained execution.', exampleTitle: '2019 AMC 10B Problem 24 / 2019 AMC 12B Problem 22', exampleText: `Define a sequence recursively by $x_0=5$ and
+$$x_{n+1}=\\frac{x_n^2+5x_n+4}{x_n+6}$$
+for all nonnegative integers $n$. Let $m$ be the least positive integer such that
+$$x_m\\le 4+\\frac{1}{2^{20}}.$$
+In which of the following intervals does $m$ lie?
+
+$\\text{(A) }[9,26]\\qquad \\text{(B) }[27,80]\\qquad \\text{(C) }[81,242]\\qquad \\text{(D) }[243,728]\\qquad \\text{(E) }[729,\\infty)$` },
+  { value: 4.5, label: 'Intro Proof/Olympiad', summary: 'Hard AMC/AIME transition and easiest proof-based olympiad problems, such as USAJMO 1/4.', references: 'First proof-flavored level; may require a clean argument, not just computation.', exampleTitle: 'USAJMO 2011/1', exampleText: `Find, with proof, all positive integers $n$ for which $2^n+12^n+2011^n$ is a perfect square.` },
+  { value: 5.0, label: 'Difficult AIME / Simple Olympiad', summary: 'Difficult AIME 11-13 and simple proof-based olympiad problems, including early JBMO and easiest USAJMO 1/4.', references: 'Advanced AIME or simple olympiad-style proof.', exampleTitle: 'JBMO 2020/1', exampleText: `Find all triples $(a,b,c)$ of real numbers such that the following system holds:
+$$a+b+c=\\frac{1}{a}+\\frac{1}{b}+\\frac{1}{c},$$
+$$a^2+b^2+c^2=\\frac{1}{a^2}+\\frac{1}{b^2}+\\frac{1}{c^2}.$$` },
+  { value: 5.5, label: 'Advanced AIME / Proof', summary: 'Advanced AIME and proof problems between difficult AIME and introductory olympiad.', references: 'Multiple linked ideas; geometry/proof setup is common.', exampleTitle: '2011 AMC 12A Problem 25', exampleText: `Triangle $ABC$ has $\\angle BAC=60^\\circ$, $\\angle CBA\\le 90^\\circ$, $BC=1$, and $AC\\ge AB$. Let $H$, $I$, and $O$ be the orthocenter, incenter, and circumcenter of $\\triangle ABC$, respectively. Assume that the area of pentagon $BCOIH$ is the maximum possible. What is $\\angle CBA$?` },
+  { value: 6.0, label: 'Intro Olympiad', summary: 'AIME 14/15 and introductory olympiad questions, harder USAJMO 1/4, easier USAJMO 2/5, easier USAMO/IMO 1/4.', references: 'Genuine olympiad-level reasoning with a discoverable main idea.', exampleTitle: '2020 AIME I Problem 15', exampleText: `Let $\\triangle ABC$ be an acute triangle with circumcircle $\\omega$, and let $H$ be the intersection of the altitudes of $\\triangle ABC$. Suppose the tangent to the circumcircle of $\\triangle HBC$ at $H$ intersects $\\omega$ at points $X$ and $Y$ with $HA=3$, $HX=2$, and $HY=6$. The area of $\\triangle ABC$ can be written in the form $m\\sqrt n$, where $m$ and $n$ are positive integers, and $n$ is not divisible by the square of any prime. Find $m+n$.` },
+  { value: 6.5, label: 'Olympiad', summary: 'Olympiad problems around USAMO/USAJMO early-mid difficulty.', references: 'Proof-level geometry, algebra, number theory, or combinatorics with a serious lemma.', exampleTitle: 'USAMO 2021/1, USAJMO 2021/2', exampleText: `Rectangles $BCC_1B_2$, $CAA_1C_2$, and $ABB_1A_2$ are erected outside an acute triangle $ABC$. Suppose that
+$$\\angle BC_1C+\\angle CA_1A+\\angle AB_1B=180^\\circ.$$
+Prove that lines $B_1C_2$, $C_1A_2$, and $A_1B_2$ are concurrent.` },
+  { value: 7.0, label: 'Tough Olympiad', summary: 'Harder USAJMO 2/5, most USAJMO 3/6, extremely hard USAMO/IMO 1/4, easy-medium USAMO/IMO 2/5.', references: 'Technical olympiad problems requiring several insights.', exampleTitle: 'IMO 2015/1', exampleText: `We say that a finite set $S$ in the plane is balanced if, for any two different points $A,B$ in $S$, there is a point $C$ in $S$ such that $AC=BC$. We say that $S$ is centre-free if for any three different points $A,B,C$ in $S$, there is no point $P$ in $S$ such that $PA=PB=PC$.
+
+a. Show that for all integers $n\\ge 3$, there exists a balanced set consisting of $n$ points.
+
+b. Determine all integers $n\\ge 3$ for which there exists a balanced centre-free set consisting of $n$ points.` },
+  { value: 7.5, label: 'Advanced Olympiad', summary: 'Advanced national olympiad level, around hard USAMO/IMO 2/5.', references: 'Hard functional equations, geometry, or number theory with a hidden structure.', exampleTitle: 'USAMO 2014/2', exampleText: `Let $\\mathbb Z$ be the set of integers. Find all functions $f:\\mathbb Z\\to\\mathbb Z$ such that
+$$xf(2f(y)-x)+y^2f(2x-f(y))=\\frac{f(x)^2}{x}+f(yf(y))$$
+for all $x,y\\in\\mathbb Z$ with $x\\ne 0$.` },
+  { value: 8.0, label: 'High Olympiad', summary: 'Medium-hard USAMO and IMO 2/5, easiest USAMO and IMO 3/6.', references: 'High olympiad level with a very non-obvious main idea.', exampleTitle: 'IMO 2014/5', exampleText: `For each positive integer $n$, the Bank of Cape Town issues coins of denomination $\\frac{1}{n}$. Given a finite collection of such coins (of not necessarily different denominations) with total value at most $99+\\frac{1}{2}$, prove that it is possible to split this collection into $100$ or fewer groups, such that each group has total value at most $1$.` },
+  { value: 8.5, label: 'Very High Olympiad', summary: 'Very hard national/IMO-level problems above standard problem 2/5 difficulty.', references: 'Deep olympiad geometry or combinatorics; usually elite training level.', exampleTitle: 'IMO 2019/6', exampleText: `Let $I$ be the incentre of acute triangle $ABC$ with $AB\\ne AC$. The incircle $\\omega$ of $ABC$ is tangent to sides $BC$, $CA$, and $AB$ at $D$, $E$, and $F$, respectively. The line through $D$ perpendicular to $EF$ meets $\\omega$ at $R$. Line $AR$ meets $\\omega$ again at $P$. The circumcircles of triangle $PCE$ and $PBF$ meet again at $Q$.
+
+Prove that lines $DI$ and $PQ$ meet on the line through $A$ perpendicular to $AI$.` },
+  { value: 9.0, label: 'Expert Olympiad', summary: 'Average USAMO and IMO 3/6.', references: 'Expert olympiad problems where very few students find the central idea quickly.', exampleTitle: 'IMO 2022/3', exampleText: `Let $k$ be a positive integer and let $S$ be a finite set of odd prime numbers. Prove that there is at most one way (up to rotation and reflection) to place the elements of $S$ around the circle such that the product of any two neighbors is of the form $x^2+x+k$ for some positive integer $x$.` },
+  { value: 9.5, label: 'Hardest Olympiad', summary: 'Hard USAMO and IMO 3/6; among the hardest problems strong students could reasonably solve.', references: 'The hardest regular olympiad tier.', exampleTitle: 'IMO 2018/3', exampleText: `An anti-Pascal triangle is an equilateral triangular array of numbers such that, except for the numbers in the bottom row, each number is the absolute value of the difference of the two numbers immediately below it. For example, the following is an anti-Pascal triangle with four rows which contains every integer from $1$ to $10$:
+$$\\begin{array}{c}
+4\\\\
+2\\quad 6\\\\
+5\\quad 7\\quad 1\\\\
+8\\quad 3\\quad 10\\quad 9
+\\end{array}$$
+Does there exist an anti-Pascal triangle with $2018$ rows which contains every integer from $1$ to $1+2+3+\\cdots+2018$?` },
+  { value: 10.0, label: 'Historically Hard', summary: 'Historically hard problems, often too tedious, long, or difficult even for very hard contests.', references: 'World-class difficulty; very few students solve globally.', exampleTitle: 'IMO 2020/6', exampleText: `Prove that there exists a positive constant $c$ such that the following statement is true: Consider an integer $n>1$, and a set $S$ of $n$ points in the plane such that the distance between any two different points in $S$ is at least $1$. It follows that there is a line $\\ell$ separating $S$ such that the distance from any point of $S$ to $\\ell$ is at least $cn^{-1/3}$.
+
+(A line $\\ell$ separates a set of points $S$ if some segment joining two points in $S$ crosses $\\ell$.)` },
+];
+
+const parseDifficultyValue = (value: string) => {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeDifficultyValue = (value: string) => {
+  const parsed = parseDifficultyValue(value);
+  if (parsed === null) return null;
+  return Math.min(Math.max(parsed, DIFFICULTY_MIN), DIFFICULTY_MAX).toFixed(1);
+};
+
+const clampDifficultyNumber = (value: number | string | null | undefined) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DIFFICULTY_MIN;
+  return Math.min(Math.max(parsed, DIFFICULTY_MIN), DIFFICULTY_MAX);
+};
+
+const getDifficultyReference = (item: typeof DIFFICULTY_GUIDE[number]) => item.summary;
+
+const getDifficultyLabel = (value: string) => {
+  const parsed = parseDifficultyValue(value);
+  if (parsed === null) return 'Select difficulty';
+  const d = Math.min(Math.max(parsed, DIFFICULTY_MIN), DIFFICULTY_MAX);
+  const exact = DIFFICULTY_GUIDE.find(item => item.value === Number(d.toFixed(1)));
+  if (exact) return getDifficultyReference(exact);
+  const lower = [...DIFFICULTY_GUIDE].reverse().find(item => item.value < d);
+  const upper = DIFFICULTY_GUIDE.find(item => item.value > d);
+  if (lower && upper) return `${lower.value.toFixed(1)}-${upper.value.toFixed(1)}: ${lower.summary}`;
+  const nearest = lower || upper;
+  return nearest ? getDifficultyReference(nearest) : 'Select difficulty';
+};
+
+type ToastVariant = 'success' | 'info' | 'warning' | 'error';
+
+interface Toast {
+  id: string;
+  variant: ToastVariant;
+  title: string;
+  message?: string;
+  duration?: number;
+}
 
 // --- CONSTELLATION BACKGROUND COMPONENT ---
 const ConstellationBg = () => {
@@ -211,6 +302,7 @@ export default function App() {
   // --- Global State ---
   const [users, setUsers] = useState<User[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [deletedProblems, setDeletedProblems] = useState<Problem[]>([]);
   const [quotas, setQuotas] = useState<Quota[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [activeQuotaId, setActiveQuotaId] = useState<string>('q1');
@@ -218,8 +310,13 @@ export default function App() {
   // --- Session State ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'dashboard' | 'pool' | 'submit' | 'admin' | 'composer' | 'waitlist'>('dashboard');
+  const [waitlistTab, setWaitlistTab] = useState<'pending' | 'deleted'>('pending');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimeoutsRef = useRef<Map<string, number>>(new Map());
   
   // Login State
   const [loginNameInput, setLoginNameInput] = useState(''); // <--- ADD THIS
@@ -240,6 +337,7 @@ export default function App() {
   const [answerKey, setAnswerKey] = useState('');
   const [difficulty, setDifficulty] = useState('');
   const [showRatingScale, setShowRatingScale] = useState(false);
+  const [expandedGuideValue, setExpandedGuideValue] = useState<number | null>(null);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>([]);
   const [imageData, setImageData] = useState<string | null>(null);
   const [isVerified, setIsVerified] = useState(false); 
@@ -283,9 +381,9 @@ export default function App() {
   const [poolFilterTopic, setPoolFilterTopic] = useState<string>('All');
   const [poolFilterStatus, setPoolFilterStatus] = useState<string>('All');
   const [poolFilterQuota, setPoolFilterQuota] = useState<string>('All');
-  const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<number>(0);
-  const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<number>(10);
-  const [poolIds, setPoolIds] = useState<string[]>([]);
+  const [poolFilterDiffMin, setPoolFilterDiffMin] = useState<string>('');
+  const [poolFilterDiffMax, setPoolFilterDiffMax] = useState<string>('');
+  const [contributionFilterQuota, setContributionFilterQuota] = useState<string>('All');
 
   // Composer State
   const [composerSelectedRoundId, setComposerSelectedRoundId] = useState<string | null>(null);
@@ -312,6 +410,84 @@ export default function App() {
   const [exportRoundName, setExportRoundName] = useState('');
   const [exportContestName, setExportContestName] = useState('Washington Math Tournament');
   const [exportDate, setExportDate] = useState('Oct 11th, 2025');
+
+  const dismissToast = (id: string) => {
+    const timeoutId = toastTimeoutsRef.current.get(id);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      toastTimeoutsRef.current.delete(id);
+    }
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  };
+
+  const showToast = (toast: Omit<Toast, 'id'>) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const duration = toast.duration ?? (toast.variant === 'error' ? 5500 : 4000);
+    setToasts(prev => [{ ...toast, id, duration }, ...prev].slice(0, 5));
+    const timeoutId = window.setTimeout(() => dismissToast(id), duration);
+    toastTimeoutsRef.current.set(id, timeoutId);
+  };
+
+  useEffect(() => {
+    return () => {
+      toastTimeoutsRef.current.forEach(timeoutId => window.clearTimeout(timeoutId));
+      toastTimeoutsRef.current.clear();
+    };
+  }, []);
+
+  const getToastIcon = (variant: ToastVariant) => {
+    switch (variant) {
+      case 'success': return <CheckCircle className="h-4 w-4 text-emerald-600" />;
+      case 'warning': return <AlertCircle className="h-4 w-4 text-amber-600" />;
+      case 'error': return <ShieldAlert className="h-4 w-4 text-red-600" />;
+      default: return <Info className="h-4 w-4 text-indigo-600" />;
+    }
+  };
+
+  const getToastAccent = (variant: ToastVariant) => {
+    switch (variant) {
+      case 'success': return 'border-l-emerald-500';
+      case 'warning': return 'border-l-amber-500';
+      case 'error': return 'border-l-red-500';
+      default: return 'border-l-indigo-500';
+    }
+  };
+
+  const ToastViewport = () => (
+    <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[calc(100%-2rem)] max-w-[360px] flex-col gap-2 sm:right-5 sm:top-5">
+      <AnimatePresence initial={false}>
+        {toasts.map(toast => (
+          <motion.div
+            key={toast.id}
+            layout
+            initial={{ opacity: 0, y: -10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 24, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            className={`pointer-events-auto rounded-xl border border-l-4 bg-white p-3 shadow-lg ${getToastAccent(toast.variant)}`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-50 border border-slate-100">
+                {getToastIcon(toast.variant)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold leading-5 text-slate-900">{toast.title}</p>
+                {toast.message && <p className="mt-0.5 text-xs leading-5 text-slate-500">{toast.message}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={() => dismissToast(toast.id)}
+                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Dismiss notification"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
 
 
   // --- Initial Load ---
@@ -348,7 +524,6 @@ export default function App() {
                 const savedQ = localStorage.getItem('probfair_active_quota_id');
                 if (savedQ) {
                    setActiveQuotaId(savedQ);
-                   setPoolFilterQuota(savedQ);
                 }
             }
         } catch(e) {
@@ -376,22 +551,28 @@ export default function App() {
 
       setIsLoadingData(true);
       try {
-          const [u, p, q, r] = await Promise.all([
+          const [u, p, q, r, notifs] = await Promise.all([
               api.getUsers(),
               api.getProblems(),
               api.getQuotas(),
-              api.getRounds()
+              api.getRounds(),
+              api.getNotifications().catch(() => [] as Notification[])
           ]);
           setUsers(u);
           setProblems(p);
           setQuotas(q);
           setRounds(r);
+          setNotifications(notifs);
           
           // Ensure active quota ID is valid
           if (q.length > 0 && !q.find(i => i.id === activeQuotaId)) {
              setActiveQuotaId(q[0].id);
-             // Also update the filter if it was set to the invalid ID
-             if (poolFilterQuota === activeQuotaId) setPoolFilterQuota(q[0].id);
+          }
+          if (poolFilterQuota !== 'All' && !q.find(i => i.id === poolFilterQuota)) {
+             setPoolFilterQuota('All');
+          }
+          if (contributionFilterQuota !== 'All' && !q.find(i => i.id === contributionFilterQuota)) {
+             setContributionFilterQuota('All');
           }
       } catch (e) {
           console.error("Failed to refresh data", e);
@@ -420,16 +601,31 @@ export default function App() {
     }
   }, [quotas, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (poolFilterQuota !== 'All' && quotas.length > 0 && !quotas.some(q => q.id === poolFilterQuota)) {
+      setPoolFilterQuota('All');
+    }
+    if (composerSourceQuota !== 'All' && quotas.length > 0 && !quotas.some(q => q.id === composerSourceQuota)) {
+      setComposerSourceQuota('All');
+    }
+    if (contributionFilterQuota !== 'All' && quotas.length > 0 && !quotas.some(q => q.id === contributionFilterQuota)) {
+      setContributionFilterQuota('All');
+    }
+  }, [quotas, poolFilterQuota, composerSourceQuota, contributionFilterQuota]);
+
+  const isOffWaitlist = (p: Problem) => p.status === 'approved' || p.status === 'accepted';
+
   // Update Users submitted & voted count locally based on ACTIVE QUOTA
   useEffect(() => {
     if (currentUser?.role === 'guest') return;
 
     if (problems.length >= 0 && users.length > 0) {
       const activeProblems = problems.filter(p => p.quotaId === activeQuotaId);
+      const countableActiveProblems = activeProblems.filter(isOffWaitlist);
       
       const updatedUsers = users.map(u => ({
         ...u,
-        submittedCount: activeProblems.filter(p => p.authorId === u.id).length,
+        submittedCount: countableActiveProblems.filter(p => p.authorId === u.id).length,
         voteCount: activeProblems.filter(p => p.votedBy?.includes(u.id)).length
       }));
       
@@ -440,57 +636,6 @@ export default function App() {
     }
   }, [problems, activeQuotaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Handle Pool Sorting & Filtering
-  useEffect(() => {
-    if (view === 'pool') {
-      // In the "Pool", we only show Approved problems, or Accepted. We hide Pending (Waitlist).
-      let filtered = [...problems].filter(p => p.status === 'approved' || p.status === 'accepted');
-
-      // Filter by Quota
-      if (poolFilterQuota !== 'All') {
-          filtered = filtered.filter(p => p.quotaId === poolFilterQuota);
-      }
-
-      // Filter by Topic
-      if (poolFilterTopic !== 'All') {
-          filtered = filtered.filter(p => p.topics && p.topics.includes(poolFilterTopic as Topic));
-      }
-
-      // Filter by Status (Within allowed pool types)
-      if (poolFilterStatus !== 'All') {
-          filtered = filtered.filter(p => {
-             const s = p.status || 'pending';
-             return s === poolFilterStatus;
-          });
-      }
-
-      // Filter by Difficulty
-      filtered = filtered.filter(p => {
-          const d = p.difficulty || 0;
-          return d >= poolFilterDiffMin && d <= poolFilterDiffMax;
-      });
-
-      // Sort
-      filtered.sort((a, b) => {
-          const scoreA = a.score || 0;
-          const scoreB = b.score || 0;
-          const diffA = a.difficulty || 0;
-          const diffB = b.difficulty || 0;
-
-          switch(poolSort) {
-              case 'highest': return scoreB - scoreA;
-              case 'lowest': return scoreA - scoreB;
-              case 'hardest': return diffB - diffA;
-              case 'easiest': return diffA - diffB;
-              case 'newest': return b.createdAt - a.createdAt;
-              default: return 0;
-          }
-      });
-
-      setPoolIds(filtered.map(p => p.id));
-    }
-  }, [view, problems.length, poolSort, poolFilterTopic, poolFilterStatus, poolFilterDiffMin, poolFilterDiffMax, poolFilterQuota]); 
-  
   // Set Composer default filter when opening view
   useEffect(() => {
       if (view === 'composer') {
@@ -502,6 +647,7 @@ export default function App() {
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
+  const getErrorMessage = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
 
   // --- Actions ---
 
@@ -575,8 +721,10 @@ export default function App() {
         // Switch to this round immediately
         setComposerSelectedRoundId(newRound.id);
         setIsCreatingRound(false);
+        showToast({ variant: 'success', title: 'Round created', message: `${newRound.name} is ready.` });
     } catch(e) {
         console.error("Failed to create round", e);
+        showToast({ variant: 'error', title: "Couldn't create round", message: getErrorMessage(e, 'Please try again.') });
     }
   };
 
@@ -598,8 +746,10 @@ export default function App() {
           });
           refreshData(); // Updates the rounds list
           setIsEditingRound(false);
+          showToast({ variant: 'success', title: 'Round updated', message: 'Round settings were saved.' });
       } catch (e) {
           console.error("Edit round failed", e);
+          showToast({ variant: 'error', title: "Couldn't update round", message: getErrorMessage(e, 'Please try again.') });
       }
   };
 
@@ -610,8 +760,10 @@ export default function App() {
           await api.deleteRound(composerSelectedRoundId);
           setComposerSelectedRoundId(null);
           refreshData();
+          showToast({ variant: 'success', title: 'Round deleted', message: 'Problems were unassigned, not deleted.' });
       } catch (e) {
           console.error("Delete round failed", e);
+          showToast({ variant: 'error', title: "Couldn't delete round", message: getErrorMessage(e, 'Please try again.') });
       }
   };
 
@@ -642,8 +794,10 @@ export default function App() {
       });
       await refreshData();
       setEditingQuotaId(null);
+      showToast({ variant: 'success', title: 'Quota updated', message: 'Cycle settings were saved.' });
     } catch (e) {
       console.error("Failed to update quota");
+      showToast({ variant: 'error', title: "Couldn't save quota", message: getErrorMessage(e, 'Please try again.') });
     }
   };
 
@@ -664,8 +818,10 @@ export default function App() {
       await refreshData();
       setIsCreatingQuota(false);
       setNewQuotaForm({ name: '', target: 5, voteTarget: 3, instructions: '', quotaType: 'formal', assignmentMode: 'global', isEnabled: true, assignedUserIds: [] });
+      showToast({ variant: 'success', title: 'Quota created', message: 'The new cycle is ready.' });
     } catch (e) {
       console.error("Failed to create quota", e);
+      showToast({ variant: 'error', title: "Couldn't create quota", message: getErrorMessage(e, 'Please try again.') });
     }
   };
 
@@ -674,7 +830,7 @@ export default function App() {
       ? users.filter(u => u.role !== 'guest')
       : users.filter(u => q.assignedUserIds?.includes(u.id));
     return eligibleUsers.map(u => {
-      const submitted = problems.filter(p => p.authorId === u.id && p.quotaId === q.id).length;
+      const submitted = problems.filter(p => p.authorId === u.id && p.quotaId === q.id && isOffWaitlist(p)).length;
       const target = u.customTargets?.[q.id] || q.target;
       return { user: u, submitted, target };
     }).sort((a, b) => b.submitted - a.submitted);
@@ -682,8 +838,23 @@ export default function App() {
 
   const switchQuota = (id: string) => {
     setActiveQuotaId(id);
-    setPoolFilterQuota(id); // Auto-filter pool to the new active quota for convenience
     localStorage.setItem('probfair_active_quota_id', id);
+  };
+
+  const handlePoolQuotaFilterChange = (id: string) => {
+    setPoolFilterQuota(id);
+    setPoolFilterTopic('All');
+    setPoolFilterStatus('All');
+    setPoolFilterDiffMin('');
+    setPoolFilterDiffMax('');
+  };
+
+  const clearPoolFilters = () => {
+    setPoolFilterQuota('All');
+    setPoolFilterTopic('All');
+    setPoolFilterStatus('All');
+    setPoolFilterDiffMin('');
+    setPoolFilterDiffMax('');
   };
 
   // -- User Management --
@@ -704,8 +875,10 @@ export default function App() {
         setNewUserName('');
         setNewUserPassword('');
         setNewUserRole('writer');
+        showToast({ variant: 'success', title: 'User created', message: 'The new account is ready.' });
     } catch(e) {
         console.error("Failed to create user", e);
+        showToast({ variant: 'error', title: "Couldn't create user", message: getErrorMessage(e, 'Please try again.') });
     }
   };
 
@@ -714,9 +887,10 @@ export default function App() {
     try {
         await api.deleteUser(id);
         await refreshData();
+        showToast({ variant: 'success', title: 'User deleted', message: 'The account and related submissions were removed.' });
     } catch(e) {
         console.error("Delete failed");
-        alert("Action failed. You may not have permission to delete this user.");
+        showToast({ variant: 'error', title: "Couldn't delete user", message: getErrorMessage(e, 'You may not have permission to delete this user.') });
     }
   }
 
@@ -740,9 +914,10 @@ export default function App() {
       });
       await refreshData();
       setEditingUserId(null);
+      showToast({ variant: 'success', title: 'User updated', message: 'Account changes were saved.' });
     } catch (e) {
       console.error("Failed to update user");
-      alert("Update failed. Directors cannot change passwords.");
+      showToast({ variant: 'error', title: "Couldn't update user", message: getErrorMessage(e, 'Directors cannot change passwords.') });
     }
   };
 
@@ -763,10 +938,10 @@ export default function App() {
     try {
         await api.resetVotes();
         await refreshData();
-        alert("All votes have been reset.");
+        showToast({ variant: 'success', title: 'Votes reset', message: 'All problem scores were cleared.' });
     } catch(e) {
         console.error("Failed to reset votes");
-        alert("Reset failed.");
+        showToast({ variant: 'error', title: "Couldn't reset votes", message: getErrorMessage(e, 'Please try again.') });
     }
   };
 
@@ -793,7 +968,7 @@ export default function App() {
       setStatement(prob.statement);
       setSolution(prob.solution || '');
       setAnswerKey(prob.answerKey || '');
-      setDifficulty(prob.difficulty.toString());
+      setDifficulty(Number(prob.difficulty).toFixed(1));
       setSelectedTopics(prob.topics || []);
       setImageData(prob.imageData || null);
       setIsVerified(true); // Auto-verify on edit since it's already there
@@ -812,7 +987,7 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 2 * 1024 * 1024) { // 2MB limit check on client for UX
-          alert("File is too large. Please use an image under 2MB.");
+          showToast({ variant: 'warning', title: 'Image too large', message: 'Please use an image under 2MB.' });
           return;
       }
       const reader = new FileReader();
@@ -829,6 +1004,12 @@ export default function App() {
         setSubmissionError("Please select at least one topic.");
         return;
     }
+    const normalizedDifficulty = normalizeDifficultyValue(difficulty);
+    if (!normalizedDifficulty) {
+        setSubmissionError("Please enter a valid difficulty.");
+        showToast({ variant: 'warning', title: 'Difficulty required', message: 'Enter a difficulty from 0.5 to 10.0.' });
+        return;
+    }
     
     setSubmissionError(null);
     setIsSubmitting(true);
@@ -839,7 +1020,7 @@ export default function App() {
           statement,
           solution,
           answerKey,
-          difficulty: parseFloat(difficulty),
+          difficulty: parseFloat(normalizedDifficulty),
           topics: selectedTopics,
           quotaId: selectedSubmissionQuotaId || activeQuotaId,
           imageData: imageData || undefined,
@@ -848,17 +1029,18 @@ export default function App() {
 
       if (editingProblemId) {
           await api.updateProblem(editingProblemId, payload);
+          showToast({ variant: 'success', title: 'Problem updated', message: 'Your changes were saved.' });
       } else {
           await api.submitProblem({
               ...payload,
               authorId: currentUser.id,
               authorName: currentUser.name,
           });
+          showToast({ variant: 'success', title: 'Problem submitted', message: 'Your problem was added to the waitlist.' });
       }
       
       // If guest, do not refresh data or change view heavily
       if (currentUser.role === 'guest') {
-          alert("Thank you! Your problem has been submitted for review.");
           resetForm();
       } else {
           await refreshData();
@@ -866,7 +1048,9 @@ export default function App() {
           setView('dashboard');
       }
     } catch (e: any) {
-      setSubmissionError(e.message || "System error during validation.");
+      const message = e.message || "System error during validation.";
+      setSubmissionError(message);
+      showToast({ variant: 'error', title: "Couldn't save problem", message });
     } finally {
       setIsSubmitting(false);
     }
@@ -875,11 +1059,16 @@ export default function App() {
   // -- Bulk Import --
   const handleBulkParse = async () => {
       if (!bulkText) return;
+      const normalizedDifficulty = normalizeDifficultyValue(difficulty);
+      if (!normalizedDifficulty) {
+          showToast({ variant: 'warning', title: 'Difficulty required', message: 'Enter a difficulty from 0.5 to 10.0.' });
+          return;
+      }
       try {
-          const parsed = await api.parseBulkLatex(bulkText, selectedTopics, parseFloat(difficulty));
+          const parsed = await api.parseBulkLatex(bulkText, selectedTopics, parseFloat(normalizedDifficulty));
           setParsedProblems(parsed);
       } catch (e) {
-          alert("Parsing failed. Please check format.");
+          showToast({ variant: 'error', title: "Couldn't parse import", message: getErrorMessage(e, 'Please check the format.') });
       }
   };
 
@@ -898,7 +1087,11 @@ export default function App() {
           } catch(e) { console.error(e); }
       }
       setIsSubmitting(false);
-      alert(`Imported ${successCount} problems successfully.`);
+      showToast({
+        variant: successCount === parsedProblems.length ? 'success' : 'warning',
+        title: successCount === parsedProblems.length ? 'Problems imported' : 'Import partially completed',
+        message: `Imported ${successCount} of ${parsedProblems.length} problem${parsedProblems.length === 1 ? '' : 's'}.`
+      });
       setBulkText('');
       setParsedProblems([]);
       setShowBulkImport(false);
@@ -934,9 +1127,89 @@ export default function App() {
     
     try {
         await api.toggleVote(problemId);
+        showToast({ variant: 'info', title: 'Vote updated' });
     } catch (e) {
         setProblems(oldProblems);
         console.error("Vote failed");
+        showToast({ variant: 'error', title: "Couldn't update vote", message: getErrorMessage(e, 'Please try again.') });
+    }
+  };
+
+  const refreshNotifications = async () => {
+    if (!currentUser || currentUser.role === 'guest') return;
+    setNotificationsLoading(true);
+    try {
+      const notifs = await api.getNotifications();
+      setNotifications(notifs);
+      const deletedProblemIds = new Set(
+        notifs
+          .filter(n => n.type === 'problem_deleted' && n.problemId)
+          .map(n => n.problemId as string)
+      );
+      if (deletedProblemIds.size > 0) {
+        setProblems(prev => prev.filter(p => !deletedProblemIds.has(p.id)));
+      }
+    } catch(e) {
+      // non-fatal
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  const refreshDeletedProblems = async () => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'director')) return;
+    try {
+      const deleted = await api.getDeletedProblems();
+      setDeletedProblems(deleted);
+    } catch(e) {
+      // non-fatal
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role === 'guest') return;
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshNotifications();
+      }
+    };
+
+    const intervalId = window.setInterval(refreshIfVisible, 15000);
+    window.addEventListener('focus', refreshNotifications);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshNotifications);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view === 'waitlist' || waitlistTab === 'deleted') {
+      refreshDeletedProblems();
+    }
+  }, [view, waitlistTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      setNotifications(prev => prev.map(n => ({ ...n, readAt: n.readAt ?? Date.now() })));
+    } catch(e) {}
+  };
+
+  const handleNotificationClick = async (notif: Notification) => {
+    if (!notif.readAt) {
+      api.markNotificationRead(notif.id).catch(() => {});
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, readAt: Date.now() } : n));
+    }
+    if (notif.problemId) {
+      const problem = problems.find(p => p.id === notif.problemId);
+      if (problem) {
+        switchQuota(problem.quotaId);
+        setView('dashboard');
+      }
     }
   };
 
@@ -945,25 +1218,66 @@ export default function App() {
         await api.updateProblemStatus(problemId, status);
         const updated = problems.map(p => p.id === problemId ? { ...p, status } : p);
         setProblems(updated);
+        refreshNotifications();
+        const title = status === 'approved'
+          ? 'Problem approved'
+          : status === 'pending'
+            ? 'Returned to waitlist'
+            : 'Problem accepted';
+        const message = status === 'approved'
+          ? 'The author will see this update on their dashboard.'
+          : status === 'pending'
+            ? 'The problem is back in the review queue.'
+            : 'The problem status was updated.';
+        showToast({ variant: 'success', title, message });
      } catch(e) {
         console.error("Failed to update status");
+        showToast({ variant: 'error', title: "Couldn't update status", message: getErrorMessage(e, 'Please try again.') });
      }
   };
 
   const handleDeleteProblem = async (problem: Problem) => {
-    if (!window.confirm(`Delete "${problem.title}"? This will permanently remove the problem, its votes, comments, and any round assignments.`)) {
+    if (!window.confirm(`Remove "${problem.title}" from the pool? The author will be notified. You can restore it later from the Deleted tab.`)) {
       return;
     }
+    const reasonInput = window.prompt('Optional reason for deletion (shown to the author):');
+    const reason = reasonInput?.trim() || undefined;
 
     const previousProblems = problems;
-    setProblems(problems.filter(p => p.id !== problem.id));
+    setProblems(prev => prev.filter(p => p.id !== problem.id));
+    // Optimistically add to deleted list so it appears immediately
+    setDeletedProblems(prev => [{
+      ...problem,
+      deletedAt: Date.now(),
+      deletedBy: currentUser!.id,
+      deletedByName: currentUser!.name,
+      deletedByAvatarUrl: currentUser!.avatarUrl || null,
+      deletionReason: reason || null,
+    }, ...prev.filter(p => p.id !== problem.id)]);
 
     try {
-      await api.deleteProblem(problem.id);
+      await api.deleteProblem(problem.id, reason);
+      refreshNotifications();
+      refreshDeletedProblems(); // sync with server truth
+      showToast({ variant: 'success', title: 'Problem removed', message: 'The author has been notified and can see the reason.' });
     } catch (e) {
       console.error("Failed to delete problem", e);
       setProblems(previousProblems);
-      alert("Delete failed.");
+      setDeletedProblems(prev => prev.filter(p => p.id !== problem.id));
+      showToast({ variant: 'error', title: "Couldn't remove problem", message: getErrorMessage(e, 'Please try again.') });
+    }
+  };
+
+  const handleRestoreProblem = async (problem: Problem) => {
+    if (!window.confirm(`Restore "${problem.title}" back to the pool?`)) return;
+    try {
+      await api.restoreProblem(problem.id);
+      setDeletedProblems(prev => prev.filter(p => p.id !== problem.id));
+      await refreshData();
+      refreshNotifications();
+      showToast({ variant: 'success', title: 'Problem restored', message: 'The problem is back in the pool and the author has been notified.' });
+    } catch(e) {
+      showToast({ variant: 'error', title: "Couldn't restore problem", message: getErrorMessage(e, 'Please try again.') });
     }
   };
   
@@ -978,6 +1292,7 @@ export default function App() {
       } catch(e) {
           console.error("Composer update failed");
           refreshData(); // Revert
+          showToast({ variant: 'error', title: "Couldn't save", message: getErrorMessage(e, 'Composer changes were reverted.') });
       }
   };
 
@@ -1026,8 +1341,10 @@ export default function App() {
          
          // Fix order
          await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
+         showToast({ variant: 'success', title: 'Added to round', message: `The problem was added to ${composerSelectedRound?.name || 'the round'}.` });
       } catch(e) {
           refreshData();
+          showToast({ variant: 'error', title: "Couldn't add to round", message: getErrorMessage(e, 'Please try again.') });
       }
   };
 
@@ -1050,7 +1367,10 @@ export default function App() {
           await api.removeFromRound(problem.id, composerSelectedRoundId);
       } catch(e) {
           refreshData();
+          showToast({ variant: 'error', title: "Couldn't remove from round", message: getErrorMessage(e, 'Please try again.') });
+          return;
       }
+      showToast({ variant: 'success', title: 'Removed from round', message: `The problem was removed from ${composerSelectedRound?.name || 'the round'}.` });
   };
 
   // Drag and Drop Handlers
@@ -1163,6 +1483,7 @@ export default function App() {
               await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
           } catch(e) {
               refreshData();
+              showToast({ variant: 'error', title: "Couldn't reorder round", message: getErrorMessage(e, 'Please try again.') });
           }
       }
   };
@@ -1250,11 +1571,11 @@ tex += `\\end{longtable}
 \\end{document}`;
 
       navigator.clipboard.writeText(tex).then(() => {
-          alert("Copied WAMT TeX template to clipboard!");
+          showToast({ variant: 'success', title: 'Export copied', message: 'WAMT TeX template copied to clipboard.' });
           setShowExportModal(false);
       }).catch(err => {
           console.error("Failed to copy", err);
-          alert("Failed to copy to clipboard");
+          showToast({ variant: 'error', title: "Couldn't copy export", message: getErrorMessage(err, 'Clipboard access failed.') });
       });
   };
 
@@ -1331,11 +1652,22 @@ tex += `\\end{longtable}
                             <MathText text={problem.title} />
                         </h4>
                         <span className="ml-2 text-[9px] font-bold bg-slate-50 text-slate-500 px-1 py-0.5 rounded border border-slate-100 whitespace-nowrap">
-                            D: {problem.difficulty}
+                            D: {Number(problem.difficulty).toFixed(1)}
                         </span>
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5 flex flex-wrap gap-2 items-center">
-                        <span className="truncate max-w-[150px]">{problem.topics.join(', ')}</span>
+                        <span className="flex items-center gap-1">
+                          {[...(problem.topics || [])].sort((a, b) => TOPICS.indexOf(a) - TOPICS.indexOf(b)).map(t => {
+                            return (
+                              <span key={t} title={t} className={`grid h-4 w-4 place-items-center rounded-full border text-[8px] font-black ${TOPIC_CHIP_CLASSES[t]}`}>
+                                {TOPIC_LABELS[t]}
+                              </span>
+                            );
+                          })}
+                        </span>
+                        <span className="flex items-center gap-0.5 text-slate-400">
+                            <FolderOpen className="w-2.5 h-2.5" /> {quotas.find(q => q.id === problem.quotaId)?.name || 'Unknown cycle'}
+                        </span>
                         {problem.score > 0 && (
                             <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
                                 <ThumbsUp className="w-2.5 h-2.5"/> {problem.score}
@@ -1448,8 +1780,193 @@ tex += `\\end{longtable}
       );
   };
 
+  // --- Notification Helpers ---
+
+  const getTimeAgo = (ts: number): string => {
+    const diff = Date.now() - ts;
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return `${min}m ago`;
+    const hours = Math.floor(min / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(ts).toLocaleDateString();
+  };
+
+  const getNotifIcon = (type: NotificationType) => {
+    switch (type) {
+      case 'problem_approved': return <CheckCircle className="w-4 h-4" />;
+      case 'problem_returned_to_waitlist': return <Clock className="w-4 h-4" />;
+      case 'problem_added_to_round': return <FolderOpen className="w-4 h-4" />;
+      case 'problem_removed_from_round': return <X className="w-4 h-4" />;
+      case 'problem_commented': return <MessageSquare className="w-4 h-4" />;
+      case 'problem_deleted': return <Trash2 className="w-4 h-4" />;
+      default: return <Activity className="w-4 h-4" />;
+    }
+  };
+
+  const getNotifStyle = (type: NotificationType): string => {
+    switch (type) {
+      case 'problem_approved': return 'bg-emerald-50 border-emerald-100 text-emerald-600';
+      case 'problem_returned_to_waitlist': return 'bg-amber-50 border-amber-100 text-amber-600';
+      case 'problem_added_to_round': return 'bg-indigo-50 border-indigo-100 text-indigo-600';
+      case 'problem_removed_from_round': return 'bg-orange-50 border-orange-100 text-orange-600';
+      case 'problem_commented': return 'bg-blue-50 border-blue-100 text-blue-600';
+      case 'problem_deleted': return 'bg-red-50 border-red-100 text-red-600';
+      default: return 'bg-slate-50 border-slate-100 text-slate-500';
+    }
+  };
+
+  const shouldShowActorAvatar = (notif: Notification) => {
+    return notif.type === 'problem_commented' && Boolean(notif.actorName && notif.actorId);
+  };
+
+  const NotificationItem = ({ notif }: { notif: Notification }) => {
+    const isUnread = !notif.readAt;
+    const showActorAvatar = shouldShowActorAvatar(notif);
+    return (
+      <div
+        onClick={() => handleNotificationClick(notif)}
+        className={`flex items-start gap-3 p-3 rounded-xl border shadow-sm cursor-pointer transition-all ${
+          isUnread
+            ? 'bg-indigo-50/70 border-indigo-200 hover:bg-indigo-100/80'
+            : 'bg-white border-slate-200 hover:bg-slate-50'
+        }`}
+      >
+        {showActorAvatar ? (
+          <Avatar name={notif.actorName || undefined} size="sm" />
+        ) : (
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${getNotifStyle(notif.type)}`}>
+            {getNotifIcon(notif.type)}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p className={`text-sm font-semibold leading-tight ${isUnread ? 'text-slate-900' : 'text-slate-700'}`}>
+              {notif.title}
+            </p>
+            <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0 mt-0.5">
+              {getTimeAgo(notif.createdAt)}
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{notif.body}</p>
+        </div>
+        {isUnread && (
+          <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
+        )}
+      </div>
+    );
+  };
+
+  const renderDifficultyGuideModal = () => {
+    const selected = normalizeDifficultyValue(difficulty);
+    return (
+      <AnimatePresence initial={false}>
+        {showRatingScale && (
+          <motion.div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/35 p-3 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.18 }}
+              className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            >
+              <div className="shrink-0 border-b border-slate-100 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight text-slate-900">Competition Difficulty Scale</h2>
+                    <p className="mt-1 text-sm text-slate-500">Use anchors as reference points; exact submissions can use tenths.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowRatingScale(false)}
+                    className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Close difficulty guide"
+                    title="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                <div className="grid gap-2">
+                  {DIFFICULTY_GUIDE.map(item => {
+                    const itemValue = item.value.toFixed(1);
+                    const isCurrent = selected === itemValue;
+                    const expanded = expandedGuideValue === item.value;
+                    return (
+                      <div
+                        key={item.value}
+                        className={`rounded-xl border p-4 transition-all ${isCurrent ? 'border-indigo-300 bg-indigo-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-indigo-200'}`}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDifficulty(itemValue);
+                              showToast({ variant: 'success', title: 'Difficulty selected', message: `${itemValue} - ${item.label}` });
+                            }}
+                            className={`grid h-12 w-16 shrink-0 place-items-center rounded-xl border font-mono text-lg font-black transition ${isCurrent ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-indigo-300 hover:text-indigo-700'}`}
+                            title={`Use ${itemValue}`}
+                          >
+                            {itemValue}
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-sm font-bold text-slate-900">{item.summary}</h3>
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500">{item.label}</span>
+                              {isCurrent && <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">Current</span>}
+                            </div>
+                            <p className="mt-1 text-xs leading-5 text-slate-600">{item.references}</p>
+                          </div>
+                          <div className="flex shrink-0 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedGuideValue(expanded ? null : item.value)}
+                              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                            >
+                              {expanded ? 'Hide example' : 'Show example'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDifficulty(itemValue);
+                                setShowRatingScale(false);
+                              }}
+                              className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-slate-800"
+                            >
+                              Use
+                            </button>
+                          </div>
+                        </div>
+                        {expanded && (
+                          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-xs font-bold text-slate-800">{item.exampleTitle}</p>
+                            <MathText text={item.exampleText} className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-600" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+  };
+
   const WaitlistProblemCard = ({ p }: { p: Problem }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isPreview, setIsPreview] = useState(false);
     const [formData, setFormData] = useState({
         title: p.title,
         statement: p.statement,
@@ -1475,13 +1992,23 @@ tex += `\\end{longtable}
             await api.updateProblem(p.id, { ...formData });
             await refreshData();
             setIsExpanded(false);
-        } catch(e) { console.error(e); alert("Failed to save"); }
+            showToast({ variant: 'success', title: 'Problem updated', message: 'Your changes were saved.' });
+        } catch(e) {
+            console.error(e);
+            showToast({ variant: 'error', title: "Couldn't save", message: getErrorMessage(e, 'Please try again.') });
+        }
         finally { setIsSaving(false); }
     };
     
     const approve = async () => {
-        await api.updateProblem(p.id, { ...formData, status: 'approved' });
-        await refreshData();
+        try {
+            await api.updateProblem(p.id, { ...formData, status: 'approved' });
+            await refreshData();
+            showToast({ variant: 'success', title: 'Problem approved', message: 'The author will see this update on their dashboard.' });
+        } catch (e) {
+            console.error(e);
+            showToast({ variant: 'error', title: "Couldn't approve problem", message: getErrorMessage(e, 'Please try again.') });
+        }
     };
 
     const toggleTopic = (t: Topic) => {
@@ -1509,42 +2036,81 @@ tex += `\\end{longtable}
                         <span>ID: {p.id.substring(0,8)}</span>
                         <span>•</span>
                         <span>{new Date(p.createdAt).toLocaleDateString()}</span>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-1">
+                            <FolderOpen className="w-3 h-3" />
+                            {quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
+                        </span>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-100 shrink-0">
                     <div className="flex flex-col items-center px-2 border-r border-slate-200">
                         <span className="text-[8px] font-bold text-slate-400 uppercase">Diff</span>
-                        <input 
+                        <input
                             type="number" step="0.1"
-                            className="w-10 text-sm bg-transparent text-center font-bold text-slate-800 outline-none placeholder:text-slate-400" 
-                            value={formData.difficulty} 
+                            className="w-10 text-sm bg-transparent text-center font-bold text-slate-800 outline-none placeholder:text-slate-400"
+                            value={formData.difficulty}
                             placeholder="0.0"
-                            onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})} 
+                            onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})}
                         />
                     </div>
-                    {/* ORIGINAL GREEN APPROVE BUTTON */}
-                    <Button 
-                        size="sm" 
-                        onClick={approve} 
+                    <Button
+                        size="sm"
+                        onClick={approve}
                         className="!bg-white !text-emerald-600 border border-slate-200 hover:!bg-slate-50 h-8 text-xs px-4 shadow-sm font-bold"
                     >
                         Approve
                     </Button>
-                    <button 
-                        onClick={() => setIsExpanded(!isExpanded)} 
-                        className={`p-1.5 rounded-md border transition-colors ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400 border-slate-200'}`}
+                    <button
+                        onClick={() => handleDeleteProblem(p)}
+                        className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
+                        title="Remove problem"
                     >
-                        {isExpanded ? <X size={16} /> : <Pencil size={16} />}
+                        <Trash2 size={16} />
                     </button>
+                    <button
+                        onClick={() => { setIsPreview(!isPreview); setIsExpanded(false); }}
+                        className={`p-1.5 rounded-md border transition-colors ${isPreview ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                        title="Preview as pool card"
+                    >
+                        <Eye size={16} />
+                    </button>
+                    {!isPreview && (
+                        <button
+                            onClick={() => setIsExpanded(!isExpanded)}
+                            className={`p-1.5 rounded-md border transition-colors ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400 border-slate-200'}`}
+                        >
+                            {isExpanded ? <X size={16} /> : <Pencil size={16} />}
+                        </button>
+                    )}
                 </div>
             </div>
 
+            {/* PREVIEW MODE: show as pool card */}
+            {isPreview && (
+                <div className="-mx-5 -mb-5 border-t border-slate-100">
+                    <ProblemCard
+                        problem={{ ...p, ...formData }}
+                        currentUserId={currentUser!.id}
+                        currentUserRole={currentUser!.role}
+                        onUpvote={() => {}}
+                        onEdit={() => {}}
+                        showAuthor={true}
+                        votingPower={currentUser!.votingPower || 1}
+                        defaultExpanded={true}
+                    />
+                </div>
+            )}
+
+            {/* EDIT MODE: rows 2-4 */}
+            {!isPreview && (
+              <>
             {/* ROW 2: STATEMENT */}
             <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Statement</label>
                 {isExpanded ? (
-                    <textarea 
+                    <textarea
                         className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
                         value={formData.statement}
                         onChange={e => setFormData({...formData, statement: e.target.value})}
@@ -1561,18 +2127,18 @@ tex += `\\end{longtable}
                 )}
             </div>
 
-            {/* ROW 3: SOLUTION & ANSWER (Shown by Default) */}
+            {/* ROW 3: SOLUTION & ANSWER */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Solution</label>
                     {isExpanded ? (
-                        <textarea 
-                            className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
+                        <textarea
+                            className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
                             value={formData.solution}
                             onChange={e => setFormData({...formData, solution: e.target.value})}
                         />
                     ) : (
-                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs font-serif text-slate-600">
+                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-sm font-serif text-slate-600">
                             <MathText text={formData.solution || 'No solution provided.'} />
                         </div>
                     )}
@@ -1580,33 +2146,37 @@ tex += `\\end{longtable}
                 <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Answer Key</label>
                     {isExpanded ? (
-                        <input 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
+                        <input
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-serif focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
                             value={formData.answerKey}
                             onChange={e => setFormData({...formData, answerKey: e.target.value})}
                         />
                     ) : (
-                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-sm font-mono font-bold text-indigo-600">
-                            {formData.answerKey || '—'}
+                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-sm font-serif text-slate-700">
+                            {formData.answerKey
+                                ? <MathText text={formData.answerKey} />
+                                : <span className="text-slate-400 italic">—</span>
+                            }
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* ROW 4: TOPICS & SAVE (Shown by Default) */}
+            {/* ROW 4: TOPICS & SAVE */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-50">
                 <div className="flex flex-wrap gap-1.5">
                     {TOPICS.map(t => (
                         <button
                             key={t}
                             onClick={() => isExpanded && toggleTopic(t)}
-                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all border ${
-                                formData.topics.includes(t) 
-                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-sm' 
-                                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                            title={t}
+                            className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-black transition-all border ${
+                                formData.topics.includes(t)
+                                ? `${TOPIC_CHIP_CLASSES[t]} shadow-sm`
+                                : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                             }`}
                         >
-                            {t}
+                            {TOPIC_LABELS[t]}
                         </button>
                     ))}
                 </div>
@@ -1617,6 +2187,8 @@ tex += `\\end{longtable}
                     </Button>
                 )}
             </div>
+              </>
+            )}
         </motion.div>
     );
 }
@@ -1633,6 +2205,7 @@ tex += `\\end{longtable}
   if (!currentUser) {
     return (
       <div className="relative min-h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-900">
+        <ToastViewport />
         <style>{`
           @keyframes wamo-symbol-fade { 0%, 100% { opacity: 0.04; } 50% { opacity: 0.095; } }
           @keyframes wamo-line-fade { 0%, 100% { stroke-opacity: 0.16; } 50% { stroke-opacity: 0.58; } }
@@ -2099,13 +2672,16 @@ tex += `\\end{longtable}
   }
 
   const activeQuota = getActiveQuota();
+  const difficultyValue = parseDifficultyValue(difficulty);
+  const isDifficultyValid = difficultyValue !== null && difficultyValue >= DIFFICULTY_MIN && difficultyValue <= DIFFICULTY_MAX;
+  const difficultyLabel = getDifficultyLabel(difficulty);
   // Get override or default
   const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
   // Vote target is currently global per quota
   const voteTarget = activeQuota.voteTarget || 3;
 
-  // Count only for active quota
-  const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length;
+  // Count only off-waitlist problems for quota progress.
+  const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId && isOffWaitlist(p)).length;
   // Count votes (Strictly for active quota)
   const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
 
@@ -2170,13 +2746,56 @@ tex += `\\end{longtable}
   });
   
   const pendingCount = problems.filter(p => p.status === 'pending').length;
+  const unreadNotifCount = notifications.filter(n => !n.readAt).length;
+  const poolBaseProblems = problems.filter(p => p.status === 'approved' || p.status === 'accepted');
+  const poolCountsByQuota = poolBaseProblems.reduce<Record<string, number>>((acc, p) => {
+    acc[p.quotaId] = (acc[p.quotaId] || 0) + 1;
+    return acc;
+  }, {});
+  const selectedPoolQuotaName = poolFilterQuota === 'All'
+    ? 'all cycles'
+    : quotas.find(q => q.id === poolFilterQuota)?.name || 'selected cycle';
+  const selectedPoolQuotaBaseCount = poolFilterQuota === 'All'
+    ? poolBaseProblems.length
+    : poolCountsByQuota[poolFilterQuota] || 0;
+  const poolDiffMin = poolFilterDiffMin === '' ? DIFFICULTY_MIN : (parseFloat(poolFilterDiffMin) || DIFFICULTY_MIN);
+  const poolDiffMax = poolFilterDiffMax === '' ? DIFFICULTY_MAX : (parseFloat(poolFilterDiffMax) || DIFFICULTY_MAX);
+  const filteredPoolProblems = [...problems]
+    .filter(p => p.status === 'approved' || p.status === 'accepted')
+    .filter(p => poolFilterQuota === 'All' || p.quotaId === poolFilterQuota)
+    .filter(p => poolFilterTopic === 'All' || (p.topics && p.topics.includes(poolFilterTopic as Topic)))
+    .filter(p => poolFilterStatus === 'All' || (p.status || 'pending') === poolFilterStatus)
+    .filter(p => {
+      const d = clampDifficultyNumber(p.difficulty);
+      return d >= poolDiffMin && d <= poolDiffMax;
+    })
+    .sort((a, b) => {
+      const scoreA = a.score || 0;
+      const scoreB = b.score || 0;
+      const diffA = clampDifficultyNumber(a.difficulty);
+      const diffB = clampDifficultyNumber(b.difficulty);
+      switch (poolSort) {
+        case 'highest': return scoreB - scoreA;
+        case 'lowest': return scoreA - scoreB;
+        case 'hardest': return diffB - diffA;
+        case 'easiest': return diffA - diffB;
+        case 'newest': return b.createdAt - a.createdAt;
+        default: return 0;
+      }
+    });
+  const currentUserContributions = problems
+    .filter(p => p.authorId === currentUser.id)
+    .filter(p => contributionFilterQuota === 'All' || p.quotaId === contributionFilterQuota)
+    .sort((a, b) => b.createdAt - a.createdAt);
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-slate-900 flex flex-col md:flex-row font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
+    <div className="h-screen overflow-hidden bg-[#F8F9FA] text-slate-900 flex font-sans selection:bg-indigo-100 selection:text-indigo-900">
+      <ToastViewport />
+      {renderDifficultyGuideModal()}
       
       {/* Sidebar Navigation */}
-      <aside className="fixed md:sticky top-0 left-0 w-full md:w-56 bg-white border-r border-slate-200 flex flex-col sticky top-0 md:h-screen z-30 shadow-sm">
-        <div className="px-4 py-4 border-b border-slate-100 flex items-center gap-3">
+      <aside className="z-30 flex h-screen w-56 shrink-0 flex-col bg-white border-r border-slate-200 shadow-sm">
+        <div className="shrink-0 px-4 py-4 border-b border-slate-100 flex items-center gap-3">
             <div className="w-7 h-7 bg-slate-900 rounded-md flex items-center justify-center text-white">
                 <BookOpen className="w-3.5 h-3.5" strokeWidth={2.5} />
             </div>
@@ -2185,13 +2804,14 @@ tex += `\\end{longtable}
             </h2>
         </div>
         
-        <nav className="flex-1 p-2.5 space-y-0.5 overflow-y-auto custom-scrollbar">
+        <nav className="flex-1 min-h-0 p-2.5 space-y-0.5 overflow-y-auto custom-scrollbar">
           {!isGuest && (
               <NavItem
                 icon={<LayoutDashboard />}
                 label="Overview"
                 active={view === 'dashboard'}
                 onClick={() => setView('dashboard')}
+                badge={unreadNotifCount > 0 ? unreadNotifCount : undefined}
               />
           )}
 
@@ -2239,11 +2859,9 @@ tex += `\\end{longtable}
           )}
         </nav>
 
-        <div className="p-3 border-t border-slate-100">
+        <div className="shrink-0 p-3 border-t border-slate-100">
           <div className="flex items-center gap-2.5 mb-2 px-1">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-xs ${currentUser.role === 'admin' ? 'bg-purple-600' : currentUser.role === 'director' ? 'bg-indigo-600' : currentUser.role === 'guest' ? 'bg-amber-500' : 'bg-slate-700'}`}>
-               {isGuest ? <UserIcon className="w-3.5 h-3.5" /> : currentUser.name.charAt(0)}
-            </div>
+            <Avatar name={currentUser.name} size="md" />
             <div className="flex-1 min-w-0">
                <p className="text-xs font-semibold text-slate-800 truncate leading-tight">{currentUser.name}</p>
                <p className="text-[10px] text-slate-400 capitalize leading-tight">{currentUser.role}</p>
@@ -2256,7 +2874,7 @@ tex += `\\end{longtable}
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar relative p-5 md:p-8 bg-[#F8F9FA]">
+      <main className="flex-1 h-screen overflow-y-auto custom-scrollbar relative p-5 md:p-8 bg-[#F8F9FA]">
         <div className="max-w-7xl mx-auto">
         
         {/* VIEW: WAITLIST */}
@@ -2267,26 +2885,81 @@ tex += `\\end{longtable}
                         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Waitlist Queue</h1>
                         <p className="text-slate-500 text-sm mt-1">Review pending submissions.</p>
                     </div>
-                    <span className="bg-white text-slate-600 px-3 py-1 rounded-full text-xs font-bold border border-slate-200 shadow-sm">{pendingCount} Pending</span>
-                </div>
-                
-                {pendingCount > 0 ? (
-                    <div className="grid gap-4">
-                        {problems.filter(p => p.status === 'pending').map(p => (
-                            <motion.div variants={itemVar} key={p.id}>
-                                <WaitlistProblemCard p={p} />
-                            </motion.div>
-                        ))}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setWaitlistTab('pending')}
+                            className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${waitlistTab === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                        >
+                            Pending · {pendingCount}
+                        </button>
+                        <button
+                            onClick={() => setWaitlistTab('deleted')}
+                            className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${waitlistTab === 'deleted' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                        >
+                            Deleted · {deletedProblems.length}
+                        </button>
                     </div>
-                ) : (
-                    <motion.div variants={itemVar} className="bg-white border border-slate-200 rounded-xl p-16 text-center flex flex-col items-center shadow-sm">
-                        <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 border border-emerald-100">
-                            <CheckCircle className="w-8 h-8 text-emerald-500" />
+                </div>
+
+                {/* Always keep both sections mounted; toggle visibility with CSS to avoid remount flicker */}
+                <div className={waitlistTab === 'pending' ? '' : 'hidden'}>
+                    {pendingCount > 0 ? (
+                        <div className="grid gap-4">
+                            {problems.filter(p => p.status === 'pending').map(p => (
+                                <div key={p.id}>
+                                    <WaitlistProblemCard p={p} />
+                                </div>
+                            ))}
                         </div>
-                        <h3 className="font-bold text-lg text-slate-800">Queue Cleared</h3>
-                        <p className="text-slate-400 text-sm mt-1">All submissions have been processed.</p>
-                    </motion.div>
-                )}
+                    ) : (
+                        <div className="bg-white border border-slate-200 rounded-xl p-16 text-center flex flex-col items-center shadow-sm">
+                            <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-4 border border-emerald-100">
+                                <CheckCircle className="w-8 h-8 text-emerald-500" />
+                            </div>
+                            <h3 className="font-bold text-lg text-slate-800">Queue Cleared</h3>
+                            <p className="text-slate-400 text-sm mt-1">All submissions have been processed.</p>
+                        </div>
+                    )}
+                </div>
+
+                <div className={waitlistTab === 'deleted' ? '' : 'hidden'}>
+                    {deletedProblems.length > 0 ? (
+                        <div className="grid gap-3">
+                            {deletedProblems.map(p => (
+                                <div key={p.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-start gap-4">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-bold text-slate-800 text-sm truncate">{p.title}</span>
+                                            <span className="text-[10px] bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded font-bold">Deleted</span>
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-1 flex items-center gap-3 flex-wrap">
+                                            <span>By <span className="text-slate-600 font-medium">{p.authorName}</span></span>
+                                            <span>Removed by <span className="text-slate-600 font-medium">{p.deletedByName || '—'}</span></span>
+                                            {p.deletedAt && <span>{new Date(p.deletedAt).toLocaleDateString()}</span>}
+                                        </div>
+                                        {p.deletionReason && (
+                                            <p className="text-xs text-slate-500 mt-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100 italic">"{p.deletionReason}"</p>
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={() => handleRestoreProblem(p)}
+                                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-colors"
+                                    >
+                                        <RotateCcw className="w-3.5 h-3.5" /> Restore
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="bg-white border border-slate-200 rounded-xl p-16 text-center flex flex-col items-center shadow-sm">
+                            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                                <Trash2 className="w-8 h-8 text-slate-300" />
+                            </div>
+                            <h3 className="font-bold text-lg text-slate-800">No Deleted Problems</h3>
+                            <p className="text-slate-400 text-sm mt-1">Problems you remove will appear here for recovery.</p>
+                        </div>
+                    )}
+                </div>
             </motion.div>
         )}
 
@@ -2296,7 +2969,7 @@ tex += `\\end{longtable}
              {/* Header */}
              <div className="col-span-12 mb-2">
                 <motion.h1 variants={itemVar} className="text-2xl font-bold text-slate-900 tracking-tight">
-                  Mission Control
+                  Dashboard
                 </motion.h1>
              </div>
 
@@ -2320,7 +2993,7 @@ tex += `\\end{longtable}
                  ) : (
                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                      {myFormalQuotas.map(q => {
-                       const myCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === q.id).length;
+                       const myCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === q.id && isOffWaitlist(p)).length;
                        const myTarget = currentUser.customTargets?.[q.id] || q.target;
                        const pct = myTarget > 0 ? Math.min((myCount / myTarget) * 100, 100) : 0;
                        const myVotes = problems.filter(p => p.quotaId === q.id && p.votedBy?.includes(currentUser.id)).length;
@@ -2393,6 +3066,57 @@ tex += `\\end{longtable}
                </motion.div>
              </div>
 
+             {/* Updates / Notifications */}
+             <div className="col-span-12 mt-4">
+               <motion.div variants={itemVar}>
+                 <div className="flex items-center justify-between mb-3">
+                   <div className="flex items-center gap-2.5">
+                     <h3 className="text-lg font-bold text-slate-800">Updates</h3>
+                     {unreadNotifCount > 0 && (
+                       <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
+                         {unreadNotifCount} new
+                       </span>
+                     )}
+                   </div>
+                   {unreadNotifCount > 0 && (
+                     <button
+                       onClick={handleMarkAllRead}
+                       className="text-xs text-indigo-600 hover:underline font-medium"
+                     >
+                       Mark all read
+                     </button>
+                   )}
+                 </div>
+
+                 {notificationsLoading ? (
+                   <div className="bg-white border border-slate-200 rounded-xl p-5 text-center text-slate-400 text-sm shadow-sm">
+                     Loading updates...
+                   </div>
+                 ) : notifications.length === 0 ? (
+                   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-start gap-3">
+                     <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
+                       <Activity className="w-4 h-4 text-slate-400" />
+                     </div>
+                     <div>
+                       <p className="text-sm font-medium text-slate-600">No updates yet</p>
+                       <p className="text-xs text-slate-400 mt-0.5">Approvals, round changes, and comments on your problems will appear here.</p>
+                     </div>
+                   </div>
+                 ) : (
+                   <div className="space-y-2">
+                     {notifications.slice(0, 5).map(notif => (
+                       <NotificationItem key={notif.id} notif={notif} />
+                     ))}
+                     {notifications.length > 5 && (
+                       <p className="text-center text-xs text-slate-400 pt-1">
+                         +{notifications.length - 5} older updates
+                       </p>
+                     )}
+                   </div>
+                 )}
+               </motion.div>
+             </div>
+
              {/* User's Problems List */}
              <div className="col-span-12 mt-4">
                  <div className="flex items-center justify-between mb-4">
@@ -2401,9 +3125,10 @@ tex += `\\end{longtable}
                      {eligibleQuotas.length > 1 && (
                        <select
                          className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-600 outline-none"
-                         value={activeQuotaId}
-                         onChange={e => switchQuota(e.target.value)}
+                         value={contributionFilterQuota}
+                         onChange={e => setContributionFilterQuota(e.target.value)}
                        >
+                         <option value="All">All quotas</option>
                          {myFormalQuotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
                          {generalQuota && <option value={generalQuota.id}>{generalQuota.name}</option>}
                        </select>
@@ -2416,12 +3141,13 @@ tex += `\\end{longtable}
 
                  <div className="grid gap-4">
                     <AnimatePresence>
-                    {problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).length > 0 ? (
-                        problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId).map(p => (
+                    {currentUserContributions.length > 0 ? (
+                        currentUserContributions.map(p => (
                             <ProblemCard 
                                 key={p.id} 
                                 problem={p} 
                                 roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
+                                quotaName={quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
                                 showAuthor={true} 
                                 currentUserId={currentUser.id}
                                 currentUserRole={currentUser.role}
@@ -2429,6 +3155,8 @@ tex += `\\end{longtable}
                                 onEdit={handleStartEdit}
                                 onDelete={handleDeleteProblem}
                                 onStatusChange={handleStatusChange}
+                                onCommentPosted={() => showToast({ variant: 'success', title: 'Comment posted', message: 'Your comment was added.' })}
+                                onCommentError={(message) => showToast({ variant: 'error', title: "Couldn't post comment", message })}
                                 votingPower={currentUser.votingPower}
                                 defaultExpanded={false}
                             />
@@ -2905,22 +3633,61 @@ tex += `\\end{longtable}
                 {/* Topics & Difficulty */}
                 <div className="grid md:grid-cols-2 gap-8">
                     <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Difficulty</label>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex items-center gap-2">
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Difficulty</label>
+                            <button type="button" onClick={() => setShowRatingScale(true)} className="text-xs text-indigo-600 hover:underline font-bold flex items-center gap-1">
+                                <Info className="w-3.5 h-3.5" /> Open Scale Guide
+                            </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2 items-center">
                             <input 
                                 type="number" 
                                 step="0.1"
-                                min="0"
+                                min={DIFFICULTY_MIN}
                                 max="10"
                                 value={difficulty}
-                                onChange={(e) => setDifficulty(e.target.value)}
-                                className="w-24 px-4 py-3 bg-white rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 text-lg font-bold font-mono text-center"
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  const parsed = parseDifficultyValue(next);
+                                  if (parsed !== null && parsed > DIFFICULTY_MAX) {
+                                    setDifficulty(DIFFICULTY_MAX.toFixed(1));
+                                  } else {
+                                    setDifficulty(next);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  const normalized = normalizeDifficultyValue(difficulty);
+                                  if (normalized) setDifficulty(normalized);
+                                }}
+                                className={`w-24 px-4 py-3 bg-white rounded-lg border focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 text-lg font-bold font-mono text-center ${difficulty && !isDifficultyValid ? 'border-red-300' : 'border-slate-200'}`}
                             />
-                            <button onClick={() => setShowRatingScale(!showRatingScale)} className="text-xs text-indigo-600 hover:underline font-bold flex items-center gap-1 ml-2">
-                                <Info className="w-3.5 h-3.5" /> Scale Guide
-                            </button>
+                            <span className={`max-w-full px-2.5 py-1 rounded-lg border text-xs font-bold leading-5 ${isDifficultyValid ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                              {difficultyLabel}
+                            </span>
                         </div>
-                        {showRatingScale && AOPS_SCALE_INFO}
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quick set</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {DIFFICULTY_QUICK_VALUES.map(value => {
+                              const label = value.toFixed(1);
+                              const isActive = normalizeDifficultyValue(difficulty) === label;
+                              return (
+                                <button
+                                  key={label}
+                                  type="button"
+                                  onClick={() => setDifficulty(label)}
+                                  className={`px-2.5 py-1 rounded-md border text-[11px] font-bold transition-all ${
+                                    isActive
+                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                      : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-200 hover:text-indigo-600'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                     </div>
                     <div className="space-y-2">
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Topics</label>
@@ -2928,14 +3695,16 @@ tex += `\\end{longtable}
                             {TOPICS.map(t => (
                                 <button
                                     key={t}
+                                    type="button"
+                                    title={t}
                                     onClick={() => handleTopicToggle(t)}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-all ${
+                                    className={`grid h-9 w-9 place-items-center rounded-full text-sm font-black border transition-all ${
                                         selectedTopics.includes(t) 
-                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
-                                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                        ? `${TOPIC_CHIP_CLASSES[t]} ring-2 ring-offset-1 ring-indigo-100` 
+                                        : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                                     }`}
                                 >
-                                    {t}
+                                    {TOPIC_LABELS[t]}
                                 </button>
                             ))}
                         </div>
@@ -3017,7 +3786,7 @@ tex += `\\end{longtable}
                 {!isGuest && <Button variant="ghost" onClick={() => setView('dashboard')}>Cancel</Button>}
                 <Button 
                   onClick={handleSubmit} 
-                  disabled={!title || !statement || !isVerified}
+                  disabled={!title || !statement || !isVerified || !isDifficultyValid}
                   isLoading={isSubmitting}
                   className="px-8 shadow-md shadow-indigo-100"
                 >
@@ -3051,10 +3820,14 @@ tex += `\\end{longtable}
                 <select 
                     className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 outline-none"
                     value={poolFilterQuota}
-                    onChange={(e) => setPoolFilterQuota(e.target.value)}
+                    onChange={(e) => handlePoolQuotaFilterChange(e.target.value)}
                 >
-                    <option value="All">All Cycles</option>
-                    {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                    <option value="All">All Cycles ({poolBaseProblems.length})</option>
+                    {quotas.map(q => (
+                      <option key={q.id} value={q.id}>
+                        {q.name} ({poolCountsByQuota[q.id] || 0})
+                      </option>
+                    ))}
                 </select>
                 
                 <select 
@@ -3067,19 +3840,39 @@ tex += `\\end{longtable}
                 </select>
 
                 <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Diff</span>
-                    <input 
-                        type="number" 
-                        className="w-8 bg-transparent text-xs text-center outline-none border-b border-slate-300 font-bold text-slate-800"
+                    <span className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap">Diff</span>
+                    <input
+                        type="number"
+                        placeholder="Min"
                         value={poolFilterDiffMin}
-                        onChange={e => setPoolFilterDiffMin(Number(e.target.value))}
+                        onChange={e => setPoolFilterDiffMin(e.target.value)}
+                        onBlur={e => {
+                            const val = e.target.value.trim();
+                            if (val === '') { setPoolFilterDiffMin(''); return; }
+                            const n = Math.min(Math.max(parseFloat(val), DIFFICULTY_MIN), DIFFICULTY_MAX);
+                            const normalized = n.toFixed(1);
+                            const curMax = poolFilterDiffMax === '' ? DIFFICULTY_MAX : parseFloat(poolFilterDiffMax) || DIFFICULTY_MAX;
+                            setPoolFilterDiffMin(n > curMax ? curMax.toFixed(1) : normalized);
+                        }}
+                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-xs text-slate-700 outline-none focus:ring-1 focus:ring-indigo-400 text-center"
+                        aria-label="Minimum difficulty"
                     />
-                    <span className="text-slate-300">-</span>
-                    <input 
-                        type="number" 
-                        className="w-8 bg-transparent text-xs text-center outline-none border-b border-slate-300 font-bold text-slate-800"
+                    <span className="text-slate-400 text-xs">–</span>
+                    <input
+                        type="number"
+                        placeholder="Max"
                         value={poolFilterDiffMax}
-                        onChange={e => setPoolFilterDiffMax(Number(e.target.value))}
+                        onChange={e => setPoolFilterDiffMax(e.target.value)}
+                        onBlur={e => {
+                            const val = e.target.value.trim();
+                            if (val === '') { setPoolFilterDiffMax(''); return; }
+                            const n = Math.min(Math.max(parseFloat(val), DIFFICULTY_MIN), DIFFICULTY_MAX);
+                            const normalized = n.toFixed(1);
+                            const curMin = poolFilterDiffMin === '' ? DIFFICULTY_MIN : parseFloat(poolFilterDiffMin) || DIFFICULTY_MIN;
+                            setPoolFilterDiffMax(n < curMin ? curMin.toFixed(1) : normalized);
+                        }}
+                        className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-xs text-slate-700 outline-none focus:ring-1 focus:ring-indigo-400 text-center"
+                        aria-label="Maximum difficulty"
                     />
                 </div>
 
@@ -3102,19 +3895,35 @@ tex += `\\end{longtable}
             </motion.div>
 
             <div className="grid gap-3">
-              {poolIds.length === 0 ? (
+              {filteredPoolProblems.length === 0 ? (
                 <div className="text-center py-20 bg-slate-50 rounded-xl border border-slate-200 border-dashed">
-                   <p className="text-slate-400 text-sm font-medium">No problems found matching criteria.</p>
+                   <p className="text-slate-400 text-sm font-medium">
+                    {selectedPoolQuotaBaseCount > 0
+                      ? `No problems in ${selectedPoolQuotaName} match the active topic/status/difficulty filters.`
+                      : `No approved problems found in ${selectedPoolQuotaName}.`}
+                   </p>
+                   <button
+                     type="button"
+                     onClick={clearPoolFilters}
+                     className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                   >
+                     Clear filters
+                   </button>
                 </div>
               ) : (
-                poolIds.map(id => {
-                  const p = problems.find(prob => prob.id === id);
-                  if (!p) return null;
+                filteredPoolProblems.map(p => {
                   return (
-                    <motion.div variants={itemVar} key={p.id}>
+                    <motion.div
+                      key={p.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.18 }}
+                    >
                       <ProblemCard 
                         problem={p} 
                         roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
+                        quotaName={quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
                         showAuthor={p.authorId === currentUser.id} 
                         currentUserId={currentUser.id}
                         currentUserRole={currentUser.role}
@@ -3122,6 +3931,8 @@ tex += `\\end{longtable}
                         onEdit={handleStartEdit}
                         onDelete={handleDeleteProblem}
                         onStatusChange={handleStatusChange}
+                        onCommentPosted={() => showToast({ variant: 'success', title: 'Comment posted', message: 'Your comment was added.' })}
+                        onCommentError={(message) => showToast({ variant: 'error', title: "Couldn't post comment", message })}
                         votingPower={currentUser.votingPower}
                         defaultExpanded={false}
                       />
@@ -3242,7 +4053,7 @@ tex += `\\end{longtable}
                    const totalAssigned = q.assignmentMode === 'global'
                      ? users.filter(u => u.role !== 'guest').length
                      : (q.assignedUserIds?.length || 0);
-                   const totalSubmitted = problems.filter(p => p.quotaId === q.id).length;
+                   const totalSubmitted = problems.filter(p => p.quotaId === q.id && isOffWaitlist(p)).length;
                    return (
                      <div key={q.id}>
                        {isEdit ? (
@@ -3481,8 +4292,9 @@ tex += `\\end{longtable}
                                                     </select>
                                                 </div>
                                                 ) : (
-                                                <div className="flex items-center gap-1.5">
-                                                    {u.name}
+                                                <div className="flex items-center gap-2">
+                                                    <Avatar name={u.name} size="sm" />
+                                                    <span className="truncate">{u.name}</span>
                                                     {u.role === 'admin' && <Crown className="w-3 h-3 text-purple-500"/>}
                                                     {u.role === 'director' && <span className="text-[9px] bg-indigo-50 text-indigo-600 px-1 rounded border border-indigo-100">DIR</span>}
                                                 </div>

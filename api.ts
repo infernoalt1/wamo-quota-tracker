@@ -1,5 +1,5 @@
 
-import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment } from './types';
+import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment, Notification } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -84,7 +84,8 @@ export const api = {
           name: user.name,
           email: `${user.name?.toLowerCase().replace(/\s/g, '')}@probfair.org`, // Auto-gen email for login ID
           password: user.password,
-          role: user.role || 'writer'
+          role: user.role || 'writer',
+          avatarUrl: user.avatarUrl || null
       })
     });
     if (!res.ok) throw new Error('Failed to create user');
@@ -155,14 +156,31 @@ export const api = {
     }
   },
 
-  deleteProblem: async (problemId: string): Promise<void> => {
+  deleteProblem: async (problemId: string, reason?: string): Promise<void> => {
     if (USE_MOCK_BACKEND) return;
 
     const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}`, {
       method: 'DELETE',
-      headers: getAuthHeader()
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || null })
     });
     if (!res.ok) throw new Error('Delete problem failed');
+  },
+
+  getDeletedProblems: async (): Promise<Problem[]> => {
+    if (USE_MOCK_BACKEND) return [];
+    const res = await fetch(`${API_BASE_URL}/api/problems/deleted`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error('Failed to fetch deleted problems');
+    return res.json();
+  },
+
+  restoreProblem: async (problemId: string): Promise<void> => {
+    if (USE_MOCK_BACKEND) return;
+    const res = await fetch(`${API_BASE_URL}/api/problems/${problemId}/restore`, {
+      method: 'POST',
+      headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error('Restore problem failed');
   },
   
   updateProblemStatus: async (problemId: string, status: ProblemStatus): Promise<void> => {
@@ -228,6 +246,29 @@ export const api = {
       if (!res.ok) throw new Error("Parsing failed");
       const data = await res.json();
       return data.problems;
+  },
+
+  // Notifications
+  getNotifications: async (): Promise<Notification[]> => {
+    const res = await fetch(`${API_BASE_URL}/api/notifications`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error('Failed to fetch notifications');
+    return res.json();
+  },
+
+  markNotificationRead: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE_URL}/api/notifications/${id}/read`, {
+      method: 'PATCH',
+      headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error('Failed to mark notification read');
+  },
+
+  markAllNotificationsRead: async (): Promise<void> => {
+    const res = await fetch(`${API_BASE_URL}/api/notifications/read-all`, {
+      method: 'POST',
+      headers: getAuthHeader()
+    });
+    if (!res.ok) throw new Error('Failed to mark all notifications read');
   },
 
   // Comments

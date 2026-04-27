@@ -46,6 +46,7 @@ export interface Comment {
   id: string;
   userId: string;
   userName: string;
+  userAvatarUrl?: string | null;
   text: string;
   createdAt: number;
 }
@@ -71,6 +72,11 @@ export interface Problem {
   orderIndex: number;
   version: number;
   commentCount?: number;
+  deletedAt?: number | null;
+  deletedBy?: string | null;
+  deletedByName?: string | null;
+  deletedByAvatarUrl?: string | null;
+  deletionReason?: string | null;
 }
 
 export interface User {
@@ -82,4 +88,30 @@ export interface User {
   voteCount: number;
   votingPower: number;
   customTargets: Record<string, number>;
+  avatarUrl?: string | null;
+}
+
+export type NotificationType =
+  | 'problem_approved'
+  | 'problem_returned_to_waitlist'
+  | 'problem_added_to_round'
+  | 'problem_removed_from_round'
+  | 'problem_commented'
+  | 'problem_deleted'
+  | 'problem_restored'
+  | 'problem_edited';
+
+export interface Notification {
+  id: string;
+  userId: string;
+  actorId?: string | null;
+  actorName?: string | null;
+  actorAvatarUrl?: string | null;
+  problemId?: string | null;
+  type: NotificationType;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  readAt?: number | null;
+  createdAt: number;
 }

@@ -47,6 +47,7 @@ const initDB = async () => {
         role TEXT NOT NULL,
         voting_power INTEGER DEFAULT 1,
         custom_targets JSONB DEFAULT '{}'::jsonb,
+        avatar_url TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT users_role_check CHECK (role IN ('admin', 'director', 'writer', 'guest'))
       );
@@ -96,6 +97,9 @@ const initDB = async () => {
         status TEXT DEFAULT 'pending',
         order_index INTEGER DEFAULT 0,
         version INTEGER DEFAULT 1,
+        deleted_at TIMESTAMP WITH TIME ZONE,
+        deleted_by UUID REFERENCES users(id),
+        deletion_reason TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -122,6 +126,20 @@ const initDB = async () => {
         text TEXT NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        problem_id UUID,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        read_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     
     // --- MIGRATION: Ensure new columns exist for old databases ---
@@ -135,6 +153,15 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS answer_key TEXT;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS round_id UUID REFERENCES rounds(id);
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id);
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_id UUID;
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+      UPDATE problems SET difficulty = 10 WHERE difficulty > 10;
+      UPDATE problems SET difficulty = 0.5 WHERE difficulty < 0.5 OR difficulty IS NULL;
       
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
@@ -149,6 +176,45 @@ const initDB = async () => {
         PRIMARY KEY (quota_id, user_id)
       );
     `);
+
+    // --- MIGRATION: Notifications table (for existing databases) ---
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        problem_id UUID,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        read_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Existing databases may have been created with notifications.problem_id as
+    // a foreign key to problems. Deletion notices need to survive the problem
+    // row being deleted, so keep this column as a plain UUID.
+    const notifProblemConstraints = await client.query(`
+      SELECT conname
+      FROM pg_constraint
+      WHERE conrelid = 'notifications'::regclass
+        AND contype = 'f'
+        AND conkey = ARRAY[
+          (
+            SELECT attnum
+            FROM pg_attribute
+            WHERE attrelid = 'notifications'::regclass
+              AND attname = 'problem_id'
+          )
+        ]::smallint[]
+    `);
+    for (const row of notifProblemConstraints.rows) {
+      const constraintName = row.conname.replace(/"/g, '""');
+      await client.query(`ALTER TABLE notifications DROP CONSTRAINT "${constraintName}"`);
+    }
 
     // --- MIGRATION: Backfill problem_rounds from legacy round_id if empty ---
     const checkJoin = await client.query('SELECT count(*) FROM problem_rounds');
@@ -229,6 +295,69 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// --- Helper: Create Notification (safe to call inside transactions) ---
+async function createNotification(db, { userId, actorId, problemId, type, title, body, metadata }) {
+  if (!userId) return;
+  try {
+    await db.query(
+      `INSERT INTO notifications (user_id, actor_id, problem_id, type, title, body, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, actorId || null, problemId || null, type, title, body, JSON.stringify(metadata || {})]
+    );
+  } catch (e) {
+    console.error('createNotification failed:', e.message);
+  }
+}
+
+async function createRoundMembershipNotification(db, { userId, actorId, problemId, type, title, body, metadata }) {
+  if (!userId) return;
+  const roundId = metadata?.roundId;
+  if (!roundId) {
+    return createNotification(db, { userId, actorId, problemId, type, title, body, metadata });
+  }
+
+  try {
+    const existing = await db.query(
+      `SELECT id FROM notifications
+       WHERE user_id = $1
+         AND problem_id = $2
+         AND type IN ('problem_added_to_round', 'problem_removed_from_round')
+         AND metadata->>'roundId' = $3
+         AND created_at > CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, problemId || null, roundId]
+    );
+
+    if (existing.rows.length > 0) {
+      await db.query(
+        `UPDATE notifications
+         SET actor_id = $1,
+             type = $2,
+             title = $3,
+             body = $4,
+             metadata = $5,
+             read_at = NULL,
+             created_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $6`,
+        [actorId || null, type, title, body, JSON.stringify(metadata || {}), existing.rows[0].id]
+      );
+      return;
+    }
+
+    await createNotification(db, { userId, actorId, problemId, type, title, body, metadata });
+  } catch (e) {
+    console.error('createRoundMembershipNotification failed:', e.message);
+  }
+}
+
+function normalizeDifficulty(input) {
+  const parsed = Number(input);
+  if (!Number.isFinite(parsed)) return 0.5;
+  return Number(Math.min(Math.max(parsed, 0.5), 10).toFixed(1));
+}
+
 // --- Routes: Auth ---
 
 app.get('/auth/me', authenticateToken, async (req, res) => {
@@ -242,7 +371,8 @@ app.get('/auth/me', authenticateToken, async (req, res) => {
         name: user.name,
         role: user.role,
         votingPower: user.voting_power,
-        customTargets: user.custom_targets || {}
+        customTargets: user.custom_targets || {},
+        avatarUrl: user.avatar_url || null
      });
   } catch(err) {
      console.error(err);
@@ -262,7 +392,8 @@ app.post('/auth/guest-login', async (req, res) => {
        name: user.name,
        role: user.role,
        votingPower: user.voting_power,
-       customTargets: user.custom_targets || {}
+       customTargets: user.custom_targets || {},
+       avatarUrl: user.avatar_url || null
     }});
   } catch (e) {
     console.error(e);
@@ -272,7 +403,7 @@ app.post('/auth/guest-login', async (req, res) => {
 
 app.post('/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, avatarUrl } = req.body;
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
@@ -281,8 +412,8 @@ app.post('/auth/register', async (req, res) => {
 
     // Return all fields needed for the frontend User interface
     const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, role, voting_power, custom_targets',
-      [name, email, hashedPassword, safeRole]
+      'INSERT INTO users (name, email, password_hash, role, avatar_url) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, role, voting_power, custom_targets, avatar_url',
+      [name, email, hashedPassword, safeRole, avatarUrl || null]
     );
     
     const u = result.rows[0];
@@ -291,7 +422,8 @@ app.post('/auth/register', async (req, res) => {
         name: u.name,
         role: u.role,
         votingPower: u.voting_power,
-        customTargets: u.custom_targets || {}
+        customTargets: u.custom_targets || {},
+        avatarUrl: u.avatar_url || null
     });
   } catch (err) {
     console.error(err);
@@ -324,7 +456,8 @@ app.post('/auth/login', async (req, res) => {
         name: user.name, 
         role: user.role, 
         votingPower: user.voting_power,
-        customTargets: user.custom_targets || {}
+        customTargets: user.custom_targets || {},
+        avatarUrl: user.avatar_url || null
       }});
     } else {
       res.status(403).json({ error: 'Invalid password' });
@@ -340,13 +473,14 @@ app.post('/auth/login', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   // Made public to populate the Login "Select User" list
   try {
-    const result = await pool.query("SELECT id, name, role, voting_power, custom_targets FROM users WHERE role != 'guest' ORDER BY name");
+    const result = await pool.query("SELECT id, name, role, voting_power, custom_targets, avatar_url FROM users WHERE role != 'guest' ORDER BY name");
     const users = result.rows.map(u => ({
         id: u.id,
         name: u.name,
         role: u.role,
         votingPower: u.voting_power,
         customTargets: u.custom_targets || {},
+        avatarUrl: u.avatar_url || null,
         password: '' // Don't send hashes
     }));
     res.json(users);
@@ -360,7 +494,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
   const { id } = req.params;
-  const { name, password, votingPower, customTargets, role } = req.body;
+  const { name, password, votingPower, customTargets, role, avatarUrl } = req.body;
   
   try {
     // Permission Check: Sub-Director Limitations
@@ -392,6 +526,11 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (role && req.user.role === 'admin') {
          query += `, role = $${paramIndex++}`;
          params.push(role);
+    }
+
+    if (avatarUrl !== undefined) {
+         query += `, avatar_url = $${paramIndex++}`;
+         params.push(avatarUrl || null);
     }
 
     query += ` WHERE id = $${paramIndex}`;
@@ -471,6 +610,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
+      WHERE p.deleted_at IS NULL
       ORDER BY p.score DESC
     `);
     
@@ -481,7 +621,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       quotaId: row.quota_id, // Ensure we send this
       roundId: row.round_id, // Legacy/Primary round
       roundIds: row.round_ids || [], // New: Many-to-Many
-      difficulty: row.difficulty ? parseFloat(row.difficulty) : 0,
+      difficulty: normalizeDifficulty(row.difficulty),
       topics: row.topics || [],
       status: row.status || 'pending',
       orderIndex: row.order_index || 0,
@@ -501,11 +641,64 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'director') {
+    return res.sendStatus(403);
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT p.*, u.name as author_name,
+        deleter.id as deleted_by_id,
+        deleter.name as deleted_by_name,
+        deleter.avatar_url as deleted_by_avatar_url,
+        (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
+        (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
+        (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids
+      FROM problems p
+      LEFT JOIN users u ON p.author_id = u.id
+      LEFT JOIN users deleter ON p.deleted_by = deleter.id
+      WHERE p.deleted_at IS NOT NULL
+      ORDER BY p.deleted_at DESC
+    `);
+
+    const problems = result.rows.map(row => ({
+      ...row,
+      authorName: row.author_name || 'Unknown',
+      authorId: row.author_id,
+      quotaId: row.quota_id,
+      roundId: row.round_id,
+      roundIds: row.round_ids || [],
+      difficulty: normalizeDifficulty(row.difficulty),
+      topics: row.topics || [],
+      status: row.status || 'pending',
+      orderIndex: row.order_index || 0,
+      createdAt: new Date(row.created_at).getTime(),
+      votedBy: row.voted_by || [],
+      imageData: row.image_data,
+      solution: row.solution,
+      answerKey: row.answer_key,
+      version: row.version,
+      commentCount: parseInt(row.comment_count || '0'),
+      deletedAt: row.deleted_at ? new Date(row.deleted_at).getTime() : null,
+      deletedBy: row.deleted_by_id || row.deleted_by || null,
+      deletedByName: row.deleted_by_name || null,
+      deletedByAvatarUrl: row.deleted_by_avatar_url || null,
+      deletionReason: row.deletion_reason || null
+    }));
+
+    res.json(problems);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch deleted problems' });
+  }
+});
+
 app.post('/api/problems', authenticateToken, async (req, res) => {
   try {
     const { title, statement, quotaId, difficulty, topics, imageData, solution, answerKey } = req.body;
     
-    const diffVal = (difficulty && !isNaN(difficulty)) ? difficulty : 0;
+    const diffVal = normalizeDifficulty(difficulty);
     
     const result = await pool.query(
       'INSERT INTO problems (author_id, quota_id, title, statement, difficulty, topics, status, image_data, solution, answer_key, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1) RETURNING *',
@@ -527,8 +720,9 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
 
   try {
     // 1. Verify ownership or admin status
-    const check = await pool.query('SELECT author_id FROM problems WHERE id = $1', [id]);
+    const check = await pool.query('SELECT author_id, title, status, deleted_at FROM problems WHERE id = $1', [id]);
     if (check.rows.length === 0) return res.status(404).json({ error: 'Problem not found' });
+    if (check.rows[0].deleted_at) return res.status(409).json({ error: 'Cannot edit a deleted problem' });
     
     const authorId = check.rows[0].author_id;
     if (authorId !== userId && userRole !== 'admin' && userRole !== 'director') {
@@ -552,6 +746,21 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
                      const maxIdxRes = await client.query('SELECT MAX(order_index) as m FROM problem_rounds WHERE round_id = $1', [newRoundId]);
                      const nextIdx = (maxIdxRes.rows[0].m || 0) + 1;
                      await client.query('INSERT INTO problem_rounds (problem_id, round_id, order_index) VALUES ($1, $2, $3)', [id, newRoundId, nextIdx]);
+
+                     // Notify problem author
+                     const roundInfoRes = await client.query('SELECT name FROM rounds WHERE id = $1', [newRoundId]);
+                     const roundName = roundInfoRes.rows[0]?.name || 'a round';
+                     const authorId = check.rows[0].author_id;
+                     const problemTitle = check.rows[0].title;
+                     if (authorId && authorId !== req.user.id) {
+                         await createRoundMembershipNotification(client, {
+                             userId: authorId, actorId: req.user.id, problemId: id,
+                             type: 'problem_added_to_round',
+                             title: 'Added to Round',
+                             body: `'${problemTitle}' was added to ${roundName}.`,
+                             metadata: { roundId: newRoundId, roundName, problemTitle }
+                         });
+                     }
                 }
                 // Update legacy column for display compatibility
                 await client.query('UPDATE problems SET round_id = $1 WHERE id = $2', [newRoundId, id]);
@@ -590,12 +799,16 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
         };
 
         // Build SET clauses
+        const contentFieldsChanged = Object.keys(updates).some(key =>
+          ['title', 'statement', 'solution', 'answerKey', 'difficulty', 'topics', 'imageData'].includes(key)
+        );
+        let updatedProblemTitle = check.rows[0].title;
         for (const key of Object.keys(updates)) {
             if (allowedFields.includes(key) && key !== 'version') {
                  const dbCol = dbMapping[key];
                  if (dbCol) {
                      setClauses.push(`${dbCol} = $${idx++}`);
-                     values.push(updates[key] === undefined ? null : updates[key]);
+                     values.push(key === 'difficulty' ? normalizeDifficulty(updates[key]) : (updates[key] === undefined ? null : updates[key]));
                  }
             }
         }
@@ -614,7 +827,45 @@ app.put('/api/problems/:id', authenticateToken, async (req, res) => {
             }
 
             query += ` RETURNING *`;
-            await client.query(query, values);
+            const updateRes = await client.query(query, values);
+            updatedProblemTitle = updateRes.rows[0]?.title || updatedProblemTitle;
+
+            if (updates.status && updates.status !== check.rows[0].status && check.rows[0].author_id !== req.user.id) {
+                const notificationDetails = {
+                    approved: {
+                        type: 'problem_approved',
+                        title: 'Problem Approved',
+                        body: `Your problem '${check.rows[0].title}' was approved.`
+                    },
+                    pending: {
+                        type: 'problem_returned_to_waitlist',
+                        title: 'Returned to Waitlist',
+                        body: `'${check.rows[0].title}' was returned to the waitlist.`
+                    }
+                }[updates.status];
+
+                if (notificationDetails) {
+                    await createNotification(client, {
+                        userId: check.rows[0].author_id,
+                        actorId: req.user.id,
+                        problemId: id,
+                        ...notificationDetails,
+                        metadata: { problemTitle: check.rows[0].title }
+                    });
+                }
+            }
+
+            if (contentFieldsChanged && check.rows[0].author_id !== req.user.id) {
+                await createNotification(client, {
+                    userId: check.rows[0].author_id,
+                    actorId: req.user.id,
+                    problemId: id,
+                    type: 'problem_edited',
+                    title: 'Problem Edited',
+                    body: `Your problem '${updatedProblemTitle}' was edited.`,
+                    metadata: { problemTitle: updatedProblemTitle }
+                });
+            }
         }
 
         await client.query('COMMIT');
@@ -641,21 +892,46 @@ app.delete('/api/problems/:id', authenticateToken, async (req, res) => {
   }
 
   const { id } = req.params;
+  const { reason } = req.body || {};
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    const exists = await client.query('SELECT id FROM problems WHERE id = $1', [id]);
+    const exists = await client.query('SELECT id, author_id, title, deleted_at FROM problems WHERE id = $1', [id]);
     if (exists.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Problem not found' });
     }
 
-    await client.query('DELETE FROM votes WHERE problem_id = $1', [id]);
-    await client.query('DELETE FROM comments WHERE problem_id = $1', [id]);
+    const { author_id: authorId, title: problemTitle, deleted_at: deletedAt } = exists.rows[0];
+    if (deletedAt) {
+      await client.query('ROLLBACK');
+      return res.json({ success: true });
+    }
+
     await client.query('DELETE FROM problem_rounds WHERE problem_id = $1', [id]);
-    await client.query('DELETE FROM problems WHERE id = $1', [id]);
+    await client.query(
+      `UPDATE problems
+       SET deleted_at = CURRENT_TIMESTAMP,
+           deleted_by = $1,
+           deletion_reason = $2,
+           round_id = NULL
+       WHERE id = $3`,
+      [req.user.id, reason?.trim() || null, id]
+    );
+
+    if (authorId && authorId !== req.user.id) {
+      await createNotification(client, {
+        userId: authorId, actorId: req.user.id, problemId: id,
+        type: 'problem_deleted',
+        title: 'Problem Deleted',
+        body: reason?.trim()
+          ? `Your problem '${problemTitle}' was deleted. Reason: ${reason.trim()}`
+          : `Your problem '${problemTitle}' was deleted.`,
+        metadata: { problemTitle, reason: reason?.trim() || null }
+      });
+    }
 
     await client.query('COMMIT');
     res.json({ success: true });
@@ -668,26 +944,98 @@ app.delete('/api/problems/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/api/problems/:id/restore', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'director') {
+    return res.sendStatus(403);
+  }
+
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const exists = await client.query('SELECT id, author_id, title, deleted_at FROM problems WHERE id = $1', [id]);
+    if (exists.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+    if (!exists.rows[0].deleted_at) {
+      await client.query('ROLLBACK');
+      return res.json({ success: true });
+    }
+
+    await client.query(
+      `UPDATE problems
+       SET deleted_at = NULL,
+           deleted_by = NULL,
+           deletion_reason = NULL,
+           status = 'approved',
+           round_id = NULL
+       WHERE id = $1`,
+      [id]
+    );
+    await client.query('DELETE FROM problem_rounds WHERE problem_id = $1', [id]);
+
+    const authorId = exists.rows[0].author_id;
+    const problemTitle = exists.rows[0].title;
+    if (authorId && authorId !== req.user.id) {
+      await createNotification(client, {
+        userId: authorId, actorId: req.user.id, problemId: id,
+        type: 'problem_restored',
+        title: 'Problem Restored',
+        body: `Your problem '${problemTitle}' was restored to the pool.`,
+        metadata: { problemTitle }
+      });
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Restore problem failed' });
+  } finally {
+    client.release();
+  }
+});
+
 // New Route: Remove problem from a specific round
 app.delete('/api/problems/:id/round/:roundId', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id, roundId } = req.params;
-    
+
     try {
+        // Fetch problem and round info before deletion for notification
+        const [probRes, roundRes] = await Promise.all([
+            pool.query('SELECT author_id, title FROM problems WHERE id = $1', [id]),
+            pool.query('SELECT name FROM rounds WHERE id = $1', [roundId])
+        ]);
+        const authorId = probRes.rows[0]?.author_id;
+        const problemTitle = probRes.rows[0]?.title || 'A problem';
+        const roundName = roundRes.rows[0]?.name || 'a round';
+
         await pool.query('DELETE FROM problem_rounds WHERE problem_id = $1 AND round_id = $2', [id, roundId]);
-        
+
         // Update legacy column if it matches
         await pool.query('UPDATE problems SET round_id = NULL WHERE id = $1 AND round_id = $2', [id, roundId]);
-        
-        // If it's still in other rounds, maybe update round_id to one of them?
-        // For now, keep it simple. Legacy round_id just shows "one of" the rounds.
-        
+
         // Status update logic: If no rounds left, set to 'approved' (pool)
         const check = await pool.query('SELECT count(*) FROM problem_rounds WHERE problem_id = $1', [id]);
         if (parseInt(check.rows[0].count) === 0) {
             await pool.query("UPDATE problems SET status = 'approved' WHERE id = $1", [id]);
         }
-        
+
+        if (authorId && authorId !== req.user.id) {
+            await createRoundMembershipNotification(pool, {
+                userId: authorId, actorId: req.user.id, problemId: id,
+                type: 'problem_removed_from_round',
+                title: 'Removed from Round',
+                body: `'${problemTitle}' was removed from ${roundName}.`,
+                metadata: { roundId, roundName, problemTitle }
+            });
+        }
+
         res.json({ success: true });
     } catch(e) {
         console.error(e);
@@ -703,6 +1051,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
         if (!text) return res.status(400).json({ error: "No text provided" });
 
         const problems = [];
+        const safeDefaultDifficulty = normalizeDifficulty(defaultDifficulty ?? 3);
         let currentProblem = null;
         
         // Strategy 1: Look for explicit blocks
@@ -740,7 +1089,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
                 solution: solution,
                 answerKey: answer,
                 topics: defaultTopics || [],
-                difficulty: defaultDifficulty || 3
+                difficulty: safeDefaultDifficulty
             });
         }
 
@@ -758,7 +1107,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
                             solution: solution,
                             answerKey: answer,
                             topics: defaultTopics || [],
-                            difficulty: defaultDifficulty || 3
+                            difficulty: safeDefaultDifficulty
                         });
                     }
                 });
@@ -775,7 +1124,7 @@ app.post('/api/problems/bulk-parse', authenticateToken, async (req, res) => {
 // New Route: Update Status (Admin Only)
 app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-  
+
   const { id } = req.params;
   const { status } = req.body;
 
@@ -784,7 +1133,33 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
   }
 
   try {
+    const oldRes = await pool.query('SELECT author_id, title, status as old_status FROM problems WHERE id = $1', [id]);
+    const oldProblem = oldRes.rows[0];
+
     await pool.query('UPDATE problems SET status = $1 WHERE id = $2', [status, id]);
+
+    if (oldProblem && oldProblem.author_id !== req.user.id) {
+      const authorId = oldProblem.author_id;
+      const problemTitle = oldProblem.title;
+      if (status === 'approved' && oldProblem.old_status !== 'approved') {
+        await createNotification(pool, {
+          userId: authorId, actorId: req.user.id, problemId: id,
+          type: 'problem_approved',
+          title: 'Problem Approved',
+          body: `Your problem '${problemTitle}' was approved.`,
+          metadata: {}
+        });
+      } else if (status === 'pending' && oldProblem.old_status !== 'pending') {
+        await createNotification(pool, {
+          userId: authorId, actorId: req.user.id, problemId: id,
+          type: 'problem_returned_to_waitlist',
+          title: 'Returned to Waitlist',
+          body: `'${problemTitle}' was returned to the waitlist.`,
+          metadata: {}
+        });
+      }
+    }
+
     res.json({ success: true, status });
   } catch (err) {
     console.error(err);
@@ -876,7 +1251,7 @@ app.get('/api/problems/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT c.id, c.text, c.created_at, u.id as user_id, u.name as user_name 
+      `SELECT c.id, c.text, c.created_at, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar_url
        FROM comments c 
        JOIN users u ON c.user_id = u.id 
        WHERE c.problem_id = $1 
@@ -888,7 +1263,8 @@ app.get('/api/problems/:id/comments', authenticateToken, async (req, res) => {
       text: r.text,
       createdAt: new Date(r.created_at).getTime(),
       userId: r.user_id,
-      userName: r.user_name
+      userName: r.user_name,
+      userAvatarUrl: r.user_avatar_url || null
     }));
     res.json(comments);
   } catch (e) {
@@ -903,16 +1279,39 @@ app.post('/api/problems/:id/comments', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { text } = req.body;
     if (!text || !text.trim()) return res.status(400).json({error: "Empty comment"});
-    
+
+    // Fetch problem author and title; fetch commenter name
+    const [probRes, commenterRes] = await Promise.all([
+      pool.query('SELECT author_id, title FROM problems WHERE id = $1', [id]),
+      pool.query('SELECT name, avatar_url FROM users WHERE id = $1', [req.user.id])
+    ]);
+
     const result = await pool.query(
       'INSERT INTO comments (problem_id, user_id, text) VALUES ($1, $2, $3) RETURNING id, created_at',
       [id, req.user.id, text]
     );
-    
+
+    const commenterName = commenterRes.rows[0]?.name || 'Someone';
+    const commenterAvatarUrl = commenterRes.rows[0]?.avatar_url || null;
+    const authorId = probRes.rows[0]?.author_id;
+    const problemTitle = probRes.rows[0]?.title || 'a problem';
+
+    // Don't notify the author about their own comment
+    if (authorId && authorId !== req.user.id) {
+      await createNotification(pool, {
+        userId: authorId, actorId: req.user.id, problemId: id,
+        type: 'problem_commented',
+        title: 'New Comment',
+        body: `${commenterName} commented on '${problemTitle}'.`,
+        metadata: { commentId: result.rows[0].id, commenterName }
+      });
+    }
+
     res.json({
       id: result.rows[0].id,
       userId: req.user.id,
-      userName: req.user.name,
+      userName: commenterName,
+      userAvatarUrl: commenterAvatarUrl,
       text,
       createdAt: new Date(result.rows[0].created_at).getTime()
     });
@@ -1211,6 +1610,67 @@ app.delete('/api/rounds/:id', authenticateToken, async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+// --- Routes: Notifications ---
+
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.json([]);
+  try {
+    const result = await pool.query(`
+      SELECT n.id, n.user_id, n.actor_id, n.problem_id, n.type, n.title, n.body, n.metadata, n.read_at, n.created_at,
+             actor.name as actor_name, actor.avatar_url as actor_avatar_url
+      FROM notifications n
+      LEFT JOIN users actor ON n.actor_id = actor.id
+      WHERE n.user_id = $1
+      ORDER BY n.created_at DESC
+      LIMIT 50
+    `, [req.user.id]);
+    res.json(result.rows.map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      actorId: r.actor_id,
+      actorName: r.actor_name || null,
+      actorAvatarUrl: r.actor_avatar_url || null,
+      problemId: r.problem_id,
+      type: r.type,
+      title: r.title,
+      body: r.body,
+      metadata: r.metadata || {},
+      readAt: r.read_at ? new Date(r.read_at).getTime() : null,
+      createdAt: new Date(r.created_at).getTime()
+    })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+app.post('/api/notifications/read-all', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.json({ success: true });
+  try {
+    await pool.query(
+      `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
+      [req.user.id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to mark all read' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    await pool.query(
+      `UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 AND read_at IS NULL`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to mark read' });
+  }
 });
 
 // All other GET requests not handled before will return the React app
