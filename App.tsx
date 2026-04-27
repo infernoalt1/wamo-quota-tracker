@@ -783,8 +783,8 @@ export default function App() {
       await api.updateQuota({
         id: editingQuotaId,
         name: editQuotaForm.name || '',
-        target: editQuotaForm.target || 5,
-        voteTarget: editQuotaForm.voteTarget || 3,
+        target: editQuotaForm.target ?? 5,
+        voteTarget: editQuotaForm.voteTarget ?? 3,
         instructions: editQuotaForm.instructions || '',
         dueDate: editQuotaForm.dueDate || null,
         quotaType: editQuotaForm.quotaType || 'formal',
@@ -806,8 +806,8 @@ export default function App() {
     try {
       await api.createQuota({
         name: newQuotaForm.name,
-        target: newQuotaForm.target || 5,
-        voteTarget: newQuotaForm.voteTarget || 3,
+        target: newQuotaForm.target ?? 5,
+        voteTarget: newQuotaForm.voteTarget ?? 3,
         instructions: newQuotaForm.instructions || '',
         dueDate: newQuotaForm.dueDate || null,
         quotaType: newQuotaForm.quotaType || 'formal',
@@ -1742,7 +1742,7 @@ tex += `\\end{longtable}
                         </div>
                     ) : (
                         <div className="relative group/latex">
-                            <MathText text={problem.statement} className="text-slate-700 whitespace-pre-wrap font-serif mb-2 leading-snug" />
+                            <MathText text={problem.statement} className="text-xs text-slate-700 whitespace-pre-wrap font-serif mb-2 leading-snug" />
                             {isAccepted && (
                                 <button 
                                     onClick={() => { setEditMode(true); setLocalStatement(problem.statement); setLocalSolution(problem.solution || ''); setLocalAnswer(problem.answerKey || ''); }}
@@ -1764,12 +1764,12 @@ tex += `\\end{longtable}
                              <div className="bg-white p-2 rounded border border-slate-200 shadow-sm">
                                  <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Solution Outline</span>
                                  <div className="max-h-24 overflow-y-auto custom-scrollbar">
-                                    <MathText text={problem.solution || 'None'} className="text-[10px] text-slate-600" />
+                                    <MathText text={problem.solution || 'None'} className="text-xs text-slate-600 font-serif leading-snug" />
                                  </div>
                              </div>
                              <div className="bg-white p-2 rounded border border-slate-200 h-fit shadow-sm">
                                  <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
-                                 <div className="font-mono font-bold text-slate-800 text-xs">{problem.answerKey || '-'}</div>
+                                 <MathText text={problem.answerKey || '—'} className="text-xs text-slate-700 font-serif leading-snug" />
                              </div>
                         </div>
                     )}
@@ -1966,7 +1966,6 @@ tex += `\\end{longtable}
 
   const WaitlistProblemCard = ({ p }: { p: Problem }) => {
     const [isExpanded, setIsExpanded] = useState(false);
-    const [isPreview, setIsPreview] = useState(false);
     const [formData, setFormData] = useState({
         title: p.title,
         statement: p.statement,
@@ -1975,6 +1974,7 @@ tex += `\\end{longtable}
         difficulty: p.difficulty,
         topics: p.topics || []
     });
+    const [difficultyInput, setDifficultyInput] = useState(String(p.difficulty));
     const [isSaving, setIsSaving] = useState(false);
 
     const hasChanges = JSON.stringify(formData) !== JSON.stringify({
@@ -2050,9 +2050,18 @@ tex += `\\end{longtable}
                         <input
                             type="number" step="0.1"
                             className="w-10 text-sm bg-transparent text-center font-bold text-slate-800 outline-none placeholder:text-slate-400"
-                            value={formData.difficulty}
+                            value={difficultyInput}
                             placeholder="0.0"
-                            onChange={e => setFormData({...formData, difficulty: Number(e.target.value)})}
+                            onChange={e => setDifficultyInput(e.target.value)}
+                            onBlur={() => {
+                                const parsed = parseFloat(difficultyInput);
+                                if (!isNaN(parsed) && parsed >= 0.5 && parsed <= 10) {
+                                    setFormData({...formData, difficulty: parsed});
+                                    setDifficultyInput(parsed.toFixed(1));
+                                } else {
+                                    setDifficultyInput(String(formData.difficulty));
+                                }
+                            }}
                         />
                     </div>
                     <Button
@@ -2070,42 +2079,14 @@ tex += `\\end{longtable}
                         <Trash2 size={16} />
                     </button>
                     <button
-                        onClick={() => { setIsPreview(!isPreview); setIsExpanded(false); }}
-                        className={`p-1.5 rounded-md border transition-colors ${isPreview ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
-                        title="Preview as pool card"
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className={`p-1.5 rounded-md border transition-colors ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400 border-slate-200'}`}
                     >
-                        <Eye size={16} />
+                        {isExpanded ? <X size={16} /> : <Pencil size={16} />}
                     </button>
-                    {!isPreview && (
-                        <button
-                            onClick={() => setIsExpanded(!isExpanded)}
-                            className={`p-1.5 rounded-md border transition-colors ${isExpanded ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400 border-slate-200'}`}
-                        >
-                            {isExpanded ? <X size={16} /> : <Pencil size={16} />}
-                        </button>
-                    )}
                 </div>
             </div>
 
-            {/* PREVIEW MODE: show as pool card */}
-            {isPreview && (
-                <div className="-mx-5 -mb-5 border-t border-slate-100">
-                    <ProblemCard
-                        problem={{ ...p, ...formData }}
-                        currentUserId={currentUser!.id}
-                        currentUserRole={currentUser!.role}
-                        onUpvote={() => {}}
-                        onEdit={() => {}}
-                        showAuthor={true}
-                        votingPower={currentUser!.votingPower || 1}
-                        defaultExpanded={true}
-                    />
-                </div>
-            )}
-
-            {/* EDIT MODE: rows 2-4 */}
-            {!isPreview && (
-              <>
             {/* ROW 2: STATEMENT */}
             <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Statement</label>
@@ -2187,8 +2168,6 @@ tex += `\\end{longtable}
                     </Button>
                 )}
             </div>
-              </>
-            )}
         </motion.div>
     );
 }
@@ -2678,7 +2657,7 @@ tex += `\\end{longtable}
   // Get override or default
   const submissionTarget = currentUser.customTargets?.[activeQuotaId] || activeQuota.target;
   // Vote target is currently global per quota
-  const voteTarget = activeQuota.voteTarget || 3;
+  const voteTarget = activeQuota.voteTarget ?? 3;
 
   // Count only off-waitlist problems for quota progress.
   const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId && isOffWaitlist(p)).length;
@@ -2783,8 +2762,10 @@ tex += `\\end{longtable}
         default: return 0;
       }
     });
-  const currentUserContributions = problems
-    .filter(p => p.authorId === currentUser.id)
+  const currentUserContributions = [
+    ...problems.filter(p => p.authorId === currentUser.id),
+    ...deletedProblems.filter(p => p.authorId === currentUser.id)
+  ]
     .filter(p => contributionFilterQuota === 'All' || p.quotaId === contributionFilterQuota)
     .sort((a, b) => b.createdAt - a.createdAt);
 
@@ -2924,29 +2905,36 @@ tex += `\\end{longtable}
 
                 <div className={waitlistTab === 'deleted' ? '' : 'hidden'}>
                     {deletedProblems.length > 0 ? (
-                        <div className="grid gap-3">
+                        <div className="grid gap-4">
                             {deletedProblems.map(p => (
-                                <div key={p.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-start gap-4">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className="font-bold text-slate-800 text-sm truncate">{p.title}</span>
-                                            <span className="text-[10px] bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded font-bold">Deleted</span>
+                                <div key={p.id} className="rounded-xl overflow-hidden border border-red-200/70 shadow-sm">
+                                    <div className="bg-red-50/80 px-4 py-2 border-b border-red-100 flex items-center justify-between gap-3">
+                                        <div className="flex items-center gap-3 text-xs text-red-700 flex-wrap min-w-0">
+                                            <span className="flex items-center gap-1 font-bold bg-red-100 px-1.5 py-0.5 rounded border border-red-200 shrink-0">
+                                                <Trash2 className="w-3 h-3" /> Deleted
+                                            </span>
+                                            <span className="shrink-0">by <span className="font-semibold">{p.deletedByName || '—'}</span></span>
+                                            {p.deletedAt && <span className="text-red-500 shrink-0">{new Date(p.deletedAt).toLocaleDateString()}</span>}
+                                            {p.deletionReason && <span className="italic text-red-600 truncate">"{p.deletionReason}"</span>}
                                         </div>
-                                        <div className="text-xs text-slate-400 mt-1 flex items-center gap-3 flex-wrap">
-                                            <span>By <span className="text-slate-600 font-medium">{p.authorName}</span></span>
-                                            <span>Removed by <span className="text-slate-600 font-medium">{p.deletedByName || '—'}</span></span>
-                                            {p.deletedAt && <span>{new Date(p.deletedAt).toLocaleDateString()}</span>}
-                                        </div>
-                                        {p.deletionReason && (
-                                            <p className="text-xs text-slate-500 mt-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100 italic">"{p.deletionReason}"</p>
-                                        )}
+                                        <button
+                                            onClick={() => handleRestoreProblem(p)}
+                                            className="shrink-0 flex items-center gap-1.5 px-3 py-1 bg-white border border-red-200 rounded-lg text-xs font-bold text-red-700 hover:text-emerald-700 hover:border-emerald-200 hover:bg-emerald-50 transition-colors"
+                                        >
+                                            <RotateCcw className="w-3 h-3" /> Restore
+                                        </button>
                                     </div>
-                                    <button
-                                        onClick={() => handleRestoreProblem(p)}
-                                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-colors"
-                                    >
-                                        <RotateCcw className="w-3.5 h-3.5" /> Restore
-                                    </button>
+                                    <ProblemCard
+                                        problem={{ ...p, status: 'pending', roundIds: [], roundId: undefined }}
+                                        showAuthor={true}
+                                        currentUserId={currentUser!.id}
+                                        currentUserRole={currentUser!.role}
+                                        onUpvote={() => {}}
+                                        onEdit={() => {}}
+                                        votingPower={currentUser!.votingPower}
+                                        readOnly={true}
+                                        className="rounded-t-none border-0 shadow-none hover:shadow-none"
+                                    />
                                 </div>
                             ))}
                         </div>
@@ -3143,23 +3131,48 @@ tex += `\\end{longtable}
                     <AnimatePresence>
                     {currentUserContributions.length > 0 ? (
                         currentUserContributions.map(p => (
-                            <ProblemCard 
-                                key={p.id} 
-                                problem={p} 
-                                roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
-                                quotaName={quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
-                                showAuthor={true} 
-                                currentUserId={currentUser.id}
-                                currentUserRole={currentUser.role}
-                                onUpvote={handleToggleVote}
-                                onEdit={handleStartEdit}
-                                onDelete={handleDeleteProblem}
-                                onStatusChange={handleStatusChange}
-                                onCommentPosted={() => showToast({ variant: 'success', title: 'Comment posted', message: 'Your comment was added.' })}
-                                onCommentError={(message) => showToast({ variant: 'error', title: "Couldn't post comment", message })}
-                                votingPower={currentUser.votingPower}
-                                defaultExpanded={false}
-                            />
+                            p.deletedAt ? (
+                                <div key={p.id} className="rounded-xl overflow-hidden border border-red-200/70 shadow-sm opacity-80">
+                                    <div className="bg-red-50/80 px-3 py-1.5 border-b border-red-100 flex items-center gap-3">
+                                        <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 uppercase tracking-wider">
+                                            <Trash2 className="w-3 h-3" /> Deleted
+                                        </span>
+                                        {p.deletedAt && <span className="text-[10px] text-red-500">{new Date(p.deletedAt).toLocaleDateString()}</span>}
+                                        {p.deletionReason && <span className="text-[10px] text-red-600 italic truncate">"{p.deletionReason}"</span>}
+                                    </div>
+                                    <ProblemCard
+                                        problem={{ ...p, status: 'pending', roundIds: [], roundId: undefined }}
+                                        quotaName={quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
+                                        showAuthor={true}
+                                        currentUserId={currentUser.id}
+                                        currentUserRole={currentUser.role}
+                                        onUpvote={() => {}}
+                                        onEdit={() => {}}
+                                        votingPower={currentUser.votingPower}
+                                        readOnly={true}
+                                        className="rounded-t-none border-0 shadow-none hover:shadow-none"
+                                    />
+                                </div>
+                            ) : (
+                                <ProblemCard
+                                    key={p.id}
+                                    problem={p}
+                                    roundName={rounds.find(r => p.roundIds?.includes(r.id))?.name}
+                                    quotaName={quotas.find(q => q.id === p.quotaId)?.name || 'Unknown cycle'}
+                                    showAuthor={true}
+                                    currentUserId={currentUser.id}
+                                    currentUserRole={currentUser.role}
+                                    onUpvote={handleToggleVote}
+                                    onEdit={handleStartEdit}
+                                    onDelete={handleDeleteProblem}
+                                    onStatusChange={handleStatusChange}
+                                    onCommentPosted={() => showToast({ variant: 'success', title: 'Comment posted', message: 'Your comment was added.' })}
+                                    onCommentError={(message) => showToast({ variant: 'error', title: "Couldn't post comment", message })}
+                                    votingPower={currentUser.votingPower}
+                                    defaultExpanded={false}
+                                    showWaitlistBadge={true}
+                                />
+                            )
                         ))
                     ) : (
                         <div className="col-span-12 text-center py-12 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
@@ -3744,7 +3757,7 @@ tex += `\\end{longtable}
                 <div className="grid md:grid-cols-2 gap-6">
                      <div className="space-y-2">
                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Solution Outline</label>
-                         <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-white rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif text-slate-700 text-xs" placeholder="Proof sketch..."/>
+                         <textarea value={solution} onChange={e => setSolution(e.target.value)} rows={4} className="w-full px-4 py-3 bg-white rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-serif text-slate-700 text-sm" placeholder="Proof sketch..."/>
                      </div>
                      <div className="space-y-2">
                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Answer Key</label>
@@ -3752,19 +3765,40 @@ tex += `\\end{longtable}
                      </div>
                 </div>
 
-                {/* Preview */}
-                  <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 mt-4">
-                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Preview</span>
-                     <MathText 
-                         text={statement || '...'} 
-                         className="font-serif text-slate-800 text-base leading-relaxed whitespace-pre-wrap min-h-[1.5rem]" 
-                     />
-                     {imageData && (
-                        <div className="mt-4 rounded-lg overflow-hidden border border-slate-200 bg-white inline-block">
-                            <img src={imageData} alt="Preview" className="max-h-48 w-auto object-contain" />
-                        </div>
-                     )}
-                  </div>
+                {/* Live Preview */}
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Preview</span>
+                  <ProblemCard
+                    problem={{
+                      id: 'preview',
+                      authorId: currentUser!.id,
+                      authorName: currentUser!.name,
+                      quotaId: selectedSubmissionQuotaId || activeQuotaId,
+                      title: title || 'Untitled',
+                      statement: statement || '...',
+                      solution: solution || undefined,
+                      answerKey: answerKey || undefined,
+                      imageData: imageData ?? undefined,
+                      difficulty: difficultyValue ?? 0,
+                      topics: selectedTopics,
+                      createdAt: Date.now(),
+                      score: 0,
+                      votedBy: [],
+                      status: 'pending',
+                      orderIndex: 0,
+                      version: 1,
+                      commentCount: 0,
+                    }}
+                    showAuthor={true}
+                    currentUserId={currentUser!.id}
+                    currentUserRole={currentUser!.role}
+                    onUpvote={() => {}}
+                    onEdit={() => {}}
+                    votingPower={currentUser!.votingPower}
+                    readOnly={true}
+                    defaultExpanded={false}
+                  />
+                </div>
 
                 {/* Verification */}
                 <label className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-100 rounded-lg cursor-pointer hover:bg-white transition-colors">
@@ -4021,11 +4055,11 @@ tex += `\\end{longtable}
                        <div className="flex gap-3">
                          <div>
                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
-                           <input type="number" min="1" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.target || 5} onChange={e => setNewQuotaForm({...newQuotaForm, target: parseInt(e.target.value)})} />
+                           <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.target ?? 5} onChange={e => setNewQuotaForm({...newQuotaForm, target: parseInt(e.target.value)})} />
                          </div>
                          <div>
                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
-                           <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.voteTarget || 3} onChange={e => setNewQuotaForm({...newQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                           <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.voteTarget ?? 3} onChange={e => setNewQuotaForm({...newQuotaForm, voteTarget: parseInt(e.target.value)})} />
                          </div>
                          <div className="flex-1">
                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
@@ -4106,11 +4140,11 @@ tex += `\\end{longtable}
                                <div className="flex gap-3">
                                  <div>
                                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
-                                   <input type="number" min="1" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.target || 5} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
+                                   <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.target ?? 5} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
                                  </div>
                                  <div>
                                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
-                                   <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.voteTarget || 3} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                                   <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.voteTarget ?? 3} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} />
                                  </div>
                                  <div className="flex-1">
                                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
@@ -4272,7 +4306,8 @@ tex += `\\end{longtable}
                         <tbody className="divide-y divide-slate-100">
                             {users.map(u => {
                                 const isEdit = editingUserId === u.id;
-                                const uTarget = u.customTargets?.[activeQuotaId] || activeQuota.target;
+                                const uTarget = u.customTargets?.[activeQuotaId] ?? activeQuota.target;
+                                const isAssigned = activeQuota.assignmentMode === 'global' || activeQuota.assignedUserIds?.includes(u.id);
                                 const uCount = u.submittedCount || 0;
                                 
                                 return (
@@ -4310,16 +4345,20 @@ tex += `\\end{longtable}
                                             {isEdit ? <input type="number" className="w-12 p-1 border rounded text-xs" value={editUserForm.customTargets?.[activeQuotaId] || activeQuota.target} onChange={e => updateUserTarget(u.id, parseInt(e.target.value))} /> : <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded">{uTarget}</span>}
                                         </td>
                                         <td className="px-4 py-3 min-w-[160px]">
-                                            <div className="space-y-2">
-                                                <div>
-                                                    <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Writing</span> <span>{u.submittedCount}/{uTarget}</span></div>
-                                                    <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-indigo-500 h-full shadow-[0_0_8px_rgba(99,102,241,0.5)]" style={{ width: `${Math.min((u.submittedCount / uTarget) * 100, 100)}%` }}></div></div>
+                                            {isAssigned ? (
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Writing</span> <span>{u.submittedCount}/{uTarget}</span></div>
+                                                        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-indigo-500 h-full shadow-[0_0_8px_rgba(99,102,241,0.5)]" style={{ width: `${uTarget === 0 ? 100 : Math.min((u.submittedCount / uTarget) * 100, 100)}%` }}></div></div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Voting</span> <span>{u.voteCount}/{voteTarget}</span></div>
+                                                        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-emerald-500 h-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${voteTarget === 0 ? 100 : Math.min(((u.voteCount || 0) / voteTarget) * 100, 100)}%` }}></div></div>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Voting</span> <span>{u.voteCount}/{voteTarget}</span></div>
-                                                    <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-emerald-500 h-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${Math.min(((u.voteCount || 0) / voteTarget) * 100, 100)}%` }}></div></div>
-                                                </div>
-                                            </div>
+                                            ) : (
+                                                <span className="text-[10px] text-slate-400 italic">Not assigned quota</span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                         {isEdit ? (

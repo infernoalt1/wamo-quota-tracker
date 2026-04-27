@@ -22,13 +22,16 @@ interface ProblemCardProps {
   onCommentError?: (message: string) => void;
   votingPower: number;
   defaultExpanded?: boolean;
+  readOnly?: boolean;
+  showWaitlistBadge?: boolean;
+  className?: string;
 }
 
-export const ProblemCard: React.FC<ProblemCardProps> = ({ 
-  problem, 
+export const ProblemCard: React.FC<ProblemCardProps> = ({
+  problem,
   roundName,
   quotaName,
-  showAuthor = false, 
+  showAuthor = false,
   currentUserId,
   currentUserRole,
   onUpvote,
@@ -38,7 +41,10 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   onCommentPosted,
   onCommentError,
   votingPower,
-  defaultExpanded = false
+  defaultExpanded = false,
+  readOnly = false,
+  showWaitlistBadge = false,
+  className = ''
 }) => {
   const hasVoted = problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
@@ -81,12 +87,19 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
     if (status === 'accepted') {
       return (
         <span className="flex items-center gap-1 bg-green-50 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold border border-green-200">
-           <CheckCircle className="w-3 h-3" /> 
+           <CheckCircle className="w-3 h-3" />
            <span>{roundName ? roundName : 'Accepted'}</span>
         </span>
       );
     }
-    return null; 
+    if (status === 'pending' && showWaitlistBadge) {
+      return (
+        <span className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold border border-amber-200">
+          <span>Waitlisted</span>
+        </span>
+      );
+    }
+    return null;
   };
 
   const toggleExpand = async () => {
@@ -119,20 +132,20 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`group bg-white rounded-xl border transition-all duration-200 relative flex flex-col shadow-sm hover:shadow-md ${status === 'accepted' ? 'border-green-200/60 ring-1 ring-green-50' : 'border-slate-200 hover:border-indigo-200'}`}
+      className={`group bg-white rounded-xl border transition-all duration-200 relative flex flex-col shadow-sm hover:shadow-md ${status === 'accepted' ? 'border-green-200/60 ring-1 ring-green-50' : 'border-slate-200 hover:border-indigo-200'} ${className}`}
     >
       
       <div className="flex flex-row items-stretch">
         {/* Vote Sidebar */}
         <div className="flex flex-col items-center p-3 border-r border-slate-100 bg-slate-50/50 w-16 gap-1 shrink-0">
-           <motion.button 
+           <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={(e) => { e.stopPropagation(); onUpvote(problem.id); }}
-              disabled={currentUserRole === 'guest'}
+              disabled={currentUserRole === 'guest' || readOnly}
               className={`flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg transition-colors ${
-                 hasVoted 
-                   ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-100' 
-                   : currentUserRole === 'guest' ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm'
+                 hasVoted && !readOnly
+                   ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-100'
+                   : (currentUserRole === 'guest' || readOnly) ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm'
               }`}
            >
               <ThumbsUp className={`w-4 h-4 ${hasVoted ? 'fill-current' : ''}`} />
@@ -192,7 +205,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                             ))}
                         </div>
                         
-                        {isAdmin && onStatusChange && status !== 'pending' && (
+                        {!readOnly && isAdmin && onStatusChange && status !== 'pending' && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onStatusChange(problem.id, 'pending'); }}
                                 className="text-slate-400 hover:text-amber-600 p-1.5 rounded-md hover:bg-amber-50 transition-colors ml-1"
@@ -202,8 +215,8 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                             </button>
                         )}
 
-                        {canEdit && (
-                            <button 
+                        {!readOnly && canEdit && (
+                            <button
                                 onClick={(e) => { e.stopPropagation(); onEdit(problem); }}
                                 className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-md hover:bg-slate-100 transition-colors ml-1"
                             >
@@ -211,7 +224,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                             </button>
                         )}
 
-                        {isAdmin && onDelete && (
+                        {!readOnly && isAdmin && onDelete && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onDelete(problem); }}
                                 className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors ml-1"
@@ -263,7 +276,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
                     <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 h-fit">
                       <h4 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-2">Answer Key</h4>
                       {problem.answerKey ? (
-                        <MathText text={problem.answerKey} className="text-indigo-900 font-bold text-sm font-serif" />
+                        <MathText text={problem.answerKey} className="text-indigo-900 text-sm font-serif" />
                       ) : (
                         <span className="text-indigo-300 italic text-sm">None</span>
                       )}
