@@ -594,11 +594,8 @@ export default function App() {
   // Auto-select a default submission quota when quotas load or user changes
   useEffect(() => {
     if (quotas.length === 0 || !currentUser) return;
-    const formals = quotas.filter(q =>
-      q.isEnabled && q.quotaType === 'formal' &&
-      (q.assignmentMode === 'global' || q.assignedUserIds?.includes(currentUser.id))
-    );
-    const general = quotas.find(q => q.isEnabled && q.quotaType === 'general');
+    const formals = quotas.filter(q => q.quotaType === 'formal' && canCurrentUserUseQuota(q));
+    const general = quotas.find(q => q.quotaType === 'general' && canCurrentUserUseQuota(q));
     const allEligible = [...formals, ...(general ? [general] : [])];
     if (allEligible.length > 0 && !allEligible.find(q => q.id === selectedSubmissionQuotaId)) {
       setSelectedSubmissionQuotaId(formals[0]?.id || general?.id || '');
@@ -652,6 +649,13 @@ export default function App() {
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
   const getErrorMessage = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
+  const canCurrentUserUseQuota = (q: Quota) => {
+    if (!q.isEnabled) return false;
+    if (q.quotaType === 'general' || q.assignmentMode === 'global') return true;
+    if (!currentUser) return false;
+    if (currentUser.role !== 'admin' && currentUser.role !== 'director') return true;
+    return q.assignedUserIds?.includes(currentUser.id) ?? false;
+  };
 
   // --- Actions ---
 
@@ -2681,11 +2685,8 @@ tex += `\\end{longtable}
   const isGuest = currentUser.role === 'guest';
 
   // Quota eligibility derived state
-  const myFormalQuotas = quotas.filter(q =>
-    q.isEnabled && q.quotaType === 'formal' &&
-    (q.assignmentMode === 'global' || q.assignedUserIds?.includes(currentUser.id))
-  );
-  const generalQuota = quotas.find(q => q.isEnabled && q.quotaType === 'general') ?? null;
+  const myFormalQuotas = quotas.filter(q => q.quotaType === 'formal' && canCurrentUserUseQuota(q));
+  const generalQuota = quotas.find(q => q.quotaType === 'general' && canCurrentUserUseQuota(q)) ?? null;
   const eligibleQuotas = [...myFormalQuotas, ...(generalQuota ? [generalQuota] : [])];
 
   // --- Composer Data ---
