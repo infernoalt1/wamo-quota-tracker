@@ -574,6 +574,10 @@ export default function App() {
           if (contributionFilterQuota !== 'All' && !q.find(i => i.id === contributionFilterQuota)) {
              setContributionFilterQuota('All');
           }
+          // Fetch deleted problems for admin/director in the same pass
+          if (currentUser?.role === 'admin' || currentUser?.role === 'director') {
+              api.getDeletedProblems().then(setDeletedProblems).catch(() => {});
+          }
       } catch (e) {
           console.error("Failed to refresh data", e);
       } finally {
@@ -1172,16 +1176,22 @@ export default function App() {
     const refreshIfVisible = () => {
       if (document.visibilityState === 'visible') {
         refreshNotifications();
+        refreshData();
       }
     };
 
-    const intervalId = window.setInterval(refreshIfVisible, 15000);
-    window.addEventListener('focus', refreshNotifications);
+    const onFocus = () => {
+      refreshNotifications();
+      refreshData();
+    };
+
+    const intervalId = window.setInterval(refreshNotifications, 15000);
+    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', refreshIfVisible);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener('focus', refreshNotifications);
+      window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
   }, [currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps
