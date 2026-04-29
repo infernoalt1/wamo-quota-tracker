@@ -78,6 +78,7 @@ const initDB = async () => {
         name TEXT NOT NULL,
         tag TEXT,
         description TEXT,
+        target_size INTEGER DEFAULT 10,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -164,6 +165,7 @@ const initDB = async () => {
       UPDATE problems SET difficulty = 0.5 WHERE difficulty < 0.5 OR difficulty IS NULL;
       
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
+      ALTER TABLE rounds ADD COLUMN IF NOT EXISTS target_size INTEGER DEFAULT 10;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_type TEXT NOT NULL DEFAULT 'formal';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS assignment_mode TEXT NOT NULL DEFAULT 'global';
@@ -607,7 +609,8 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       SELECT p.*, u.name as author_name, 
       (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
       (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
-      (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids
+      (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
+      (SELECT COALESCE(json_object_agg(round_id, order_index), '{}'::json) FROM problem_rounds WHERE problem_id = p.id) as round_order_indexes
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       WHERE p.deleted_at IS NULL
@@ -625,6 +628,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       topics: row.topics || [],
       status: row.status || 'pending',
       orderIndex: row.order_index || 0,
+      roundOrderIndexes: row.round_order_indexes || {},
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || [],
       imageData: row.image_data,
@@ -654,7 +658,8 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
         deleter.avatar_url as deleted_by_avatar_url,
         (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
         (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
-        (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids
+        (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
+        (SELECT COALESCE(json_object_agg(round_id, order_index), '{}'::json) FROM problem_rounds WHERE problem_id = p.id) as round_order_indexes
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       LEFT JOIN users deleter ON p.deleted_by = deleter.id
@@ -673,6 +678,7 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
       topics: row.topics || [],
       status: row.status || 'pending',
       orderIndex: row.order_index || 0,
+      roundOrderIndexes: row.round_order_indexes || {},
       createdAt: new Date(row.created_at).getTime(),
       votedBy: row.voted_by || [],
       imageData: row.image_data,
@@ -1171,7 +1177,7 @@ app.patch('/api/problems/:id/status', authenticateToken, async (req, res) => {
 app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   
-  const { problems, roundId } = req.body; // Array of problem IDs in desired order, and the Round ID
+  const { problems, roundId, slotIndexes } = req.body; // Array of problem IDs in desired order, and the Round ID
   
   const client = await pool.connect();
   try {
@@ -1183,15 +1189,16 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
       
       if (roundId) {
           for (let i = 0; i < problems.length; i++) {
+              const orderIndex = Array.isArray(slotIndexes) && Number.isInteger(slotIndexes[i]) ? slotIndexes[i] : i;
               await client.query(
                   'UPDATE problem_rounds SET order_index = $1 WHERE problem_id = $2 AND round_id = $3',
-                  [i, problems[i], roundId]
+                  [orderIndex, problems[i], roundId]
               );
               // Also update main table order_index if this is the "primary" round (legacy compat)
               // Just simpler to update it always, though it might get overwritten by other round reorders.
               await client.query(
-                  'UPDATE problems SET order_index = $1 WHERE id = $2 AND round_id = $3',
-                   [i, problems[i], roundId]
+                  'UPDATE problems SET order_index = $1 WHERE id = $2',
+                   [orderIndex, problems[i]]
               );
           }
       } else {
@@ -1531,7 +1538,8 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
             tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime(),
-            problemCount: parseInt(r.problem_count || '0')
+            problemCount: parseInt(r.problem_count || '0'),
+            targetSize: parseInt(r.target_size || '10')
         })));
     } catch (e) {
         console.error(e);
@@ -1541,9 +1549,10 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
 
 app.post('/api/rounds', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
-    const { name, description, tag } = req.body;
+    const { name, description, tag, targetSize } = req.body;
     try {
-        const result = await pool.query('INSERT INTO rounds (name, description, tag) VALUES ($1, $2, $3) RETURNING *', [name, description, tag]);
+        const safeTargetSize = Math.max(1, Math.min(50, parseInt(targetSize || 10)));
+        const result = await pool.query('INSERT INTO rounds (name, description, tag, target_size) VALUES ($1, $2, $3, $4) RETURNING *', [name, description, tag, safeTargetSize]);
         const r = result.rows[0];
         res.json({
             id: r.id,
@@ -1551,7 +1560,8 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
             tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime(),
-            problemCount: 0
+            problemCount: 0,
+            targetSize: parseInt(r.target_size || '10')
         });
     } catch (e) {
         console.error(e);
@@ -1563,11 +1573,12 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
 app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
     const { id } = req.params;
-    const { name, description, tag } = req.body;
+    const { name, description, tag, targetSize } = req.body;
     try {
+        const safeTargetSize = Math.max(1, Math.min(50, parseInt(targetSize || 10)));
         const result = await pool.query(
-            'UPDATE rounds SET name = $1, description = $2, tag = $3 WHERE id = $4 RETURNING *',
-            [name, description, tag, id]
+            'UPDATE rounds SET name = $1, description = $2, tag = $3, target_size = $4 WHERE id = $5 RETURNING *',
+            [name, description, tag, safeTargetSize, id]
         );
         if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
         const r = result.rows[0];
@@ -1578,6 +1589,7 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
             tag: r.tag,
             description: r.description,
             createdAt: new Date(r.created_at).getTime(),
+            targetSize: parseInt(r.target_size || '10'),
             // problemCount is missing here but usually update doesn't need it immediately or can refetch
         });
     } catch (e) {

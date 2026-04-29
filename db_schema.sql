@@ -22,6 +22,15 @@ CREATE TABLE quotas (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE rounds (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  tag TEXT,
+  description TEXT,
+  target_size INTEGER DEFAULT 10,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Problems Table
 CREATE TABLE problems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

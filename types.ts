@@ -1,4 +1,3 @@
-
 export type QuotaType = 'formal' | 'general';
 export type AssignmentMode = 'global' | 'selected';
 
@@ -13,6 +12,16 @@ export interface Round {
   tag?: string;
   description: string;
   createdAt?: number;
+
+  /**
+   * Desired number of slots/problems this round should contain.
+   * This is the round capacity and must not be confused with problemCount.
+   */
+  targetSize: number;
+
+  /**
+   * Actual number of problems currently assigned to the round, if provided by the backend.
+   */
   problemCount?: number;
 }
 
@@ -23,11 +32,10 @@ export interface Quota {
   voteTarget: number;
   instructions: string;
   dueDate: number | null;
-  // Extended fields
-  quotaType: QuotaType;           // 'formal' | 'general'
-  assignmentMode: AssignmentMode; // 'global' | 'selected'
+  quotaType: QuotaType;
+  assignmentMode: AssignmentMode;
   isEnabled: boolean;
-  assignedUserIds?: string[];     // populated for admin views
+  assignedUserIds?: string[];
 }
 
 export interface QuotaUserProgress {
@@ -70,6 +78,7 @@ export interface Problem {
   votedBy: string[];
   status: ProblemStatus;
   orderIndex: number;
+  roundOrderIndexes?: Record<string, number>;
   version: number;
   commentCount?: number;
   deletedAt?: number | null;

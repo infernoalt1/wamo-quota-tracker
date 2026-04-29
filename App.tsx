@@ -44,7 +44,6 @@ import {
   ArrowUp,
   ArrowDown,
   FileText,
-  GripVertical,
   ChevronDown,
   ChevronUp,
   MessageSquare,
@@ -126,6 +125,14 @@ const TOPIC_CHIP_CLASSES: Record<Topic, string> = {
 const DIFFICULTY_MIN = 0.5;
 const DIFFICULTY_MAX = 10;
 const DIFFICULTY_QUICK_VALUES = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+const DEFAULT_ROUND_SLOT_COUNT = 10;
+
+const getSafeRoundSize = (value: unknown, fallback = DEFAULT_ROUND_SLOT_COUNT) => {
+  if (value === '' || value === null || value === undefined) return fallback;
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(50, parsed));
+};
 
 const DIFFICULTY_GUIDE = [
   { value: 0.5, label: 'Easiest', summary: 'Easiest AMC 8 1-5, MATHCOUNTS School Sprint 1-20, easier middle-school word problems, easier Math Kangaroo, MOEMS E.', references: 'Basic elementary-middle school techniques; usually one direct idea.', exampleTitle: '2003 AMC 8 Problem 1', exampleText: `Jamie counted the number of edges of a cube, Jimmy counted the numbers of corners, and Judy counted the number of faces. They then added the three numbers. What was the resulting sum?` },
@@ -375,6 +382,7 @@ export default function App() {
   const [newRoundName, setNewRoundName] = useState('');
   const [newRoundTag, setNewRoundTag] = useState('');
   const [newRoundDesc, setNewRoundDesc] = useState('');
+  const [newRoundSize, setNewRoundSize] = useState<number | ''>('');
 
   // Pool View State (Sorting/Filtering)
   const [poolSort, setPoolSort] = useState<'highest' | 'lowest' | 'hardest' | 'easiest' | 'newest'>('highest');
@@ -389,21 +397,34 @@ export default function App() {
   const [composerSelectedRoundId, setComposerSelectedRoundId] = useState<string | null>(null);
   const [composerSourceQuota, setComposerSourceQuota] = useState<string>('All');
   const [composerFilterTopic, setComposerFilterTopic] = useState<string>('All');
-  const [composerMinDiff, setComposerMinDiff] = useState<number>(0);
-  const [composerMaxDiff, setComposerMaxDiff] = useState<number>(50);
+  const [composerMinDiff, setComposerMinDiff] = useState<number>(DIFFICULTY_MIN);
+  const [composerMaxDiff, setComposerMaxDiff] = useState<number>(DIFFICULTY_MAX);
   const [composerSort, setComposerSort] = useState<'votes' | 'difficulty' | 'newest'>('votes');
+  const [composerSelectionFilter, setComposerSelectionFilter] = useState<'unused' | 'not-round' | 'not-bench' | 'selected' | 'bench' | 'all'>('unused');
+  const [composerSolutionFilter, setComposerSolutionFilter] = useState<'all' | 'has' | 'missing'>('all');
+  const [composerAnswerFilter, setComposerAnswerFilter] = useState<'all' | 'has' | 'missing'>('all');
+  const [composerCommentFilter, setComposerCommentFilter] = useState<'all' | 'has'>('all');
   const [composerSearchText, setComposerSearchText] = useState('');
-  const [composerExpandedMap, setComposerExpandedMap] = useState<Record<string, boolean>>({});
   const [composerScrollTop, setComposerScrollTop] = useState(0); // Track scroll
-  
+  const [composerBenchByRound, setComposerBenchByRound] = useState<Record<string, string[]>>({});
+  const [composerDetailProblemId, setComposerDetailProblemId] = useState<string | null>(null);
+  const [showRoundPreview, setShowRoundPreview] = useState(false);
+  const [detailEditMode, setDetailEditMode] = useState(false);
+  const [detailSaving, setDetailSaving] = useState(false);
+  const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
+  const [detailEditForm, setDetailEditForm] = useState({
+    statement: '',
+    answerKey: '',
+    solution: '',
+    difficulty: String(DIFFICULTY_MIN),
+    topics: [] as Topic[]
+  });
+  const [composerRightTab, setComposerRightTab] = useState<'round' | 'bench'>('round');
+
   // Composer New Round UI / Editing Round
   const [isCreatingRound, setIsCreatingRound] = useState(false);
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [editRoundForm, setEditRoundForm] = useState<Partial<Round>>({});
-
-  // Drag State
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Export State
   const [showExportModal, setShowExportModal] = useState(false);
@@ -645,6 +666,23 @@ export default function App() {
       }
   }, [view]);
 
+  // Reset detail drawer state when a different problem is opened
+  useEffect(() => {
+    setDetailEditMode(false);
+    setDetailSaveError(null);
+    if (composerDetailProblemId) {
+      const p = problems.find(pr => pr.id === composerDetailProblemId);
+      if (p) setDetailEditForm({
+        statement: p.statement || '',
+        answerKey: p.answerKey || '',
+        solution: p.solution || '',
+        difficulty: String(p.difficulty ?? DIFFICULTY_MIN),
+        topics: p.topics || []
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerDetailProblemId]);
+
   // --- Helpers ---
   const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
@@ -715,16 +753,19 @@ export default function App() {
 
   const addRound = async () => {
     if (!newRoundName.trim()) return;
+    const safeRoundSize = getSafeRoundSize(newRoundSize);
     try {
         const newRound = await api.createRound({
           name: newRoundName.trim(),
           tag: newRoundTag.trim() || undefined,
           description: newRoundDesc.trim() || 'No description.',
+          targetSize: safeRoundSize,
         });
-        setRounds([newRound, ...rounds]); // Add to top
+        setRounds([{ ...newRound, targetSize: safeRoundSize }, ...rounds]); // Add to top
         setNewRoundName('');
         setNewRoundTag('');
         setNewRoundDesc('');
+        setNewRoundSize('');
         
         // Switch to this round immediately
         setComposerSelectedRoundId(newRound.id);
@@ -741,20 +782,56 @@ export default function App() {
     setNewRoundName('');
     setNewRoundTag('');
     setNewRoundDesc('');
+    setNewRoundSize('');
   };
 
   const editRound = async () => {
-      if (!composerSelectedRoundId || !editRoundForm.name) return;
+      if (!composerSelectedRoundId) return;
+
+      const roundId = composerSelectedRoundId;
+      const roundName = editRoundForm.name?.trim();
+      if (!roundName) {
+          showToast({ variant: 'warning', title: 'Round name required', message: 'Enter a round name.' });
+          return;
+      }
+
+      const safeTargetSize = getSafeRoundSize(editRoundForm.targetSize);
+      const roundPatch: Pick<Round, 'name' | 'tag' | 'description' | 'targetSize'> = {
+          name: roundName,
+          tag: editRoundForm.tag?.trim() || '',
+          description: editRoundForm.description?.trim() || '',
+          targetSize: safeTargetSize
+      };
+
+      const { slots } = getRoundSlotsFromProblems(composerRoundTarget);
+      const nextSlots = slots.slice(0, safeTargetSize);
+      const overflowProblems = slots.slice(safeTargetSize).filter(Boolean) as Problem[];
+      const overflowIds = overflowProblems.map(p => p.id);
       try {
           await api.updateRound({
-              id: composerSelectedRoundId,
-              name: editRoundForm.name,
-              tag: editRoundForm.tag || '',
-              description: editRoundForm.description || ''
+              id: roundId,
+              ...roundPatch
           });
-          refreshData(); // Updates the rounds list
+          // Optimistically update local rounds so composerRoundTarget reflects new size immediately
+          setRounds(prev => prev.map(r => r.id === roundId
+            ? { ...r, ...roundPatch }
+            : r
+          ));
+          if (overflowIds.length > 0) {
+              applyRoundSlotsOptimistic(nextSlots, overflowIds);
+              overflowIds.forEach(id => setBenchIdsForRound(roundId, ids => ids.includes(id) ? ids : [...ids, id]));
+              for (const id of overflowIds) {
+                  await api.removeFromRound(id, roundId);
+              }
+              await persistRoundSlots(nextSlots);
+          }
+          await refreshData(); // Sync with server
           setIsEditingRound(false);
-          showToast({ variant: 'success', title: 'Round updated', message: 'Round settings were saved.' });
+          showToast({
+              variant: overflowIds.length > 0 ? 'info' : 'success',
+              title: 'Round updated',
+              message: overflowIds.length > 0 ? `${overflowIds.length} overflow problem(s) moved to Bench.` : 'Round settings were saved.'
+          });
       } catch (e) {
           console.error("Edit round failed", e);
           showToast({ variant: 'error', title: "Couldn't update round", message: getErrorMessage(e, 'Please try again.') });
@@ -1310,210 +1387,251 @@ export default function App() {
       }
   };
 
-  // Composer Actions
-  const handleAddToRound = async (problem: Problem, targetIndex?: number) => {
-      if (!composerSelectedRoundId) return;
-      
-      // Get current problems in that round
-      const accepted = problems
-        .filter(p => p.roundIds && p.roundIds.includes(composerSelectedRoundId) && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
-      
-      // If already added, do nothing (unless moving, which is handled in drag)
-      if (problem.roundIds?.includes(composerSelectedRoundId)) return;
+  const getProblemRoundSlot = (problem: Problem, roundId = composerSelectedRoundId) => {
+      const raw = roundId ? problem.roundOrderIndexes?.[roundId] : undefined;
+      const parsed = Number(raw ?? problem.orderIndex ?? 0);
+      return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  };
 
-      const newOrder = [...accepted];
-      
-      // Insert at target index or end
-      if (targetIndex !== undefined && targetIndex >= 0 && targetIndex <= newOrder.length) {
-          newOrder.splice(targetIndex, 0, problem);
-      } else {
-          newOrder.push(problem);
-      }
-      
-      // Create Map for fast update
-      const orderMap = new Map();
-      newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
-
-      // Optimistic update
-      const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) {
-               const newRoundIds = [...(p.roundIds || []), composerSelectedRoundId];
-               // We set status 'accepted' if in any round
-               return { ...p, status: 'accepted', roundIds: newRoundIds, orderIndex: orderMap.get(p.id) } as Problem;
-          }
-          if (orderMap.has(p.id)) {
-              return { ...p, orderIndex: orderMap.get(p.id) };
-          }
-          return p;
+  const setBenchIdsForRound = (roundId: string, updater: (ids: string[]) => string[]) => {
+      setComposerBenchByRound(prev => {
+          const nextIds = updater(prev[roundId] || []);
+          return { ...prev, [roundId]: Array.from(new Set(nextIds)) };
       });
-      setProblems(updatedProblems);
-      
-      try {
-         // Update problem round assignment (add to round)
-         await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
-         
-         // Fix order
-         await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
-         showToast({ variant: 'success', title: 'Added to round', message: `The problem was added to ${composerSelectedRound?.name || 'the round'}.` });
-      } catch(e) {
-          refreshData();
-          showToast({ variant: 'error', title: "Couldn't add to round", message: getErrorMessage(e, 'Please try again.') });
+  };
+
+  const addProblemToBench = (problem: Problem) => {
+      if (!composerSelectedRoundId) return;
+      setBenchIdsForRound(composerSelectedRoundId, ids => ids.includes(problem.id) ? ids : [...ids, problem.id]);
+      showToast({ variant: 'info', title: 'Added to bench', message: 'Saved as a candidate without occupying a final slot.' });
+  };
+
+  const removeProblemFromBench = (problemId: string) => {
+      if (!composerSelectedRoundId) return;
+      setBenchIdsForRound(composerSelectedRoundId, ids => ids.filter(id => id !== problemId));
+  };
+
+  const getRoundSlotsFromProblems = (targetSize: number) => {
+      const slots: Array<Problem | null> = Array.from({ length: targetSize }, () => null);
+      const overflow: Problem[] = [];
+
+      composerAccepted.forEach(problem => {
+          const preferredSlot = getProblemRoundSlot(problem);
+          if (preferredSlot >= 0 && preferredSlot < targetSize && !slots[preferredSlot]) {
+              slots[preferredSlot] = problem;
+              return;
+          }
+
+          const fallbackSlot = slots.findIndex(slot => slot === null);
+          if (fallbackSlot >= 0) {
+              slots[fallbackSlot] = problem;
+          } else {
+              overflow.push(problem);
+          }
+      });
+
+      return { slots, overflow };
+  };
+
+  const placeProblemIntoSlots = (problem: Problem, targetIndex: number, slots: Array<Problem | null>) => {
+      const nextSlots = slots.map(slot => slot?.id === problem.id ? null : slot);
+      const boundedTarget = Math.max(0, Math.min(targetIndex, Math.max(nextSlots.length - 1, 0)));
+      let carry: Problem | null = problem;
+      const overflow: Problem[] = [];
+
+      for (let i = boundedTarget; i < nextSlots.length && carry; i++) {
+          const displaced = nextSlots[i];
+          nextSlots[i] = carry;
+          carry = displaced;
+      }
+
+      if (carry) overflow.push(carry);
+      return { slots: nextSlots, overflow };
+  };
+
+  const applyRoundSlotsOptimistic = (slots: Array<Problem | null>, removedIds: string[] = []) => {
+      if (!composerSelectedRoundId) return;
+      const slotMap = new Map<string, number>();
+      slots.forEach((slot, idx) => {
+          if (slot) slotMap.set(slot.id, idx);
+      });
+
+      setProblems(prev => prev.map(p => {
+          if (slotMap.has(p.id)) {
+              const nextRoundIds = p.roundIds?.includes(composerSelectedRoundId)
+                ? p.roundIds
+                : [...(p.roundIds || []), composerSelectedRoundId];
+              return {
+                  ...p,
+                  status: 'accepted',
+                  roundIds: nextRoundIds,
+                  orderIndex: slotMap.get(p.id)!,
+                  roundOrderIndexes: { ...(p.roundOrderIndexes || {}), [composerSelectedRoundId]: slotMap.get(p.id)! }
+              };
+          }
+
+          if (removedIds.includes(p.id)) {
+              const nextRoundIds = (p.roundIds || []).filter(rid => rid !== composerSelectedRoundId);
+              const nextOrderIndexes = { ...(p.roundOrderIndexes || {}) };
+              delete nextOrderIndexes[composerSelectedRoundId];
+              return {
+                  ...p,
+                  status: nextRoundIds.length > 0 ? 'accepted' : 'approved',
+                  roundIds: nextRoundIds,
+                  roundOrderIndexes: nextOrderIndexes
+              };
+          }
+
+          return p;
+      }));
+  };
+
+  const persistRoundSlots = async (slots: Array<Problem | null>, removedIds: string[] = []) => {
+      if (!composerSelectedRoundId) return;
+      const orderedSlots = slots
+        .map((problem, slotIndex) => problem ? { problem, slotIndex } : null)
+        .filter(Boolean) as { problem: Problem; slotIndex: number }[];
+
+      await api.reorderRound(
+        orderedSlots.map(item => item.problem.id),
+        composerSelectedRoundId,
+        orderedSlots.map(item => item.slotIndex)
+      );
+
+      for (const removedId of removedIds) {
+          await api.removeFromRound(removedId, composerSelectedRoundId);
       }
   };
 
-  const handleRemoveFromRound = async (problem: Problem) => {
+  const handleSwapIntoSlot = async (problem: Problem, targetIndex: number, options: { silent?: boolean } = {}) => {
+      if (!composerSelectedRoundId) return;
+      const { slots } = getRoundSlotsFromProblems(composerRoundTarget);
+      const boundedTarget = Math.max(0, Math.min(targetIndex, composerRoundTarget - 1));
+      const sourceIndex = slots.findIndex(slot => slot?.id === problem.id);
+      const occupant = slots[boundedTarget];
+      if (occupant?.id === problem.id) return;
+
+      const nextSlots = [...slots];
+      const removedIds: string[] = [];
+      const alreadyInRound = sourceIndex >= 0;
+
+      if (alreadyInRound) {
+          nextSlots[sourceIndex] = occupant || null;
+          nextSlots[boundedTarget] = problem;
+      } else {
+          if (occupant) removedIds.push(occupant.id);
+          nextSlots[boundedTarget] = problem;
+      }
+
+      applyRoundSlotsOptimistic(nextSlots, removedIds);
+      removeProblemFromBench(problem.id);
+      removedIds.forEach(id => setBenchIdsForRound(composerSelectedRoundId, ids => ids.includes(id) ? ids : [...ids, id]));
+
+      try {
+          if (!alreadyInRound) {
+              await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
+          }
+          for (const removedId of removedIds) {
+              await api.removeFromRound(removedId, composerSelectedRoundId);
+          }
+          await persistRoundSlots(nextSlots);
+          if (!options.silent) {
+              showToast({
+                  variant: occupant ? 'info' : 'success',
+                  title: occupant ? 'Slot swapped' : 'Moved to slot',
+                  message: occupant
+                    ? `${problem.title} is now in slot ${boundedTarget + 1}; the previous problem moved ${alreadyInRound ? 'to the old slot' : 'to Bench'}.`
+                    : `Placed in slot ${boundedTarget + 1}.`
+              });
+          }
+      } catch(e) {
+          refreshData();
+          showToast({ variant: 'error', title: "Couldn't update slot", message: getErrorMessage(e, 'Please try again.') });
+      }
+  };
+
+  // Composer Actions
+  const handleAddToRound = async (problem: Problem, targetIndex?: number, options: { silent?: boolean } = {}) => {
       if (!composerSelectedRoundId) return;
 
-      // Removes current roundId from list
-      const updatedProblems = problems.map(p => {
-          if (p.id === problem.id) {
-             const newRoundIds = (p.roundIds || []).filter(rid => rid !== composerSelectedRoundId);
-             // If no rounds left, it goes back to 'approved' (pool)
-             const newStatus = newRoundIds.length === 0 ? 'approved' : 'accepted';
-             return { ...p, status: newStatus, roundIds: newRoundIds } as Problem;
+      const alreadyInRound = problem.roundIds?.includes(composerSelectedRoundId);
+      if (alreadyInRound && typeof targetIndex !== 'number') {
+          setComposerDetailProblemId(problem.id);
+          return;
+      }
+
+      const { slots } = getRoundSlotsFromProblems(composerRoundTarget);
+      const openIndex = slots.findIndex(slot => slot === null);
+      if (typeof targetIndex === 'number') {
+          await handleSwapIntoSlot(problem, targetIndex, options);
+          return;
+      }
+      const resolvedTarget = openIndex;
+
+      if (resolvedTarget < 0) {
+          addProblemToBench(problem);
+          return;
+      }
+
+      const nextSlots = [...slots];
+      nextSlots[resolvedTarget] = problem;
+      applyRoundSlotsOptimistic(nextSlots);
+      removeProblemFromBench(problem.id);
+
+      try {
+          if (!alreadyInRound) {
+              await api.updateProblem(problem.id, { roundId: composerSelectedRoundId, status: 'accepted' });
           }
-          return p;
-      });
-      setProblems(updatedProblems);
+          await persistRoundSlots(nextSlots);
+          if (!options.silent) {
+              showToast({
+                  variant: 'success',
+                  title: 'Added to round',
+                  message: `Placed in slot ${resolvedTarget + 1}.`
+              });
+          }
+      } catch(e) {
+          refreshData();
+          showToast({ variant: 'error', title: "Couldn't place problem", message: getErrorMessage(e, 'Please try again.') });
+      }
+  };
+
+  const handleRemoveFromRound = async (problem: Problem, options: { toBench?: boolean } = {}) => {
+      if (!composerSelectedRoundId) return;
+
+      const { slots } = getRoundSlotsFromProblems(composerRoundTarget);
+      const nextSlots = slots.map(slot => slot?.id === problem.id ? null : slot);
+      applyRoundSlotsOptimistic(nextSlots, [problem.id]);
+      if (options.toBench) {
+          setBenchIdsForRound(composerSelectedRoundId, ids => ids.includes(problem.id) ? ids : [...ids, problem.id]);
+      }
 
       try {
           await api.removeFromRound(problem.id, composerSelectedRoundId);
+          await persistRoundSlots(nextSlots);
       } catch(e) {
           refreshData();
           showToast({ variant: 'error', title: "Couldn't remove from round", message: getErrorMessage(e, 'Please try again.') });
           return;
       }
-      showToast({ variant: 'success', title: 'Removed from round', message: `The problem was removed from ${composerSelectedRound?.name || 'the round'}.` });
-  };
-
-  // Drag and Drop Handlers
-  const handleDragStart = (e: React.DragEvent, problemId: string, source: 'candidate' | 'accepted', index?: number) => {
-      const dragImage = e.currentTarget.cloneNode(true) as HTMLElement;
-      dragImage.style.opacity = '1';
-      
-      requestAnimationFrame(() => {
-        setDraggingId(problemId);
+      showToast({
+          variant: 'success',
+          title: options.toBench ? 'Moved to bench' : 'Removed from round',
+          message: options.toBench ? 'The problem is still saved as a candidate.' : `Removed from ${composerSelectedRound?.name || 'the round'}.`
       });
-
-      e.dataTransfer.setData('problemId', problemId);
-      e.dataTransfer.setData('source', source);
-      if (typeof index === 'number') e.dataTransfer.setData('index', index.toString());
-      e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragEnd = () => {
-      setDraggingId(null);
-      setDragOverIndex(null);
+  const handleReorderRound = async (problemId: string, targetIndex: number, options: { silent?: boolean } = {}) => {
+      const problem = problems.find(p => p.id === problemId);
+      if (!problem) return;
+      await handleSwapIntoSlot(problem, targetIndex, options);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-  };
-  
-  const handleDragOverItem = (e: React.DragEvent, index: number) => {
-      e.preventDefault();
-      e.stopPropagation(); // Stop bubbling to container
-      
-      const rect = e.currentTarget.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      const newIndex = e.clientY < midY ? index : index + 1;
-      
-      if (newIndex !== dragOverIndex) {
-          setDragOverIndex(newIndex);
-      }
-  };
-
-  // Container handler to allow dropping in empty space
-  const handleContainerDragOver = (e: React.DragEvent, listLength: number) => {
-      e.preventDefault();
-      // Only set to end if we are strictly hovering the container background, not bubbling from children
-      if (e.target === e.currentTarget) {
-          setDragOverIndex(listLength);
-      }
-  };
-
-  // Handle Drop on the "Official Round" List (Accepts Candidates & Reorders Accepted)
-  const handleDropOnRound = async (e: React.DragEvent) => {
-      e.preventDefault();
-      const problemId = e.dataTransfer.getData('problemId');
-      const source = e.dataTransfer.getData('source');
-      const sourceIndexStr = e.dataTransfer.getData('index');
-      
-      if (!composerSelectedRoundId) return;
-
-      let targetIndex = dragOverIndex;
-      // Default to end if null (dropped on container background)
-      if (targetIndex === null) {
-          // Fallback to getting from the filtered accepted list length
-          const accepted = problems.filter(p => p.roundIds?.includes(composerSelectedRoundId) && p.status === 'accepted');
-          targetIndex = accepted.length;
-      }
-      
-      // Clear drag state
-      setDraggingId(null);
-      setDragOverIndex(null);
-
-      // Case 1: Dragging from Candidate -> Accepted
-      if (source === 'candidate') {
-          const problem = problems.find(p => p.id === problemId);
-          if (problem) {
-              handleAddToRound(problem, targetIndex); 
-          }
-      } 
-      // Case 2: Reordering within Accepted
-      else if (source === 'accepted') {
-          const sourceIndex = parseInt(sourceIndexStr);
-          if (isNaN(sourceIndex)) return;
-          
-          // Optimization: No op if same position
-          if (sourceIndex === targetIndex || sourceIndex === targetIndex - 1) return;
-
-          const accepted = problems
-            .filter(p => p.roundIds?.includes(composerSelectedRoundId) && p.status === 'accepted')
-            .sort((a,b) => a.orderIndex - b.orderIndex);
-          
-          // Adjusted Target Logic:
-          const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-
-          const newOrder = [...accepted];
-          const [movedItem] = newOrder.splice(sourceIndex, 1);
-          newOrder.splice(adjustedTarget, 0, movedItem);
-          
-          // Create Map for fast optimistic update
-          const orderMap = new Map();
-          newOrder.forEach((p, idx) => orderMap.set(p.id, idx));
-
-          const updatedProblems = problems.map(p => {
-              if (orderMap.has(p.id)) {
-                  return { ...p, orderIndex: orderMap.get(p.id) };
-              }
-              return p;
-          });
-          setProblems(updatedProblems);
-          
-          try {
-              await api.reorderRound(newOrder.map(p => p.id), composerSelectedRoundId);
-          } catch(e) {
-              refreshData();
-              showToast({ variant: 'error', title: "Couldn't reorder round", message: getErrorMessage(e, 'Please try again.') });
-          }
-      }
-  };
-
-  // Handle Drop on the "Candidates" List (Removes from Round)
-  const handleDropOnCandidates = async (e: React.DragEvent) => {
-      e.preventDefault();
-      const problemId = e.dataTransfer.getData('problemId');
-      const source = e.dataTransfer.getData('source');
-      setDraggingId(null);
-      setDragOverIndex(null);
-
-      if (source === 'accepted') {
-          const problem = problems.find(p => p.id === problemId);
-          if (problem) handleRemoveFromRound(problem);
-      }
+  const handleMoveRoundItem = async (problem: Problem, direction: -1 | 1) => {
+      const currentSlot = getProblemRoundSlot(problem);
+      const targetSlot = currentSlot + direction;
+      if (targetSlot < 0 || targetSlot >= composerRoundTarget) return;
+      await handleReorderRound(problem.id, targetSlot);
   };
 
   const openExportModal = () => {
@@ -1531,7 +1649,7 @@ export default function App() {
 
       const activeProblems = problems
         .filter(p => p.roundIds?.includes(targetRoundId) && p.status === 'accepted')
-        .sort((a,b) => a.orderIndex - b.orderIndex);
+        .sort((a,b) => getProblemRoundSlot(a, targetRoundId) - getProblemRoundSlot(b, targetRoundId));
 
       let tex = `\\documentclass[12pt]{extarticle}
 \\usepackage{float}
@@ -1593,204 +1711,363 @@ tex += `\\end{longtable}
       });
   };
 
-  const toggleExpandAll = (expand: boolean) => {
-      const newMap = { ...composerExpandedMap };
-      problems.forEach(p => {
-          newMap[p.id] = expand;
-      });
-      setComposerExpandedMap(newMap);
+  // --- Component Logic ---
+
+  const CompactComposerCard = ({
+      problem,
+      variant,
+      slotIndex,
+      inRoundSlot,
+      onBench
+  }: {
+      problem: Problem;
+      variant: 'pool' | 'round' | 'bench';
+      slotIndex?: number;
+      inRoundSlot?: number | null;
+      onBench?: boolean;
+  }) => {
+      const isRound = variant === 'round';
+      const isBench = variant === 'bench';
+      const statusLabel = typeof inRoundSlot === 'number'
+        ? `In round #${inRoundSlot + 1}`
+        : onBench
+          ? 'On bench'
+          : null;
+      const preview = problem.statement.replace(/\s+/g, ' ').trim();
+      const sourceName = quotas.find(q => q.id === problem.quotaId)?.name || 'Unknown source';
+
+      return (
+        <div className={`rounded-lg border bg-white shadow-sm transition-colors ${
+          isRound ? 'border-indigo-100 hover:border-indigo-200' : onBench ? 'border-amber-200 bg-amber-50/40' : statusLabel ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 hover:border-slate-300'
+        }`}>
+          <div className="flex min-h-[86px] items-start gap-2 p-2">
+            {isRound && (
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-indigo-600 text-xs font-black text-white shadow-sm">
+                {(slotIndex ?? 0) + 1}
+              </div>
+            )}
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="font-bold text-slate-800 text-xs leading-tight line-clamp-1">
+                  <MathText text={problem.title} />
+                </h4>
+                <span className="whitespace-nowrap rounded border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500" title="Difficulty is a rough reference">
+                  D: {Number(problem.difficulty).toFixed(1)}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                <span className="flex items-center gap-1">
+                  {[...(problem.topics || [])].sort((a, b) => TOPICS.indexOf(a) - TOPICS.indexOf(b)).map(t => (
+                    <span key={t} title={t} className={`grid h-4 w-4 place-items-center rounded-full border text-[8px] font-black ${TOPIC_CHIP_CLASSES[t]}`}>
+                      {TOPIC_LABELS[t]}
+                    </span>
+                  ))}
+                </span>
+                <span className="flex items-center gap-0.5 text-slate-400">
+                  <FolderOpen className="w-2.5 h-2.5" /> <span className="max-w-[120px] truncate">{sourceName}</span>
+                </span>
+                {problem.score > 0 && (
+                  <span className="flex items-center gap-0.5 rounded bg-indigo-50 px-1 font-bold text-indigo-600">
+                    <ThumbsUp className="w-2.5 h-2.5"/> {problem.score}
+                  </span>
+                )}
+                <span className="flex items-center gap-0.5 text-slate-400">
+                  <MessageSquare className="w-2.5 h-2.5" /> {problem.commentCount ?? 0}
+                </span>
+                {!problem.solution && <span className="rounded border border-amber-100 bg-amber-50 px-1 text-amber-600">No solution</span>}
+                {!isRound && statusLabel && <span className="rounded border border-emerald-100 bg-emerald-50 px-1 font-bold text-emerald-700">{statusLabel}</span>}
+              </div>
+              {preview && (
+                <p className={`mt-1 text-[11px] leading-snug text-slate-500 ${isRound ? 'line-clamp-2' : 'line-clamp-1'}`}>
+                  <MathText text={preview} />
+                </p>
+              )}
+            </div>
+
+            <div className="flex max-w-[220px] shrink-0 flex-wrap items-center justify-end gap-1">
+              {isRound && (
+                <>
+                  <button type="button" onClick={() => handleMoveRoundItem(problem, -1)} disabled={(slotIndex ?? 0) === 0} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-30" title="Move up">
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button type="button" onClick={() => handleMoveRoundItem(problem, 1)} disabled={(slotIndex ?? 0) >= composerRoundTarget - 1} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-30" title="Move down">
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) handleSwapIntoSlot(problem, Number(e.target.value)); e.currentTarget.value = ''; }}
+                    className="h-7 w-[54px] rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-600 outline-none hover:border-indigo-200"
+                    title="Move to slot"
+                  >
+                    <option value="">Move</option>
+                    {Array.from({ length: composerRoundTarget }).map((_, idx) => (
+                      <option key={idx} value={idx}>Slot {idx + 1}</option>
+                    ))}
+                  </select>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) handleSwapIntoSlot(problem, Number(e.target.value)); e.currentTarget.value = ''; }}
+                    className="h-7 w-[54px] rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-600 outline-none hover:border-indigo-200"
+                    title="Swap with slot"
+                  >
+                    <option value="">Swap</option>
+                    {composerRoundSlots.map((slot, idx) => slot && slot.id !== problem.id ? (
+                      <option key={slot.id} value={idx}>#{idx + 1}: {slot.title}</option>
+                    ) : null)}
+                  </select>
+                </>
+              )}
+              {isRound ? (
+                <>
+                  <button type="button" onClick={() => handleRemoveFromRound(problem, { toBench: true })} className="h-7 rounded-md border border-amber-100 bg-amber-50 px-2 text-[10px] font-bold text-amber-700 hover:bg-amber-100" title="Send to Bench">Bench</button>
+                  <button type="button" onClick={() => handleRemoveFromRound(problem)} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500" title="Remove">
+                    <X className="w-3.5 h-3.5"/>
+                  </button>
+                </>
+              ) : isBench ? (
+                <>
+                  <button type="button" onClick={() => handleAddToRound(problem)} className="h-7 rounded-md border border-indigo-100 bg-indigo-50 px-2 text-[10px] font-bold text-indigo-700 hover:bg-indigo-100">Next slot</button>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) handleSwapIntoSlot(problem, Number(e.target.value)); e.currentTarget.value = ''; }}
+                    className="h-7 w-[54px] rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-600 outline-none hover:border-indigo-200"
+                    title="Move to slot"
+                  >
+                    <option value="">Move</option>
+                    {Array.from({ length: composerRoundTarget }).map((_, idx) => (
+                      <option key={idx} value={idx}>Slot {idx + 1}</option>
+                    ))}
+                  </select>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) handleSwapIntoSlot(problem, Number(e.target.value)); e.currentTarget.value = ''; }}
+                    className="h-7 w-[54px] rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-600 outline-none hover:border-indigo-200"
+                    title="Swap with round slot"
+                  >
+                    <option value="">Swap</option>
+                    {composerRoundSlots.map((slot, idx) => slot ? (
+                      <option key={slot.id} value={idx}>#{idx + 1}: {slot.title}</option>
+                    ) : null)}
+                  </select>
+                  <button type="button" onClick={() => removeProblemFromBench(problem.id)} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500" title="Remove from bench">
+                    <X className="w-3.5 h-3.5"/>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleAddToRound(problem)}
+                    disabled={!!statusLabel}
+                    className={`h-7 rounded-md px-2 text-[10px] font-bold transition-colors ${statusLabel ? 'cursor-not-allowed border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+                    title={statusLabel || 'Add to next open slot'}
+                  >
+                    {statusLabel ? 'Added' : 'Add'}
+                  </button>
+                  <button type="button" onClick={() => addProblemToBench(problem)} disabled={!!statusLabel} className="h-7 rounded-md border border-amber-100 bg-amber-50 px-2 text-[10px] font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Bench</button>
+                </>
+              )}
+              <button type="button" onClick={() => setComposerDetailProblemId(problem.id)} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-700" title="Details">
+                <Info className="w-3.5 h-3.5"/>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
   };
 
-  // --- Component Logic ---
-  
-  // Helper for Composer Item
-  const ComposerItem = ({ problem, isAccepted, index, onDragStart, onDragOverItem, onDragEnd, expanded, onToggleExpand }: { problem: Problem, isAccepted: boolean, index?: number, onDragStart?: any, onDragOverItem?: any, onDragEnd: any, expanded: boolean, onToggleExpand: () => void }) => {
-      const [editMode, setEditMode] = useState(false);
-      const [localStatement, setLocalStatement] = useState(problem.statement);
-      const [localSolution, setLocalSolution] = useState(problem.solution || '');
-      const [localAnswer, setLocalAnswer] = useState(problem.answerKey || '');
-      
-      const isDragging = draggingId === problem.id;
+  const ProblemDetailDrawer = ({ problem }: { problem: Problem }) => {
+      const inRoundSlot = composerSelectedIds.has(problem.id) ? getProblemRoundSlot(problem) : null;
+      const onBench = composerBenchIdSet.has(problem.id);
+      const sourceName = quotas.find(q => q.id === problem.quotaId)?.name || 'Unknown source';
 
-      const saveEdit = () => {
-          const updates: any = {};
-          if (localStatement !== problem.statement) updates.statement = localStatement;
-          // Only update solution/answer if accepted (official round order)
-          if (isAccepted) {
-              if (localSolution !== problem.solution) updates.solution = localSolution;
-              if (localAnswer !== problem.answerKey) updates.answerKey = localAnswer;
-          }
+      const toggleTopic = (topic: Topic) => {
+        setDetailEditForm(form => ({
+          ...form,
+          topics: form.topics.includes(topic)
+            ? form.topics.filter(t => t !== topic)
+            : [...form.topics, topic]
+        }));
+      };
 
-          if (Object.keys(updates).length > 0) {
-              handleComposerUpdate(problem.id, updates);
-          }
-          setEditMode(false);
+      const saveDrawerEdit = async () => {
+        const parsedDifficulty = Number(detailEditForm.difficulty);
+        if (!Number.isFinite(parsedDifficulty)) {
+          setDetailSaveError('Difficulty must be numeric.');
+          return;
+        }
+        const updates: Partial<Problem> = {
+          statement: detailEditForm.statement,
+          answerKey: detailEditForm.answerKey,
+          solution: detailEditForm.solution,
+          difficulty: clampDifficultyNumber(parsedDifficulty),
+          topics: detailEditForm.topics
+        };
+        const previousProblems = problems;
+        setDetailSaving(true);
+        setDetailSaveError(null);
+        setProblems(prev => prev.map(p => p.id === problem.id ? { ...p, ...updates } : p));
+        try {
+          await api.updateProblem(problem.id, updates);
+          setDetailEditMode(false);
+          showToast({ variant: 'success', title: 'Problem updated', message: 'Visible cards and preview text were refreshed.' });
+        } catch (e) {
+          setProblems(previousProblems);
+          setDetailSaveError(getErrorMessage(e, 'Save failed.'));
+        } finally {
+          setDetailSaving(false);
+        }
       };
 
       return (
-        <motion.div 
-          layout
-          draggable={!editMode}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onDragOver={(e) => {
-              // Pass drag over event up for calculation if accepted item
-              if (isAccepted && !isDragging) {
-                  onDragOverItem && onDragOverItem(e, index);
-              }
-          }}
-          className={`bg-white rounded-lg transition-all duration-200 shadow-sm border ${
-              isDragging ? 'opacity-40 ring-2 ring-indigo-200 border-indigo-400 rotate-2' : ''
-          } ${
-              isAccepted ? 'border-indigo-100 hover:border-indigo-300 hover:shadow-md cursor-move' : 'border-slate-200 hover:border-slate-300 cursor-grab active:cursor-grabbing hover:shadow-sm'
-          }`}
-        >
-            <div className="p-2.5 flex items-start gap-2.5">
-                {isAccepted ? (
-                   <div className="text-indigo-600 mt-1 cursor-move flex items-center justify-center">
-                      <GripVertical className="w-4 h-4" />
-                   </div>
-                ) : (
-                   <div className="text-slate-400 mt-1">
-                      <GripVertical className="w-4 h-4 opacity-50" />
-                   </div>
-                )}
-                
-                {isAccepted && (
-                    <div className="font-mono font-bold text-indigo-600 text-xs mt-1 w-4 text-center">{index! + 1}.</div>
-                )}
-                
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => !editMode && onToggleExpand()}>
-                    <div className="flex justify-between items-start">
-                        <h4 className="font-bold text-slate-800 text-xs leading-tight hover:text-indigo-600 transition-colors line-clamp-1">
-                            <MathText text={problem.title} />
-                        </h4>
-                        <span className="ml-2 text-[9px] font-bold bg-slate-50 text-slate-500 px-1 py-0.5 rounded border border-slate-100 whitespace-nowrap">
-                            D: {Number(problem.difficulty).toFixed(1)}
-                        </span>
-                    </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5 flex flex-wrap gap-2 items-center">
-                        <span className="flex items-center gap-1">
-                          {[...(problem.topics || [])].sort((a, b) => TOPICS.indexOf(a) - TOPICS.indexOf(b)).map(t => {
-                            return (
-                              <span key={t} title={t} className={`grid h-4 w-4 place-items-center rounded-full border text-[8px] font-black ${TOPIC_CHIP_CLASSES[t]}`}>
-                                {TOPIC_LABELS[t]}
-                              </span>
-                            );
-                          })}
-                        </span>
-                        <span className="flex items-center gap-0.5 text-slate-400">
-                            <FolderOpen className="w-2.5 h-2.5" /> {quotas.find(q => q.id === problem.quotaId)?.name || 'Unknown cycle'}
-                        </span>
-                        {problem.score > 0 && (
-                            <span className="flex items-center gap-0.5 text-indigo-600 font-bold bg-indigo-50 px-1 rounded">
-                                <ThumbsUp className="w-2.5 h-2.5"/> {problem.score}
-                            </span>
-                        )}
-                        <span className="flex items-center gap-0.5 text-slate-400">
-                             <MessageSquare className="w-2.5 h-2.5" /> {problem.commentCount}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                    <button 
-                       onClick={() => isAccepted ? handleRemoveFromRound(problem) : handleAddToRound(problem)}
-                       className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                           isAccepted 
-                           ? 'hover:bg-red-50 text-slate-300 hover:text-red-500' 
-                           : 'hover:bg-indigo-50 text-slate-300 hover:text-indigo-600'
-                       }`}
-                       title={isAccepted ? "Remove" : "Add"}
-                    >
-                        {isAccepted ? <X className="w-3.5 h-3.5"/> : <ArrowRight className="w-3.5 h-3.5"/>}
-                    </button>
-                    <button onClick={onToggleExpand} className="text-slate-300 hover:text-slate-600 w-6 h-6 flex items-center justify-center">
-                        {expanded ? <ChevronUp className="w-3.5 h-3.5"/> : <ChevronDown className="w-3.5 h-3.5"/>}
-                    </button>
-                </div>
+        <aside className="absolute bottom-2 right-2 top-[5.75rem] z-30 flex w-[420px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+          <div className="flex items-start gap-3 border-b border-slate-100 bg-slate-50 p-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {typeof inRoundSlot === 'number' && <span className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">In round slot {inRoundSlot + 1}</span>}
+                {onBench && <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">On bench</span>}
+                {typeof inRoundSlot !== 'number' && !onBench && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">Not selected</span>}
+              </div>
+              <h3 className="text-sm font-bold leading-snug text-slate-900"><MathText text={problem.title} /></h3>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium text-slate-500">
+                <span>{sourceName}</span>
+                <span>Diff ref {Number(problem.difficulty).toFixed(1)}</span>
+                <span>{problem.score} votes</span>
+                <span>{problem.commentCount ?? 0} comments</span>
+              </div>
             </div>
+            <button onClick={() => setDetailEditMode(true)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-white hover:text-indigo-600" title="Edit problem">
+              <Pencil className="w-4 h-4" />
+            </button>
+            <button onClick={() => setComposerDetailProblemId(null)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-white hover:text-slate-700" title="Close drawer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
 
-            <AnimatePresence>
-            {(expanded || editMode) && (
-                <motion.div 
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-slate-100 p-2.5 bg-slate-50/50 text-xs"
-                >
-                    {editMode ? (
-                        <div className="space-y-2">
-                            <div>
-                                <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Statement</label>
-                                <textarea 
-                                    className="w-full p-2 bg-white border border-indigo-200 rounded text-xs font-mono h-24 focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                    value={localStatement}
-                                    onChange={e => setLocalStatement(e.target.value)}
-                                />
-                            </div>
-                            {isAccepted && (
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Solution</label>
-                                        <textarea 
-                                            className="w-full p-2 bg-white border border-indigo-200 rounded text-xs font-mono h-20 focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                            value={localSolution}
-                                            onChange={e => setLocalSolution(e.target.value)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Answer</label>
-                                        <input 
-                                            className="w-full p-2 bg-white border border-indigo-200 rounded text-xs font-mono focus:ring-1 focus:ring-indigo-500 outline-none text-slate-800"
-                                            value={localAnswer}
-                                            onChange={e => setLocalAnswer(e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                            <div className="flex justify-end gap-1.5 mt-1">
-                                <Button size="sm" variant="ghost" onClick={() => { setEditMode(false); setLocalStatement(problem.statement); setLocalSolution(problem.solution || ''); setLocalAnswer(problem.answerKey || ''); }}>Cancel</Button>
-                                <Button size="sm" onClick={saveEdit}>Save</Button>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="relative group/latex">
-                            <MathText text={problem.statement} className="text-xs text-slate-700 whitespace-pre-wrap font-serif mb-2 leading-snug" />
-                            {isAccepted && (
-                                <button 
-                                    onClick={() => { setEditMode(true); setLocalStatement(problem.statement); setLocalSolution(problem.solution || ''); setLocalAnswer(problem.answerKey || ''); }}
-                                    className="absolute top-0 right-0 p-1 bg-white border border-slate-200 rounded shadow-sm opacity-0 group-hover/latex:opacity-100 transition-opacity text-slate-400 hover:text-indigo-600"
-                                    title="Edit Content"
-                                >
-                                    <Pencil className="w-3 h-3" />
-                                </button>
-                            )}
-                        </div>
-                    )}
-                    
-                    {problem.imageData && (
-                        <img src={problem.imageData} alt="Problem attachment" className="max-h-32 w-auto mb-2 object-contain border border-slate-200 rounded bg-white" />
-                    )}
-                    
-                    {!editMode && (
-                        <div className="grid grid-cols-2 gap-2">
-                             <div className="bg-white p-2 rounded border border-slate-200 shadow-sm">
-                                 <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Solution Outline</span>
-                                 <div className="max-h-24 overflow-y-auto custom-scrollbar">
-                                    <MathText text={problem.solution || 'None'} className="text-xs text-slate-600 font-serif leading-snug" />
-                                 </div>
-                             </div>
-                             <div className="bg-white p-2 rounded border border-slate-200 h-fit shadow-sm">
-                                 <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Answer</span>
-                                 <MathText text={problem.answerKey || '—'} className="text-xs text-slate-700 font-serif leading-snug" />
-                             </div>
-                        </div>
-                    )}
-                </motion.div>
+          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+            {detailEditMode ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-400">Statement</label>
+                  <textarea className="h-36 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none focus:border-indigo-400" value={detailEditForm.statement} onChange={e => setDetailEditForm({...detailEditForm, statement: e.target.value})} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-400">Answer</label>
+                    <textarea className="h-20 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-800 outline-none focus:border-indigo-400" value={detailEditForm.answerKey} onChange={e => setDetailEditForm({...detailEditForm, answerKey: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-400">Difficulty</label>
+                    <input type="number" min={DIFFICULTY_MIN} max={DIFFICULTY_MAX} step="0.5" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm text-slate-800 outline-none focus:border-indigo-400" value={detailEditForm.difficulty} onChange={e => setDetailEditForm({...detailEditForm, difficulty: e.target.value})} />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-400">Topics</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {TOPICS.map(topic => (
+                      <button key={topic} type="button" onClick={() => toggleTopic(topic)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${detailEditForm.topics.includes(topic) ? TOPIC_CHIP_CLASSES[topic] : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                        {topic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-black uppercase tracking-wide text-slate-400">Solution Outline</label>
+                  <textarea className="h-36 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 outline-none focus:border-indigo-400" value={detailEditForm.solution} onChange={e => setDetailEditForm({...detailEditForm, solution: e.target.value})} />
+                </div>
+                {detailSaveError && <div className="rounded-lg border border-red-100 bg-red-50 p-2 text-xs font-medium text-red-700">{detailSaveError}</div>}
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex flex-wrap gap-1.5">
+                  {[...(problem.topics || [])].sort((a, b) => TOPICS.indexOf(a) - TOPICS.indexOf(b)).map(t => (
+                    <span key={t} className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${TOPIC_CHIP_CLASSES[t]}`}>{t}</span>
+                  ))}
+                </div>
+                <section className="mb-4">
+                  <h4 className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Statement</h4>
+                  <MathText text={problem.statement} className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800" />
+                </section>
+                {problem.imageData && <img src={problem.imageData} alt="Problem attachment" className="mb-4 max-h-52 w-auto rounded border border-slate-200 bg-white object-contain" />}
+                <section className="mb-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <h4 className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Answer</h4>
+                    <MathText text={problem.answerKey || 'Missing answer'} className="text-sm text-slate-700" />
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <h4 className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Review</h4>
+                    <div className="space-y-1 text-xs text-slate-600">
+                      <div>{problem.solution?.trim() ? 'Solution included' : 'Missing solution'}</div>
+                      <div>{problem.answerKey?.trim() ? 'Answer included' : 'Missing answer'}</div>
+                    </div>
+                  </div>
+                </section>
+                <section>
+                  <h4 className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Solution Outline</h4>
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <MathText text={problem.solution || 'No solution outline yet.'} className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700" />
+                  </div>
+                </section>
+              </>
             )}
-            </AnimatePresence>
-        </motion.div>
+          </div>
+
+          <div className="border-t border-slate-100 bg-white p-3">
+            {detailEditMode ? (
+              <div className="flex gap-2">
+                <Button size="sm" onClick={saveDrawerEdit} disabled={detailSaving} className="flex-1">{detailSaving ? 'Saving...' : 'Save'}</Button>
+                <Button size="sm" variant="ghost" onClick={() => {
+                  setDetailEditMode(false);
+                  setDetailSaveError(null);
+                  setDetailEditForm({ statement: problem.statement || '', answerKey: problem.answerKey || '', solution: problem.solution || '', difficulty: String(problem.difficulty ?? DIFFICULTY_MIN), topics: problem.topics || [] });
+                }} disabled={detailSaving}>Cancel</Button>
+              </div>
+            ) : (
+              <>
+                {typeof inRoundSlot === 'number' && (
+                  <select
+                    value=""
+                    onChange={e => {
+                      const value = e.target.value;
+                      if (value.startsWith('slot:')) handleSwapIntoSlot(problem, Number(value.slice(5)));
+                      if (value.startsWith('problem:')) {
+                        const incoming = problems.find(p => p.id === value.slice(8));
+                        if (incoming) handleSwapIntoSlot(incoming, inRoundSlot);
+                      }
+                      e.currentTarget.value = '';
+                    }}
+                    className="mb-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-bold text-slate-700 outline-none hover:border-indigo-200"
+                  >
+                    <option value="">Swap with...</option>
+                    {composerRoundSlots.map((slot, idx) => slot && slot.id !== problem.id ? (
+                      <option key={`slot-${slot.id}`} value={`slot:${idx}`}>Round slot {idx + 1}: {slot.title}</option>
+                    ) : null)}
+                    {composerBenchProblems.map(p => (
+                      <option key={`bench-${p.id}`} value={`problem:${p.id}`}>Bench: {p.title}</option>
+                    ))}
+                    {composerCandidates.filter(p => !composerSelectedIds.has(p.id) && !composerBenchIdSet.has(p.id)).slice(0, 30).map(p => (
+                      <option key={`pool-${p.id}`} value={`problem:${p.id}`}>Pool: {p.title}</option>
+                    ))}
+                  </select>
+                )}
+                <div className="mb-2 grid grid-cols-6 gap-1">
+                  {Array.from({ length: composerRoundTarget }).map((_, idx) => (
+                    <button key={idx} type="button" onClick={() => handleSwapIntoSlot(problem, idx)} className={`rounded-md border px-2 py-1.5 text-[10px] font-bold ${inRoundSlot === idx ? 'border-indigo-300 bg-indigo-600 text-white' : composerRoundSlots[idx] ? 'border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-200' : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`} title={composerRoundSlots[idx] ? `Swap into slot ${idx + 1}` : `Place in slot ${idx + 1}`}>
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => handleAddToRound(problem)} disabled={typeof inRoundSlot === 'number'} className="flex-1">Add next slot</Button>
+                  <Button size="sm" variant="secondary" onClick={() => addProblemToBench(problem)} disabled={onBench} className="flex-1">Bench</Button>
+                  {typeof inRoundSlot === 'number' && <Button size="sm" variant="ghost" onClick={() => handleRemoveFromRound(problem)} className="text-red-600">Remove</Button>}
+                  {onBench && <Button size="sm" variant="ghost" onClick={() => removeProblemFromBench(problem.id)} className="text-red-600">Unbench</Button>}
+                </div>
+              </>
+            )}
+          </div>
+        </aside>
       );
   };
 
@@ -2695,21 +2972,41 @@ tex += `\\end{longtable}
   
   const composerAccepted = problems
     .filter(p => p.roundIds && p.roundIds.includes(composerSelectedRoundId || '') && p.status === 'accepted')
-    .sort((a,b) => a.orderIndex - b.orderIndex);
+    .sort((a,b) => getProblemRoundSlot(a) - getProblemRoundSlot(b));
+  const composerHighestOccupiedSlot = composerAccepted.reduce((max, p) => Math.max(max, getProblemRoundSlot(p)), -1);
+  const composerRoundTarget = Math.max(getSafeRoundSize(composerSelectedRound?.targetSize), composerHighestOccupiedSlot + 1);
+  const { slots: composerRoundSlots, overflow: composerOverflowProblems } = getRoundSlotsFromProblems(composerRoundTarget);
+  const composerSelectedIds = new Set(composerAccepted.map(p => p.id));
+  const composerBenchIds = composerSelectedRoundId ? (composerBenchByRound[composerSelectedRoundId] || []) : [];
+  const composerBenchIdSet = new Set(composerBenchIds);
+  const composerBenchProblems = composerBenchIds
+    .map(id => problems.find(p => p.id === id))
+    .filter(Boolean) as Problem[];
   
   const composerCandidates = problems
     .filter(p => {
-        if (p.roundIds && p.roundIds.includes(composerSelectedRoundId || '')) return false;
-        if (p.status === 'accepted' && p.roundIds && p.roundIds.length > 0) {
+        const isSelectedInRound = composerSelectedIds.has(p.id);
+        const isOnBench = composerBenchIdSet.has(p.id);
+        if (composerSelectionFilter === 'unused' && (isSelectedInRound || isOnBench)) return false;
+        if (composerSelectionFilter === 'not-round' && isSelectedInRound) return false;
+        if (composerSelectionFilter === 'not-bench' && isOnBench) return false;
+        if (composerSelectionFilter === 'selected' && !isSelectedInRound) return false;
+        if (composerSelectionFilter === 'bench' && !isOnBench) return false;
+        if (p.status === 'pending') return false;
+        if (!isSelectedInRound && p.status === 'accepted' && p.roundIds && p.roundIds.length > 0) {
              const assignedRounds = rounds.filter(r => p.roundIds?.includes(r.id));
              if (!composerSelectedRoundTag) return false; 
              const hasIncompatibleRound = assignedRounds.some(r => r.tag !== composerSelectedRoundTag);
              if (hasIncompatibleRound) return false;
         }
-        if (p.status === 'pending') return false; 
         if (composerSourceQuota !== 'All' && p.quotaId !== composerSourceQuota) return false;
         if (composerFilterTopic !== 'All' && !p.topics.includes(composerFilterTopic as Topic)) return false;
         if (p.difficulty < composerMinDiff || p.difficulty > composerMaxDiff) return false;
+        if (composerSolutionFilter === 'has' && !p.solution?.trim()) return false;
+        if (composerSolutionFilter === 'missing' && p.solution?.trim()) return false;
+        if (composerAnswerFilter === 'has' && !p.answerKey?.trim()) return false;
+        if (composerAnswerFilter === 'missing' && p.answerKey?.trim()) return false;
+        if (composerCommentFilter === 'has' && !(p.commentCount && p.commentCount > 0)) return false;
         if (composerSearchText) {
             const lowerSearch = composerSearchText.toLowerCase();
             const inTitle = p.title.toLowerCase().includes(lowerSearch);
@@ -2719,11 +3016,38 @@ tex += `\\end{longtable}
         return true;
     })
     .sort((a, b) => {
+        const selectedDelta = Number(composerSelectedIds.has(b.id) || composerBenchIdSet.has(b.id)) - Number(composerSelectedIds.has(a.id) || composerBenchIdSet.has(a.id));
+        if (selectedDelta !== 0) return selectedDelta;
         if (composerSort === 'votes') return b.score - a.score;
         if (composerSort === 'difficulty') return b.difficulty - a.difficulty;
         if (composerSort === 'newest') return b.createdAt - a.createdAt;
         return 0;
     });
+
+  const composerHasActiveFilters =
+    composerSearchText.trim() !== '' ||
+    composerSourceQuota !== 'All' ||
+    composerFilterTopic !== 'All' ||
+    composerSelectionFilter !== 'unused' ||
+    composerSolutionFilter !== 'all' ||
+    composerAnswerFilter !== 'all' ||
+    composerCommentFilter !== 'all' ||
+    composerMinDiff !== DIFFICULTY_MIN ||
+    composerMaxDiff !== DIFFICULTY_MAX ||
+    composerSort !== 'votes';
+
+  const clearComposerFilters = () => {
+    setComposerSearchText('');
+    setComposerSourceQuota('All');
+    setComposerFilterTopic('All');
+    setComposerSelectionFilter('unused');
+    setComposerSolutionFilter('all');
+    setComposerAnswerFilter('all');
+    setComposerCommentFilter('all');
+    setComposerMinDiff(DIFFICULTY_MIN);
+    setComposerMaxDiff(DIFFICULTY_MAX);
+    setComposerSort('votes');
+  };
 
   const composerAvgDiff = composerAccepted.length > 0 
       ? (composerAccepted.reduce((acc, p) => acc + p.difficulty, 0) / composerAccepted.length).toFixed(1) 
@@ -2734,6 +3058,10 @@ tex += `\\end{longtable}
   composerAccepted.forEach(p => {
       p.topics.forEach(t => { if(composerTopicCounts[t] !== undefined) composerTopicCounts[t]++ });
   });
+  const composerOpenSlotCount = composerRoundSlots.filter(slot => !slot).length;
+  const composerMissingSolutionCount = composerAccepted.filter(p => !p.solution?.trim()).length;
+  const composerMissingAnswerCount = composerAccepted.filter(p => !p.answerKey?.trim()).length;
+  const composerDetailProblem = composerDetailProblemId ? problems.find(p => p.id === composerDetailProblemId) || null : null;
   
   const pendingCount = problems.filter(p => p.status === 'pending').length;
   const unreadNotifCount = notifications.filter(n => !n.readAt).length;
@@ -3227,6 +3555,15 @@ tex += `\\end{longtable}
                                   onChange={e => setNewRoundTag(e.target.value)}
                                   className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                                />
+                               <input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  placeholder="Number of Problems"
+                                  value={newRoundSize}
+                                  onChange={e => setNewRoundSize(e.target.value === '' ? '' : getSafeRoundSize(e.target.value))}
+                                  className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                               />
                                <textarea
                                    placeholder="Description..."
                                    value={newRoundDesc}
@@ -3280,7 +3617,7 @@ tex += `\\end{longtable}
                                             <p className="text-xs text-slate-500 mt-2 line-clamp-2">{r.description || 'No description.'}</p>
                                         </div>
                                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                            <LayoutList className="w-3.5 h-3.5" /> {rProbCount} Problems
+                                            <LayoutList className="w-3.5 h-3.5" /> {rProbCount} / {getSafeRoundSize(r.targetSize)} Problems
                                         </div>
                                     </motion.div>
                                 );
@@ -3298,7 +3635,7 @@ tex += `\\end{longtable}
                       </Button>
                       
                       {isEditingRound ? (
-                          <div className="flex-1 flex gap-2 items-center">
+                          <div className="flex-1 flex flex-wrap gap-2 items-center">
                               <input 
                                 className="px-3 py-1.5 bg-slate-50 border border-indigo-200 rounded-lg font-bold text-base text-slate-900 outline-none focus:ring-1 focus:ring-indigo-500" 
                                 value={editRoundForm.name} 
@@ -3310,6 +3647,22 @@ tex += `\\end{longtable}
                                 value={editRoundForm.tag} 
                                 onChange={e => setEditRoundForm({...editRoundForm, tag: e.target.value})} 
                                 placeholder="Tag"
+                              />
+                              <input
+                                className="w-20 px-3 py-1.5 bg-slate-50 border border-indigo-200 rounded-lg text-xs text-slate-900 outline-none"
+                                type="number"
+                                min={1}
+                                max={50}
+                                value={editRoundForm.targetSize ?? composerRoundTarget}
+                                onChange={e => setEditRoundForm({...editRoundForm, targetSize: getSafeRoundSize(e.target.value)})}
+                                placeholder="Size"
+                                title="Number of problems"
+                              />
+                              <input
+                                className="min-w-[220px] flex-1 px-3 py-1.5 bg-slate-50 border border-indigo-200 rounded-lg text-xs text-slate-900 outline-none"
+                                value={editRoundForm.description || ''}
+                                onChange={e => setEditRoundForm({...editRoundForm, description: e.target.value})}
+                                placeholder="Description"
                               />
                               <Button size="sm" onClick={editRound}>Save</Button>
                               <Button size="sm" variant="ghost" onClick={() => setIsEditingRound(false)}>Cancel</Button>
@@ -3378,8 +3731,6 @@ tex += `\\end{longtable}
                     <motion.div 
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDropOnCandidates}
                         className="col-span-5 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden"
                     >
                         <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-2">
@@ -3387,7 +3738,18 @@ tex += `\\end{longtable}
                                 <h2 className="font-bold text-slate-800 flex items-center gap-2 text-sm">
                                    <LayoutList className="w-4 h-4 text-slate-500"/> Pool
                                 </h2>
-                                <span className="text-[10px] font-bold bg-white text-slate-500 px-2 py-0.5 rounded border border-slate-200">{composerCandidates.length}</span>
+                                <div className="flex items-center gap-1.5">
+                                  {composerHasActiveFilters && (
+                                    <button
+                                      type="button"
+                                      onClick={clearComposerFilters}
+                                      className="text-[10px] font-bold text-slate-500 hover:text-indigo-600"
+                                    >
+                                      Clear
+                                    </button>
+                                  )}
+                                  <span className="text-[10px] font-bold bg-white text-slate-500 px-2 py-0.5 rounded border border-slate-200">{composerCandidates.length}</span>
+                                </div>
                             </div>
                             
                             {/* Search */}
@@ -3395,129 +3757,262 @@ tex += `\\end{longtable}
                                 <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
                                 <input 
                                     type="text"
-                                    placeholder="Filter..."
+                                    placeholder="Search title or statement..."
                                     className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:border-indigo-500 outline-none placeholder-slate-400"
                                     value={composerSearchText}
                                     onChange={e => setComposerSearchText(e.target.value)}
                                 />
                             </div>
 
-                            {/* Filters Grid - High Density */}
-                            <div className="flex gap-2">
-                                 <select className="flex-1 px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerSourceQuota} onChange={e => setComposerSourceQuota(e.target.value)}>
-                                    <option value="All">All Cycles</option>
+                            <div className="grid grid-cols-2 gap-2">
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerSelectionFilter} onChange={e => setComposerSelectionFilter(e.target.value as any)}>
+                                    <option value="unused">Unused</option>
+                                    <option value="not-round">Not in round</option>
+                                    <option value="not-bench">Not on bench</option>
+                                    <option value="selected">In round</option>
+                                    <option value="bench">On bench</option>
+                                    <option value="all">All usable</option>
+                                 </select>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerSourceQuota} onChange={e => setComposerSourceQuota(e.target.value)}>
+                                    <option value="All">All Sources</option>
                                     {quotas.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
                                  </select>
-                                 <select className="flex-1 px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerFilterTopic} onChange={e => setComposerFilterTopic(e.target.value)}>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerFilterTopic} onChange={e => setComposerFilterTopic(e.target.value)}>
                                     <option value="All">All Topics</option>
                                     {TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
                                  </select>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] font-bold text-slate-400 uppercase">Diff</span>
-                                <input type="number" className="w-10 text-[10px] p-1 border border-slate-200 bg-white text-slate-700 rounded outline-none text-center font-bold" value={composerMinDiff} onChange={e => setComposerMinDiff(Number(e.target.value))} />
-                                <span className="text-slate-300">-</span>
-                                <input type="number" className="w-10 text-[10px] p-1 border border-slate-200 bg-white text-slate-700 rounded outline-none text-center font-bold" value={composerMaxDiff} onChange={e => setComposerMaxDiff(Number(e.target.value))} />
-                                <div className="flex-1"></div>
-                                <select className="px-2 py-1 text-[10px] border border-slate-200 rounded bg-white text-slate-600 outline-none font-medium" value={composerSort} onChange={e => setComposerSort(e.target.value as any)}>
-                                    <option value="votes">Votes</option>
-                                    <option value="difficulty">Diff</option>
-                                    <option value="newest">New</option>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerSolutionFilter} onChange={e => setComposerSolutionFilter(e.target.value as any)}>
+                                    <option value="all">Any Solution</option>
+                                    <option value="has">Has solution</option>
+                                    <option value="missing">Missing solution</option>
+                                 </select>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerAnswerFilter} onChange={e => setComposerAnswerFilter(e.target.value as any)}>
+                                    <option value="all">Any Answer</option>
+                                    <option value="has">Has answer</option>
+                                    <option value="missing">Missing answer</option>
+                                 </select>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerCommentFilter} onChange={e => setComposerCommentFilter(e.target.value as any)}>
+                                    <option value="all">Any Comments</option>
+                                    <option value="has">Has comments</option>
+                                 </select>
+                                 <select className="px-2 py-1.5 text-[10px] border border-slate-200 rounded-lg bg-white text-slate-700 outline-none font-medium" value={composerSort} onChange={e => setComposerSort(e.target.value as any)}>
+                                    <option value="votes">Sort: votes</option>
+                                    <option value="difficulty">Sort: difficulty</option>
+                                    <option value="newest">Sort: recently added</option>
                                 </select>
                             </div>
+                            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase">Diff ref</span>
+                                <input type="number" min={DIFFICULTY_MIN} max={DIFFICULTY_MAX} step="0.5" className="w-12 text-[10px] p-1 border border-slate-200 bg-slate-50 text-slate-700 rounded outline-none text-center font-bold" value={composerMinDiff} onChange={e => setComposerMinDiff(Number(e.target.value))} />
+                                <span className="text-slate-300">-</span>
+                                <input type="number" min={DIFFICULTY_MIN} max={DIFFICULTY_MAX} step="0.5" className="w-12 text-[10px] p-1 border border-slate-200 bg-slate-50 text-slate-700 rounded outline-none text-center font-bold" value={composerMaxDiff} onChange={e => setComposerMaxDiff(Number(e.target.value))} />
+                                <span className="ml-auto text-[9px] text-slate-400">rough guide</span>
+                            </div>
+                            {composerHasActiveFilters && (
+                              <div className="flex flex-wrap gap-1">
+                                {composerSearchText.trim() && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">Search</span>}
+                                {composerSelectionFilter !== 'unused' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">{composerSelectionFilter}</span>}
+                                {composerSourceQuota !== 'All' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">Source</span>}
+                                {composerFilterTopic !== 'All' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">{composerFilterTopic}</span>}
+                                {composerSolutionFilter !== 'all' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">{composerSolutionFilter} solution</span>}
+                                {composerAnswerFilter !== 'all' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">{composerAnswerFilter} answer</span>}
+                                {composerCommentFilter !== 'all' && <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">comments</span>}
+                              </div>
+                            )}
                         </div>
                         <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar bg-slate-50/50">
                             {composerCandidates.length === 0 ? (
                                <div className="text-center py-10 text-slate-400 text-xs italic">No candidates.</div>
                             ) : (
                                composerCandidates.map(p => (
-                                   <ComposerItem 
+                                   <CompactComposerCard 
                                       key={p.id} 
                                       problem={p} 
-                                      isAccepted={false} 
-                                      onDragStart={(e: any) => handleDragStart(e, p.id, 'candidate')}
-                                      onDragEnd={handleDragEnd}
-                                      expanded={composerExpandedMap[p.id] ?? true}
-                                      onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
+                                      variant="pool"
+                                      inRoundSlot={composerSelectedIds.has(p.id) ? getProblemRoundSlot(p) : null}
+                                      onBench={composerBenchIdSet.has(p.id)}
                                    />
                                ))
                             )}
                         </div>
                     </motion.div>
     
-                    {/* RIGHT: FINAL ROUND (Drag and Drop Area) */}
-                    <motion.div 
+                    {/* RIGHT: FINAL ROUND + BENCH (tabbed) */}
+                    <motion.div
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
-                        onDragOver={(e) => handleContainerDragOver(e, composerAccepted.length)}
-                        onDrop={(e: any) => handleDropOnRound(e)}
                         className="col-span-7 bg-white rounded-xl border border-indigo-200 shadow-md shadow-indigo-100/50 flex flex-col overflow-hidden relative"
                     >
                         <div className="p-3 border-b border-indigo-100 bg-indigo-50/50 flex flex-col gap-2">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                    <h2 className="font-bold text-indigo-900 flex items-center gap-1.5 text-sm">
-                                       <CheckCircle className="w-4 h-4 text-indigo-600"/> Round Order
-                                    </h2>
-                                    <span className="text-[10px] font-bold bg-white text-indigo-600 px-2 py-0.5 rounded border border-indigo-100 shadow-sm">
-                                        {composerAccepted.length} Items
-                                    </span>
-                                </div>
-                                <div className="flex gap-1">
-                                    <button onClick={() => toggleExpandAll(false)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded transition-colors" title="Collapse">
-                                        <Minimize2 className="w-3.5 h-3.5" />
+                            {/* Tab bar + action buttons */}
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1 rounded-lg border border-indigo-100 bg-white p-0.5">
+                                    <button
+                                        onClick={() => setComposerRightTab('round')}
+                                        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${composerRightTab === 'round' ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-700 hover:bg-indigo-50'}`}
+                                    >
+                                        <CheckCircle className="w-3.5 h-3.5" />
+                                        Round
+                                        <span className={`rounded px-1 py-0.5 text-[9px] font-black ${composerRightTab === 'round' ? 'bg-indigo-500 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+                                            {composerAccepted.length}/{composerRoundTarget}
+                                        </span>
                                     </button>
-                                    <button onClick={() => toggleExpandAll(true)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded transition-colors" title="Expand">
-                                        <Maximize2 className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                            </div>
-                            {/* Stats Bar */}
-                            <div className="flex gap-4 text-[9px] text-slate-400 uppercase font-bold tracking-wider bg-white/60 p-2 rounded border border-indigo-50">
-                                <span>Avg Diff: <span className="text-slate-800 ml-1">{composerAvgDiff}</span></span>
-                                <span className="text-slate-300">|</span>
-                                {Object.entries(composerTopicCounts).map(([t, c]) => (
-                                    <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-500'}>{t.substring(0,3)}: <span className={c>0?'text-slate-800':''}>{c}</span></span>
-                                ))}
-                            </div>
-                        </div>
-                        
-                        <div 
-                            className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-white space-y-2"
-                            ref={composerListRef}
-                        >
-                             {composerAccepted.length === 0 ? (
-                                <div className="text-center py-20 pointer-events-none">
-                                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-50 text-slate-300 mb-2 border border-slate-100">
-                                        <Layers className="w-6 h-6" />
-                                    </div>
-                                    <p className="text-slate-400 text-xs font-medium">Empty Round.<br/>Drag & Drop here.</p>
-                                </div>
-                             ) : (
-                                composerAccepted.map((p, idx) => (
-                                    <React.Fragment key={p.id}>
-                                        {dragOverIndex === idx && (
-                                            <div className="h-1 bg-indigo-500 rounded-full my-1 transition-all pointer-events-none" />
+                                    <button
+                                        onClick={() => setComposerRightTab('bench')}
+                                        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${composerRightTab === 'bench' ? 'bg-amber-500 text-white shadow-sm' : 'text-amber-700 hover:bg-amber-50'}`}
+                                    >
+                                        <Layers className="w-3.5 h-3.5" />
+                                        Bench
+                                        {composerBenchProblems.length > 0 && (
+                                            <span className={`rounded px-1 py-0.5 text-[9px] font-black ${composerRightTab === 'bench' ? 'bg-amber-400 text-white' : 'bg-amber-100 text-amber-700'}`}>
+                                                {composerBenchProblems.length}
+                                            </span>
                                         )}
-                                        <ComposerItem 
-                                            problem={p} 
-                                            isAccepted={true} 
-                                            index={idx}
-                                            onDragStart={(e: any) => handleDragStart(e, p.id, 'accepted', idx)}
-                                            onDragOverItem={handleDragOverItem}
-                                            onDragEnd={handleDragEnd}
-                                            expanded={composerExpandedMap[p.id] ?? true}
-                                            onToggleExpand={() => setComposerExpandedMap(prev => ({...prev, [p.id]: !(prev[p.id] ?? true)}))}
-                                        />
-                                    </React.Fragment>
-                                ))
-                             )}
-                             {dragOverIndex === composerAccepted.length && (
-                                 <div className="h-1 bg-indigo-500 rounded-full my-1 transition-all pointer-events-none" />
-                             )}
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {composerAccepted.length < composerRoundTarget && (
+                                      <span className="text-[10px] font-bold text-slate-500">
+                                        {composerRoundTarget - composerAccepted.length} open
+                                      </span>
+                                    )}
+                                    <button onClick={() => setShowRoundPreview(true)} className="rounded-lg border border-indigo-100 bg-white px-2 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50" title="Preview student-facing round">
+                                      Preview
+                                    </button>
+                                    <button onClick={openExportModal} className={`rounded-lg border px-2 py-1 text-[10px] font-bold ${composerAccepted.length >= composerRoundTarget ? 'border-indigo-100 bg-white text-indigo-700 hover:bg-indigo-50' : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`} title={composerAccepted.length >= composerRoundTarget ? 'Export' : 'Export draft'}>
+                                      Export
+                                    </button>
+                                </div>
+                            </div>
+                            {/* Stats Bar — only shown on Round tab */}
+                            {composerRightTab === 'round' && (
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-400 uppercase font-bold tracking-wider bg-white/60 p-2 rounded border border-indigo-50">
+                                  <span>Open: <span className="text-slate-800 ml-1">{composerOpenSlotCount}</span></span>
+                                  <span>Missing sol: <span className={composerMissingSolutionCount > 0 ? 'text-amber-600 ml-1' : 'text-slate-800 ml-1'}>{composerMissingSolutionCount}</span></span>
+                                  <span>Missing ans: <span className={composerMissingAnswerCount > 0 ? 'text-amber-600 ml-1' : 'text-slate-800 ml-1'}>{composerMissingAnswerCount}</span></span>
+                                  <span>Avg diff ref: <span className="text-slate-700 ml-1">{composerAvgDiff}</span></span>
+                                  <span className="text-slate-300">|</span>
+                                  {Object.entries(composerTopicCounts).map(([t, c]) => (
+                                      <span key={t} className={c === 0 ? 'text-slate-300' : 'text-slate-500'}>{t.substring(0,3)}: <span className={c>0?'text-slate-800':''}>{c}</span></span>
+                                  ))}
+                              </div>
+                            )}
                         </div>
+
+                        {/* ROUND TAB */}
+                        {composerRightTab === 'round' && (
+                          <div
+                              className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-white space-y-2"
+                              ref={composerListRef}
+                          >
+                               {composerRoundSlots.map((problem, idx) => {
+                                  const isEmpty = !problem;
+
+                                  return (
+                                    <div
+                                      key={`slot-${idx}`}
+                                      className={`rounded-lg border transition-colors ${isEmpty ? 'border-dashed border-slate-200 bg-slate-50/70' : 'border-transparent bg-transparent'}`}
+                                    >
+                                      {problem ? (
+                                        <div className="p-1">
+                                          <CompactComposerCard
+                                              problem={problem}
+                                              variant="round"
+                                              slotIndex={idx}
+                                              inRoundSlot={idx}
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="flex min-h-[58px] items-center gap-3 px-3 py-2 text-xs text-slate-400">
+                                          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-slate-200 bg-white font-black text-slate-400">
+                                            {idx + 1}
+                                          </div>
+                                          <div className="min-w-0 flex-1">
+                                            <div className="font-bold text-slate-500">
+                                              Slot {idx + 1} — Empty
+                                            </div>
+                                            <div className="text-[10px] text-slate-400">
+                                              Add from Pool or move from Bench
+                                            </div>
+                                          </div>
+                                          {composerBenchProblems.length > 0 && (
+                                            <select
+                                              value=""
+                                              onChange={e => {
+                                                const p = problems.find(pr => pr.id === e.target.value);
+                                                if (p) handleSwapIntoSlot(p, idx);
+                                                e.currentTarget.value = '';
+                                              }}
+                                              className="h-7 rounded-md border border-amber-200 bg-amber-50 px-2 text-[10px] font-bold text-amber-700 outline-none hover:bg-amber-100"
+                                            >
+                                              <option value="">Fill from Bench</option>
+                                              {composerBenchProblems.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                            </select>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                               })}
+                          </div>
+                        )}
+
+                        {/* BENCH TAB */}
+                        {composerRightTab === 'bench' && (
+                          <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-amber-50/30 space-y-2">
+                            {composerBenchProblems.length === 0 ? (
+                              <div className="flex flex-col items-center justify-center py-16 text-center">
+                                <div className="mb-3 grid h-12 w-12 place-items-center rounded-full border border-amber-200 bg-amber-50">
+                                  <Layers className="h-6 w-6 text-amber-400" />
+                                </div>
+                                <p className="text-sm font-semibold text-amber-800">Bench is empty</p>
+                                <p className="mt-1 text-xs text-amber-600">Use the "Bench" button on Pool or Round cards to save candidates here without occupying a final slot.</p>
+                              </div>
+                            ) : (
+                              composerBenchProblems.map(problem => (
+                                <CompactComposerCard
+                                  key={`bench-${problem.id}`}
+                                  problem={problem}
+                                  variant="bench"
+                                  onBench
+                                  inRoundSlot={composerSelectedIds.has(problem.id) ? getProblemRoundSlot(problem) : null}
+                                />
+                              ))
+                            )}
+                          </div>
+                        )}
                     </motion.div>
                 </div>
+                {composerDetailProblem && <ProblemDetailDrawer problem={composerDetailProblem} />}
+                {showRoundPreview && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
+                    <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+                      <div className="flex items-center justify-between border-b border-slate-100 p-4">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900">{composerSelectedRound?.name || 'Round Preview'}</h2>
+                          <p className="text-xs text-slate-500">Student-facing problem order</p>
+                        </div>
+                        <button onClick={() => setShowRoundPreview(false)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-700">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+                        {composerAccepted.length === 0 ? (
+                          <div className="py-12 text-center text-sm text-slate-400">No problems selected yet.</div>
+                        ) : (
+                          <div className="space-y-6">
+                            {composerRoundSlots.map((problem, idx) => problem ? (
+                              <section key={problem.id} className="border-b border-slate-100 pb-5 last:border-0">
+                                <div className="mb-2 text-xs font-black uppercase tracking-wide text-slate-400">Problem {idx + 1}</div>
+                                <MathText text={problem.statement} className="whitespace-pre-wrap text-base leading-relaxed text-slate-900" />
+                              </section>
+                            ) : null)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 </>
               )}
             </motion.div>

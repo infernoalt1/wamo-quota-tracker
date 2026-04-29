@@ -10,6 +10,57 @@ const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/+$/, ''
 const isLocalDev = window.location.hostname === 'localhost' && window.location.port === '5173';
 const API_BASE_URL = configuredApiUrl || (isLocalDev ? 'http://localhost:3000' : '');
 
+const ROUND_TARGET_CACHE_KEY = 'probfair_round_target_sizes';
+
+const getSafeRoundSize = (value: unknown, fallback = 10) => {
+  if (value === '' || value === null || value === undefined) return fallback;
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(50, parsed));
+};
+
+const readRoundTargetCache = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(ROUND_TARGET_CACHE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const rememberRoundTargetSize = (roundId: string | undefined, targetSize: number) => {
+  if (!roundId) return;
+  const cache = readRoundTargetCache();
+  cache[roundId] = getSafeRoundSize(targetSize);
+  localStorage.setItem(ROUND_TARGET_CACHE_KEY, JSON.stringify(cache));
+};
+
+const normalizeRound = (round: any, fallbackTargetSize = 10): Round => {
+  const cache = readRoundTargetCache();
+  const targetSize = getSafeRoundSize(
+    round.targetSize ??
+    round.target_size ??
+    round.slotCount ??
+    round.slot_count ??
+    round.capacity ??
+    round.roundSize ??
+    round.round_size ??
+    round.desiredProblemCount ??
+    round.desired_problem_count ??
+    cache[round.id] ??
+    fallbackTargetSize
+  );
+
+  rememberRoundTargetSize(round.id, targetSize);
+
+  return {
+    ...round,
+    targetSize,
+    // This is the actual number currently assigned, if the backend provides it.
+    // Do not use it as the round capacity.
+    problemCount: Number(round.problemCount ?? round.problem_count ?? 0),
+  };
+};
+
 // --- INTERFACE ---
 
 export const api = {
@@ -205,13 +256,13 @@ export const api = {
   },
 
   // New: Reorder Round
-  reorderRound: async (problemIds: string[], roundId?: string): Promise<void> => {
+  reorderRound: async (problemIds: string[], roundId?: string, slotIndexes?: number[]): Promise<void> => {
     if (USE_MOCK_BACKEND) return; 
 
     const res = await fetch(`${API_BASE_URL}/api/rounds/reorder`, {
       method: 'POST',
       headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problems: problemIds, roundId })
+      body: JSON.stringify({ problems: problemIds, roundId, slotIndexes })
     });
     if (!res.ok) throw new Error('Reorder failed');
   },
@@ -326,28 +377,50 @@ export const api = {
     if (USE_MOCK_BACKEND) return [];
     const res = await fetch(`${API_BASE_URL}/api/rounds`, { headers: getAuthHeader() });
     if (!res.ok) throw new Error("Failed to fetch rounds");
-    return res.json();
+
+    const data = await res.json();
+    const rounds = Array.isArray(data) ? data : (data.rounds || []);
+    return rounds.map((round: any) => normalizeRound(round));
   },
 
   createRound: async (round: Partial<Round>): Promise<Round> => {
     if (USE_MOCK_BACKEND) return {} as Round;
+
+    const targetSize = getSafeRoundSize(round.targetSize);
+
     const res = await fetch(`${API_BASE_URL}/api/rounds`, {
         method: 'POST',
         headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(round)
+        body: JSON.stringify({
+          ...round,
+          targetSize,
+        })
     });
+
     if (!res.ok) throw new Error("Failed to create round");
-    return res.json();
+
+    const data = await res.json();
+    const normalized = normalizeRound(data, targetSize);
+    rememberRoundTargetSize(normalized.id, targetSize);
+    return normalized;
   },
 
   updateRound: async (round: Partial<Round> & { id: string }): Promise<void> => {
     if (USE_MOCK_BACKEND) return;
+
+    const targetSize = getSafeRoundSize(round.targetSize ?? readRoundTargetCache()[round.id]);
+
     const res = await fetch(`${API_BASE_URL}/api/rounds/${round.id}`, {
         method: 'PUT',
         headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(round)
+        body: JSON.stringify({
+          ...round,
+          targetSize,
+        })
     });
+
     if (!res.ok) throw new Error("Update round failed");
+    rememberRoundTargetSize(round.id, targetSize);
   },
 
   deleteRound: async (id: string): Promise<void> => {
