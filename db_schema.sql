@@ -47,6 +47,8 @@ CREATE TABLE votes (
   user_id UUID REFERENCES users(id),
   problem_id UUID REFERENCES problems(id),
   vote_value INTEGER NOT NULL, -- Stores the power used for this vote
+  invalid_reason TEXT,
+  invalidated_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, problem_id)
 );

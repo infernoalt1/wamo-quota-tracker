@@ -46,7 +46,8 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   showWaitlistBadge = false,
   className = ''
 }) => {
-  const hasVoted = problem.votedBy?.includes(currentUserId);
+  const isOwnProblem = problem.authorId === currentUserId;
+  const hasVoted = !isOwnProblem && problem.votedBy?.includes(currentUserId);
   const score = problem.score || 0;
   const status = problem.status || 'pending';
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -55,6 +56,7 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
   
   const isAdmin = currentUserRole === 'admin' || currentUserRole === 'director';
   const canEdit = isAdmin || problem.authorId === currentUserId;
+  const votingDisabled = currentUserRole === 'guest' || readOnly || isOwnProblem;
 
   const topicColors: Record<string, string> = {
     'Algebra': 'bg-blue-50 text-blue-700 border-blue-200',
@@ -141,11 +143,12 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
            <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={(e) => { e.stopPropagation(); onUpvote(problem.id); }}
-              disabled={currentUserRole === 'guest' || readOnly}
+              disabled={votingDisabled}
+              title={isOwnProblem ? 'You cannot vote for your own problem.' : hasVoted ? 'Remove vote' : 'Vote for this problem'}
               className={`flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg transition-colors ${
                  hasVoted && !readOnly
                    ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-100'
-                   : (currentUserRole === 'guest' || readOnly) ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm'
+                   : votingDisabled ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm'
               }`}
            >
               <ThumbsUp className={`w-4 h-4 ${hasVoted ? 'fill-current' : ''}`} />

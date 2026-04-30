@@ -116,6 +116,8 @@ const initDB = async () => {
         user_id UUID REFERENCES users(id),
         problem_id UUID REFERENCES problems(id),
         vote_value INTEGER NOT NULL,
+        invalid_reason TEXT,
+        invalidated_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, problem_id)
       );
@@ -170,6 +172,8 @@ const initDB = async () => {
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_type TEXT NOT NULL DEFAULT 'formal';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS assignment_mode TEXT NOT NULL DEFAULT 'global';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE votes ADD COLUMN IF NOT EXISTS invalid_reason TEXT;
+      ALTER TABLE votes ADD COLUMN IF NOT EXISTS invalidated_at TIMESTAMP WITH TIME ZONE;
 
       CREATE TABLE IF NOT EXISTS quota_assignments (
         quota_id UUID REFERENCES quotas(id) ON DELETE CASCADE,
@@ -177,6 +181,23 @@ const initDB = async () => {
         custom_target INTEGER,
         PRIMARY KEY (quota_id, user_id)
       );
+
+      UPDATE votes v
+      SET invalid_reason = 'self_vote',
+          invalidated_at = COALESCE(v.invalidated_at, CURRENT_TIMESTAMP)
+      FROM problems p
+      WHERE v.problem_id = p.id
+        AND v.user_id = p.author_id
+        AND v.invalid_reason IS NULL;
+
+      UPDATE problems p
+      SET score = COALESCE((
+        SELECT SUM(v.vote_value)
+        FROM votes v
+        WHERE v.problem_id = p.id
+          AND v.invalid_reason IS NULL
+          AND v.user_id IS DISTINCT FROM p.author_id
+      ), 0);
     `);
 
     // --- MIGRATION: Notifications table (for existing databases) ---
@@ -547,8 +568,10 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
           UPDATE problems 
           SET score = (
             SELECT COALESCE(SUM(vote_value), 0) 
-            FROM votes 
+            FROM votes
             WHERE votes.problem_id = problems.id
+              AND votes.invalid_reason IS NULL
+              AND votes.user_id IS DISTINCT FROM problems.author_id
           )
           WHERE id IN (SELECT problem_id FROM votes WHERE user_id = $1)
         `, [id]);
@@ -606,15 +629,22 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(`
-      SELECT p.*, u.name as author_name, 
-      (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
+      SELECT p.*, u.name as author_name,
+      COALESCE((
+        SELECT SUM(v.vote_value)
+        FROM votes v
+        WHERE v.problem_id = p.id
+          AND v.invalid_reason IS NULL
+          AND v.user_id IS DISTINCT FROM p.author_id
+      ), 0) as valid_score,
+      (SELECT array_agg(v.user_id) FROM votes v WHERE v.problem_id = p.id AND v.invalid_reason IS NULL AND v.user_id IS DISTINCT FROM p.author_id) as voted_by,
       (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
       (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
       (SELECT COALESCE(json_object_agg(round_id, order_index), '{}'::json) FROM problem_rounds WHERE problem_id = p.id) as round_order_indexes
       FROM problems p
       LEFT JOIN users u ON p.author_id = u.id
       WHERE p.deleted_at IS NULL
-      ORDER BY p.score DESC
+      ORDER BY valid_score DESC, p.created_at DESC
     `);
     
     const problems = result.rows.map(row => ({
@@ -622,6 +652,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
       quotaId: row.quota_id, // Ensure we send this
+      score: parseInt(row.valid_score || '0', 10),
       roundId: row.round_id, // Legacy/Primary round
       roundIds: row.round_ids || [], // New: Many-to-Many
       difficulty: normalizeDifficulty(row.difficulty),
@@ -656,7 +687,14 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
         deleter.id as deleted_by_id,
         deleter.name as deleted_by_name,
         deleter.avatar_url as deleted_by_avatar_url,
-        (SELECT array_agg(user_id) FROM votes WHERE problem_id = p.id) as voted_by,
+        COALESCE((
+          SELECT SUM(v.vote_value)
+          FROM votes v
+          WHERE v.problem_id = p.id
+            AND v.invalid_reason IS NULL
+            AND v.user_id IS DISTINCT FROM p.author_id
+        ), 0) as valid_score,
+        (SELECT array_agg(v.user_id) FROM votes v WHERE v.problem_id = p.id AND v.invalid_reason IS NULL AND v.user_id IS DISTINCT FROM p.author_id) as voted_by,
         (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
         (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
         (SELECT COALESCE(json_object_agg(round_id, order_index), '{}'::json) FROM problem_rounds WHERE problem_id = p.id) as round_order_indexes
@@ -672,6 +710,7 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
       authorName: row.author_name || 'Unknown',
       authorId: row.author_id,
       quotaId: row.quota_id,
+      score: parseInt(row.valid_score || '0', 10),
       roundId: row.round_id,
       roundIds: row.round_ids || [],
       difficulty: normalizeDifficulty(row.difficulty),
@@ -1227,19 +1266,65 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
     const { id } = req.params;
     const userId = req.user.id;
+    const problemRes = await client.query('SELECT author_id, deleted_at FROM problems WHERE id = $1', [id]);
+    if (problemRes.rows.length === 0 || problemRes.rows[0].deleted_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+    if (problemRes.rows[0].author_id === userId) {
+      await client.query(
+        `UPDATE votes
+         SET invalid_reason = 'self_vote',
+             invalidated_at = COALESCE(invalidated_at, CURRENT_TIMESTAMP)
+         WHERE user_id = $1 AND problem_id = $2 AND invalid_reason IS NULL`,
+        [userId, id]
+      );
+      await client.query(
+        `UPDATE problems p
+         SET score = COALESCE((
+           SELECT SUM(v.vote_value)
+           FROM votes v
+           WHERE v.problem_id = p.id
+             AND v.invalid_reason IS NULL
+             AND v.user_id IS DISTINCT FROM p.author_id
+         ), 0)
+         WHERE p.id = $1`,
+        [id]
+      );
+      await client.query('COMMIT');
+      return res.status(400).json({ error: 'You cannot vote for your own problem.' });
+    }
+
     const userRes = await client.query('SELECT voting_power FROM users WHERE id = $1', [userId]);
     const currentPower = userRes.rows.length > 0 ? (userRes.rows[0].voting_power || 1) : 1;
 
-    const check = await client.query('SELECT vote_value FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
+    const check = await client.query('SELECT vote_value FROM votes WHERE user_id = $1 AND problem_id = $2 AND invalid_reason IS NULL', [userId, id]);
     
     if (check.rows.length > 0) {
-      const previousValue = check.rows[0].vote_value;
       await client.query('DELETE FROM votes WHERE user_id = $1 AND problem_id = $2', [userId, id]);
-      await client.query('UPDATE problems SET score = score - $1 WHERE id = $2', [previousValue, id]);
     } else {
-      await client.query('INSERT INTO votes (user_id, problem_id, vote_value) VALUES ($1, $2, $3)', [userId, id, currentPower]);
-      await client.query('UPDATE problems SET score = score + $1 WHERE id = $2', [currentPower, id]);
+      await client.query(`
+        INSERT INTO votes (user_id, problem_id, vote_value, invalid_reason, invalidated_at)
+        VALUES ($1, $2, $3, NULL, NULL)
+        ON CONFLICT (user_id, problem_id)
+        DO UPDATE SET vote_value = EXCLUDED.vote_value,
+                      invalid_reason = NULL,
+                      invalidated_at = NULL
+      `, [userId, id, currentPower]);
     }
+
+    await client.query(
+      `UPDATE problems p
+       SET score = COALESCE((
+         SELECT SUM(v.vote_value)
+         FROM votes v
+         WHERE v.problem_id = p.id
+           AND v.invalid_reason IS NULL
+           AND v.user_id IS DISTINCT FROM p.author_id
+       ), 0)
+       WHERE p.id = $1`,
+      [id]
+    );
 
     await client.query('COMMIT');
     res.json({ success: true });

@@ -648,7 +648,7 @@ export default function App() {
       const updatedUsers = users.map(u => ({
         ...u,
         submittedCount: countableActiveProblems.filter(p => p.authorId === u.id).length,
-        voteCount: activeProblems.filter(p => p.votedBy?.includes(u.id)).length
+        voteCount: activeProblems.filter(p => p.authorId !== u.id && p.votedBy?.includes(u.id)).length
       }));
       
       const isDifferent = JSON.stringify(updatedUsers.map(u => ({s: u.submittedCount, v: u.voteCount}))) !== JSON.stringify(users.map(u => ({s: u.submittedCount, v: u.voteCount})));
@@ -1187,6 +1187,11 @@ export default function App() {
 
   const handleToggleVote = async (problemId: string) => {
     if (!currentUser || currentUser.role === 'guest') return;
+    const targetProblem = problems.find(p => p.id === problemId);
+    if (targetProblem?.authorId === currentUser.id) {
+      showToast({ variant: 'error', title: "Couldn't update vote", message: 'You cannot vote for your own problem.' });
+      return;
+    }
     
     const oldProblems = [...problems];
     const updatedProblems = problems.map(p => {
@@ -2953,7 +2958,7 @@ tex += `\\end{longtable}
   // Count only off-waitlist problems for quota progress.
   const submissionCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === activeQuotaId && isOffWaitlist(p)).length;
   // Count votes (Strictly for active quota)
-  const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.votedBy?.includes(currentUser.id)).length;
+  const userVoteCount = problems.filter(p => p.quotaId === activeQuotaId && p.authorId !== currentUser.id && p.votedBy?.includes(currentUser.id)).length;
 
   const subPercent = Math.min((submissionCount / submissionTarget) * 100, 100);
   const votePercent = Math.min((userVoteCount / voteTarget) * 100, 100);
@@ -3323,7 +3328,7 @@ tex += `\\end{longtable}
                        const myCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === q.id && isOffWaitlist(p)).length;
                        const myTarget = currentUser.customTargets?.[q.id] || q.target;
                        const pct = myTarget > 0 ? Math.min((myCount / myTarget) * 100, 100) : 0;
-                       const myVotes = problems.filter(p => p.quotaId === q.id && p.votedBy?.includes(currentUser.id)).length;
+                       const myVotes = problems.filter(p => p.quotaId === q.id && p.authorId !== currentUser.id && p.votedBy?.includes(currentUser.id)).length;
                        const votePct = q.voteTarget > 0 ? Math.min((myVotes / q.voteTarget) * 100, 100) : 0;
                        const isActive = activeQuotaId === q.id;
                        let statusLabel = 'Not started';

@@ -274,7 +274,10 @@ export const api = {
       method: 'POST',
       headers: getAuthHeader()
     });
-    if (!res.ok) throw new Error('Vote failed');
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || 'Vote failed');
+    }
   },
 
   resetVotes: async (): Promise<void> => {
