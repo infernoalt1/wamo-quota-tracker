@@ -57,6 +57,10 @@ const initDB = async () => {
         name TEXT NOT NULL,
         target_count INTEGER NOT NULL DEFAULT 5,
         vote_target INTEGER DEFAULT 3,
+        quota_pool_vote_target INTEGER DEFAULT 16,
+        global_pool_vote_target INTEGER DEFAULT 4,
+        min_voting_pool_size INTEGER DEFAULT 15,
+        voting_enabled BOOLEAN NOT NULL DEFAULT TRUE,
         instructions TEXT,
         due_date TIMESTAMP WITH TIME ZONE,
         is_active BOOLEAN DEFAULT FALSE,
@@ -95,6 +99,9 @@ const initDB = async () => {
         difficulty NUMERIC(3,1) DEFAULT 0,
         topics TEXT[] DEFAULT '{}',
         score INTEGER DEFAULT 0,
+        comparison_appearances INTEGER NOT NULL DEFAULT 0,
+        comparison_wins INTEGER NOT NULL DEFAULT 0,
+        comparison_losses INTEGER NOT NULL DEFAULT 0,
         status TEXT DEFAULT 'pending',
         order_index INTEGER DEFAULT 0,
         version INTEGER DEFAULT 1,
@@ -120,6 +127,34 @@ const initDB = async () => {
         invalidated_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, problem_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS comparison_votes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        voter_id UUID REFERENCES users(id),
+        quota_id UUID REFERENCES quotas(id),
+        vote_bucket TEXT NOT NULL CHECK (vote_bucket IN ('quota_pool', 'global_pool')),
+        shown_problem_ids UUID[] NOT NULL,
+        shown_key TEXT NOT NULL,
+        selected_problem_id UUID REFERENCES problems(id),
+        response_time_ms INTEGER,
+        details_opened BOOLEAN NOT NULL DEFAULT FALSE,
+        low_confidence BOOLEAN NOT NULL DEFAULT FALSE,
+        is_optional BOOLEAN NOT NULL DEFAULT FALSE,
+        is_skipped BOOLEAN NOT NULL DEFAULT FALSE,
+        skip_reason TEXT,
+        is_valid BOOLEAN NOT NULL DEFAULT TRUE,
+        invalid_reason TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS comparison_vote_items (
+        vote_id UUID REFERENCES comparison_votes(id) ON DELETE CASCADE,
+        problem_id UUID REFERENCES problems(id),
+        was_selected BOOLEAN NOT NULL DEFAULT FALSE,
+        wins_awarded INTEGER NOT NULL DEFAULT 0,
+        losses_awarded INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (vote_id, problem_id)
       );
 
       CREATE TABLE IF NOT EXISTS comments (
@@ -159,6 +194,9 @@ const initDB = async () => {
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id);
       ALTER TABLE problems ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS comparison_appearances INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS comparison_wins INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE problems ADD COLUMN IF NOT EXISTS comparison_losses INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_id UUID;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
@@ -169,6 +207,10 @@ const initDB = async () => {
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS target_size INTEGER DEFAULT 10;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_pool_vote_target INTEGER;
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS global_pool_vote_target INTEGER;
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS min_voting_pool_size INTEGER;
+      ALTER TABLE quotas ADD COLUMN IF NOT EXISTS voting_enabled BOOLEAN;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_type TEXT NOT NULL DEFAULT 'formal';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS assignment_mode TEXT NOT NULL DEFAULT 'global';
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE;
@@ -181,6 +223,47 @@ const initDB = async () => {
         custom_target INTEGER,
         PRIMARY KEY (quota_id, user_id)
       );
+
+      CREATE TABLE IF NOT EXISTS comparison_votes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        voter_id UUID REFERENCES users(id),
+        quota_id UUID REFERENCES quotas(id),
+        vote_bucket TEXT NOT NULL CHECK (vote_bucket IN ('quota_pool', 'global_pool')),
+        shown_problem_ids UUID[] NOT NULL,
+        shown_key TEXT NOT NULL,
+        selected_problem_id UUID REFERENCES problems(id),
+        response_time_ms INTEGER,
+        details_opened BOOLEAN NOT NULL DEFAULT FALSE,
+        low_confidence BOOLEAN NOT NULL DEFAULT FALSE,
+        is_optional BOOLEAN NOT NULL DEFAULT FALSE,
+        is_skipped BOOLEAN NOT NULL DEFAULT FALSE,
+        skip_reason TEXT,
+        is_valid BOOLEAN NOT NULL DEFAULT TRUE,
+        invalid_reason TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS comparison_vote_items (
+        vote_id UUID REFERENCES comparison_votes(id) ON DELETE CASCADE,
+        problem_id UUID REFERENCES problems(id),
+        was_selected BOOLEAN NOT NULL DEFAULT FALSE,
+        wins_awarded INTEGER NOT NULL DEFAULT 0,
+        losses_awarded INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (vote_id, problem_id)
+      );
+
+      UPDATE quotas
+      SET quota_pool_vote_target = COALESCE(quota_pool_vote_target, vote_target, 3),
+          global_pool_vote_target = COALESCE(global_pool_vote_target, 0),
+          min_voting_pool_size = COALESCE(min_voting_pool_size, 15),
+          voting_enabled = COALESCE(voting_enabled, TRUE);
+
+      UPDATE quotas
+      SET vote_target = 0,
+          quota_pool_vote_target = 0,
+          global_pool_vote_target = 0,
+          voting_enabled = FALSE
+      WHERE quota_type = 'general';
 
       UPDATE votes v
       SET invalid_reason = 'self_vote',
@@ -291,8 +374,11 @@ const initDB = async () => {
     const generalQuotaCheck = await client.query("SELECT * FROM quotas WHERE quota_type = 'general' LIMIT 1");
     if (generalQuotaCheck.rows.length === 0) {
       await client.query(
-        "INSERT INTO quotas (name, target_count, vote_target, instructions, is_active, quota_type, assignment_mode, is_enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        ['General Submissions', 0, 0, 'Submit problems freely, outside of any formal quota cycle.', true, 'general', 'global', true]
+        `INSERT INTO quotas (
+          name, target_count, vote_target, quota_pool_vote_target, global_pool_vote_target,
+          min_voting_pool_size, voting_enabled, instructions, is_active, quota_type, assignment_mode, is_enabled
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        ['General Submissions', 0, 0, 0, 0, 15, false, 'Submit problems freely, outside of any formal quota cycle.', true, 'general', 'global', true]
       );
       console.log('--- General Submissions quota created ---');
     }
@@ -379,6 +465,277 @@ function normalizeDifficulty(input) {
   const parsed = Number(input);
   if (!Number.isFinite(parsed)) return 0.5;
   return Number(Math.min(Math.max(parsed, 0.5), 10).toFixed(1));
+}
+
+const VALID_VOTE_BUCKETS = new Set(['quota_pool', 'global_pool']);
+
+function getInt(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
+}
+
+function getQuotaPoolVoteTarget(q) {
+  return getInt(q.quota_pool_vote_target ?? q.quotaPoolVoteTarget ?? q.vote_target ?? q.voteTarget, 3);
+}
+
+function getGlobalPoolVoteTarget(q) {
+  return getInt(q.global_pool_vote_target ?? q.globalPoolVoteTarget, 0);
+}
+
+function getMinVotingPoolSize(q) {
+  return Math.max(3, getInt(q.min_voting_pool_size ?? q.minVotingPoolSize, 15));
+}
+
+function mapQuotaRow(q) {
+  const quotaPoolVoteTarget = getQuotaPoolVoteTarget(q);
+  const globalPoolVoteTarget = getGlobalPoolVoteTarget(q);
+  return {
+    id: q.id,
+    name: q.name,
+    target: getInt(q.target_count ?? q.target, 5),
+    voteTarget: quotaPoolVoteTarget + globalPoolVoteTarget,
+    quotaPoolVoteTarget,
+    globalPoolVoteTarget,
+    minVotingPoolSize: getMinVotingPoolSize(q),
+    votingEnabled: q.voting_enabled !== false,
+    instructions: q.instructions,
+    dueDate: q.due_date ? new Date(q.due_date).getTime() : null,
+    quotaType: q.quota_type || 'formal',
+    assignmentMode: q.assignment_mode || 'global',
+    isEnabled: q.is_enabled !== false,
+    assignedUserIds: q.assigned_user_ids || []
+  };
+}
+
+function mapProblemRow(row, { hideAuthor = false } = {}) {
+  return {
+    id: row.id,
+    authorId: row.author_id,
+    authorName: hideAuthor ? 'Hidden' : (row.author_name || 'Unknown'),
+    quotaId: row.quota_id,
+    roundId: row.round_id,
+    roundIds: row.round_ids || [],
+    title: row.title,
+    statement: row.statement,
+    solution: row.solution,
+    answerKey: row.answer_key,
+    imageData: row.image_data,
+    difficulty: normalizeDifficulty(row.difficulty),
+    topics: row.topics || [],
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    score: parseInt(row.valid_score ?? row.score ?? '0', 10),
+    votedBy: row.voted_by || [],
+    status: row.status || 'pending',
+    orderIndex: row.order_index || 0,
+    roundOrderIndexes: row.round_order_indexes || {},
+    version: row.version,
+    commentCount: parseInt(row.comment_count || '0', 10),
+    comparisonAppearances: parseInt(row.comparison_appearances || '0', 10),
+    comparisonWins: parseInt(row.comparison_wins || '0', 10),
+    comparisonLosses: parseInt(row.comparison_losses || '0', 10)
+  };
+}
+
+function normalizeShownIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return [...new Set(ids.filter(Boolean).map(String))];
+}
+
+function getShownKey(ids) {
+  return normalizeShownIds(ids).sort().join(':');
+}
+
+async function getEligibleQuota(client, quotaId, user) {
+  const result = await client.query(
+    `SELECT q.*,
+       array_agg(qa.user_id) FILTER (WHERE qa.user_id IS NOT NULL) as assigned_user_ids
+     FROM quotas q
+     LEFT JOIN quota_assignments qa ON qa.quota_id = q.id
+     WHERE q.id = $1 AND q.is_enabled = TRUE
+     GROUP BY q.id`,
+    [quotaId]
+  );
+  if (result.rows.length === 0) return null;
+  const q = result.rows[0];
+  if ((q.quota_type || 'formal') !== 'formal') return null;
+  const isAdmin = user.role === 'admin' || user.role === 'director';
+  const assignedIds = q.assigned_user_ids || [];
+  const canUse = isAdmin
+    || q.quota_type === 'general'
+    || q.assignment_mode === 'global'
+    || assignedIds.includes(user.id);
+  return canUse ? q : null;
+}
+
+async function getVotingProgress(client, quotaRow, userId) {
+  const q = mapQuotaRow(quotaRow);
+  const submitted = await client.query(
+    `SELECT COUNT(*)::int AS count
+     FROM problems
+     WHERE quota_id = $1
+       AND author_id = $2
+       AND deleted_at IS NULL
+       AND status IN ('approved', 'accepted')`,
+    [q.id, userId]
+  );
+  const voteCounts = await client.query(
+    `SELECT vote_bucket, COUNT(*)::int AS count
+     FROM comparison_votes
+     WHERE voter_id = $1
+       AND quota_id = $2
+       AND is_valid = TRUE
+       AND is_skipped = FALSE
+     GROUP BY vote_bucket`,
+    [userId, q.id]
+  );
+  const rawByBucket = { quota_pool: 0, global_pool: 0 };
+  for (const row of voteCounts.rows) rawByBucket[row.vote_bucket] = parseInt(row.count || '0', 10);
+  const quotaRequired = q.quotaPoolVoteTarget;
+  const globalRequired = q.globalPoolVoteTarget;
+  const quotaRaw = rawByBucket.quota_pool;
+  const globalRaw = rawByBucket.global_pool;
+  return {
+    quota: q,
+    writingCompleted: parseInt(submitted.rows[0]?.count || '0', 10),
+    writingRequired: q.quotaType === 'general' ? 0 : q.target,
+    quotaPool: {
+      completed: Math.min(quotaRaw, quotaRequired),
+      rawCompleted: quotaRaw,
+      required: quotaRequired
+    },
+    globalPool: {
+      completed: Math.min(globalRaw, globalRequired),
+      rawCompleted: globalRaw,
+      required: globalRequired
+    },
+    totalCompleted: Math.min(quotaRaw, quotaRequired) + Math.min(globalRaw, globalRequired),
+    totalRawCompleted: quotaRaw + globalRaw,
+    totalRequired: quotaRequired + globalRequired,
+    isComplete: quotaRaw >= quotaRequired && globalRaw >= globalRequired
+  };
+}
+
+function chooseNextBucket(progress, requestedBucket) {
+  if (VALID_VOTE_BUCKETS.has(requestedBucket)) return requestedBucket;
+  const quotaReq = progress.quotaPool.required;
+  const globalReq = progress.globalPool.required;
+  const quotaPct = quotaReq > 0 ? progress.quotaPool.rawCompleted / quotaReq : Infinity;
+  const globalPct = globalReq > 0 ? progress.globalPool.rawCompleted / globalReq : Infinity;
+  const quotaNeedsVotes = quotaReq > 0 && progress.quotaPool.rawCompleted < quotaReq;
+  const globalNeedsVotes = globalReq > 0 && progress.globalPool.rawCompleted < globalReq;
+  if (quotaNeedsVotes && globalNeedsVotes) return quotaPct <= globalPct ? 'quota_pool' : 'global_pool';
+  if (quotaNeedsVotes) return 'quota_pool';
+  if (globalNeedsVotes) return 'global_pool';
+  return quotaReq > 0 ? 'quota_pool' : 'global_pool';
+}
+
+async function getEligibleProblemCount(client, quotaId, userId, bucket) {
+  const params = [userId, quotaId];
+  const quotaFilter = bucket === 'quota_pool' ? 'p.quota_id = $2' : 'p.quota_id IS DISTINCT FROM $2';
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS count
+     FROM problems p
+     WHERE p.deleted_at IS NULL
+       AND p.status IN ('approved', 'accepted')
+       AND p.author_id IS DISTINCT FROM $1
+       AND ${quotaFilter}`,
+    params
+  );
+  return parseInt(result.rows[0]?.count || '0', 10);
+}
+
+async function getCandidateProblems(client, quotaId, userId, bucket) {
+  const quotaFilter = bucket === 'quota_pool' ? 'p.quota_id = $2' : 'p.quota_id IS DISTINCT FROM $2';
+  const result = await client.query(
+    `SELECT p.*, q.name as source_name, u.name as author_name,
+        (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
+        COALESCE(COUNT(cvi.vote_id), 0) as voting_appearances
+     FROM problems p
+     LEFT JOIN quotas q ON q.id = p.quota_id
+     LEFT JOIN users u ON p.author_id = u.id
+     LEFT JOIN comparison_vote_items cvi ON cvi.problem_id = p.id
+     WHERE p.deleted_at IS NULL
+       AND p.status IN ('approved', 'accepted')
+       AND p.author_id IS DISTINCT FROM $1
+       AND ${quotaFilter}
+     GROUP BY p.id, q.name, u.name
+     ORDER BY voting_appearances ASC, p.comparison_appearances ASC, random()
+     LIMIT 24`,
+    [userId, quotaId]
+  );
+  return result.rows;
+}
+
+async function recentShownKeys(client, quotaId, userId, bucket) {
+  const result = await client.query(
+    `SELECT shown_key
+     FROM comparison_votes
+     WHERE voter_id = $1 AND quota_id = $2 AND vote_bucket = $3
+     ORDER BY created_at DESC
+     LIMIT 80`,
+    [userId, quotaId, bucket]
+  );
+  return new Set(result.rows.map(r => r.shown_key));
+}
+
+function pickTriple(candidates, seenKeys) {
+  const pool = [...candidates];
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const triple = [];
+    const authors = new Set();
+    for (const candidate of shuffled) {
+      if (triple.length < 2 || !authors.has(candidate.author_id)) {
+        triple.push(candidate);
+        authors.add(candidate.author_id);
+      }
+      if (triple.length === 3) break;
+    }
+    if (triple.length < 3) {
+      triple.push(...shuffled.filter(c => !triple.some(t => t.id === c.id)).slice(0, 3 - triple.length));
+    }
+    if (triple.length === 3 && !seenKeys.has(getShownKey(triple.map(p => p.id)))) {
+      return triple.sort(() => Math.random() - 0.5);
+    }
+  }
+  return pool.slice(0, 3).sort(() => Math.random() - 0.5);
+}
+
+async function validateVotingProblemSet(client, { quotaId, userId, bucket, shownProblemIds, selectedProblemId, requireSelected }) {
+  if (!VALID_VOTE_BUCKETS.has(bucket)) {
+    return { ok: false, status: 400, error: 'Invalid vote bucket.' };
+  }
+  const ids = normalizeShownIds(shownProblemIds);
+  if (ids.length !== 3) {
+    return { ok: false, status: 400, error: 'A comparison vote must include exactly 3 shown problems.' };
+  }
+  if (requireSelected && !ids.includes(selectedProblemId)) {
+    return { ok: false, status: 400, error: 'Selected problem must be one of the shown problems.' };
+  }
+  const result = await client.query(
+    `SELECT id, author_id, quota_id, status, deleted_at
+     FROM problems
+     WHERE id = ANY($1::uuid[])`,
+    [ids]
+  );
+  if (result.rows.length !== 3) {
+    return { ok: false, status: 400, error: 'One or more shown problems are unavailable.' };
+  }
+  for (const row of result.rows) {
+    if (row.deleted_at || !['approved', 'accepted'].includes(row.status || 'pending')) {
+      return { ok: false, status: 400, error: 'One or more shown problems are not eligible for voting.' };
+    }
+    if (row.author_id === userId) {
+      return { ok: false, status: 400, error: 'You cannot vote on a set containing your own problem.' };
+    }
+    if (bucket === 'quota_pool' && row.quota_id !== quotaId) {
+      return { ok: false, status: 400, error: 'Quota pool votes must use problems from the selected quota.' };
+    }
+    if (bucket === 'global_pool' && row.quota_id === quotaId) {
+      return { ok: false, status: 400, error: 'Global pool votes must use problems outside the selected quota.' };
+    }
+  }
+  return { ok: true, ids, shownKey: getShownKey(ids), rows: result.rows };
 }
 
 // --- Routes: Auth ---
@@ -666,7 +1023,10 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
       solution: row.solution,
       answerKey: row.answer_key,
       version: row.version,
-      commentCount: parseInt(row.comment_count || '0')
+      commentCount: parseInt(row.comment_count || '0'),
+      comparisonAppearances: parseInt(row.comparison_appearances || '0', 10),
+      comparisonWins: parseInt(row.comparison_wins || '0', 10),
+      comparisonLosses: parseInt(row.comparison_losses || '0', 10)
     }));
 
     res.json(problems);
@@ -725,6 +1085,9 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
       answerKey: row.answer_key,
       version: row.version,
       commentCount: parseInt(row.comment_count || '0'),
+      comparisonAppearances: parseInt(row.comparison_appearances || '0', 10),
+      comparisonWins: parseInt(row.comparison_wins || '0', 10),
+      comparisonLosses: parseInt(row.comparison_losses || '0', 10),
       deletedAt: row.deleted_at ? new Date(row.deleted_at).getTime() : null,
       deletedBy: row.deleted_by_id || row.deleted_by || null,
       deletedByName: row.deleted_by_name || null,
@@ -1421,7 +1784,9 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
   try {
       await client.query('BEGIN');
       await client.query('TRUNCATE TABLE votes');
+      await client.query('TRUNCATE TABLE comparison_vote_items, comparison_votes');
       await client.query('UPDATE problems SET score = 0');
+      await client.query('UPDATE problems SET comparison_appearances = 0, comparison_wins = 0, comparison_losses = 0');
       await client.query('COMMIT');
       res.json({ success: true });
   } catch (e) {
@@ -1430,6 +1795,297 @@ app.post('/api/admin/reset-votes', authenticateToken, async (req, res) => {
       res.status(500).json({ error: 'Reset failed' });
   } finally {
       client.release();
+  }
+});
+
+// --- Routes: Guided Comparison Voting ---
+
+app.get('/api/voting/quotas', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.sendStatus(403);
+  const client = await pool.connect();
+  try {
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'director';
+    const result = isAdmin
+      ? await client.query(`
+          SELECT q.*,
+          array_agg(qa.user_id) FILTER (WHERE qa.user_id IS NOT NULL) as assigned_user_ids
+          FROM quotas q
+          LEFT JOIN quota_assignments qa ON qa.quota_id = q.id
+          WHERE q.is_enabled = TRUE AND q.quota_type = 'formal'
+          GROUP BY q.id
+          ORDER BY q.quota_type ASC, q.created_at DESC
+        `)
+      : await client.query(`
+          SELECT DISTINCT q.*,
+            NULL::uuid[] as assigned_user_ids
+          FROM quotas q
+          WHERE q.is_enabled = TRUE AND q.voting_enabled IS DISTINCT FROM FALSE AND q.quota_type = 'formal' AND (
+            q.assignment_mode = 'global'
+            OR (q.assignment_mode = 'selected'
+                AND EXISTS (
+                  SELECT 1 FROM quota_assignments qa
+                  WHERE qa.quota_id = q.id AND qa.user_id = $1
+                ))
+          )
+          ORDER BY q.quota_type ASC, q.created_at DESC
+        `, [req.user.id]);
+
+    const progress = [];
+    for (const quota of result.rows) {
+      progress.push(await getVotingProgress(client, quota, req.user.id));
+    }
+    res.json(progress);
+  } catch (err) {
+    console.error('Failed to fetch voting quotas:', err);
+    res.status(500).json({ error: 'Failed to fetch voting quotas' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/voting/next', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.sendStatus(403);
+  const { quotaId, bucket = 'auto' } = req.query;
+  if (!quotaId) return res.status(400).json({ error: 'quotaId is required' });
+
+  const client = await pool.connect();
+  try {
+    const quotaRow = await getEligibleQuota(client, quotaId, req.user);
+    if (!quotaRow) return res.status(404).json({ error: 'Quota not found or unavailable.' });
+    const progress = await getVotingProgress(client, quotaRow, req.user.id);
+    const selectedBucket = chooseNextBucket(progress, bucket);
+    const required = selectedBucket === 'quota_pool'
+      ? progress.quotaPool.required
+      : progress.globalPool.required;
+    const minEligible = selectedBucket === 'quota_pool'
+      ? progress.quota.minVotingPoolSize
+      : 3;
+    const eligibleCount = await getEligibleProblemCount(client, quotaId, req.user.id, selectedBucket);
+
+    if (!progress.quota.votingEnabled) {
+      return res.json({
+        status: 'blocked',
+        quotaId,
+        bucket: selectedBucket,
+        nextBucket: selectedBucket,
+        problems: [],
+        progress,
+        eligibleCount,
+        minEligible,
+        message: 'Voting is currently disabled for this quota.'
+      });
+    }
+    if (required === 0 && !progress.isComplete) {
+      return res.json({
+        status: 'complete',
+        quotaId,
+        bucket: selectedBucket,
+        nextBucket: selectedBucket,
+        problems: [],
+        progress,
+        eligibleCount,
+        minEligible,
+        message: 'This voting bucket has no required votes.'
+      });
+    }
+    if (eligibleCount < minEligible) {
+      const label = selectedBucket === 'quota_pool' ? 'Quota pool' : 'Global pool';
+      return res.json({
+        status: 'blocked',
+        quotaId,
+        bucket: selectedBucket,
+        nextBucket: selectedBucket,
+        problems: [],
+        progress,
+        eligibleCount,
+        minEligible,
+        message: `${label} voting opens once there are at least ${minEligible} eligible problems. Current eligible pool: ${eligibleCount} / ${minEligible}.`
+      });
+    }
+
+    const candidates = await getCandidateProblems(client, quotaId, req.user.id, selectedBucket);
+    if (candidates.length < 3) {
+      return res.json({
+        status: 'blocked',
+        quotaId,
+        bucket: selectedBucket,
+        nextBucket: selectedBucket,
+        problems: [],
+        progress,
+        eligibleCount: candidates.length,
+        minEligible: 3,
+        message: 'Not enough eligible problems to show a comparison.'
+      });
+    }
+
+    const seenKeys = await recentShownKeys(client, quotaId, req.user.id, selectedBucket);
+    const triple = pickTriple(candidates, seenKeys);
+    res.json({
+      status: 'ready',
+      quotaId,
+      bucket: selectedBucket,
+      nextBucket: selectedBucket,
+      problems: triple.map(row => mapProblemRow(row, { hideAuthor: true })),
+      progress,
+      eligibleCount,
+      minEligible
+    });
+  } catch (err) {
+    console.error('Failed to fetch voting set:', err);
+    res.status(500).json({ error: 'Failed to fetch voting set' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/voting/submit', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.sendStatus(403);
+  const { quotaId, bucket, shownProblemIds, selectedProblemId, responseTimeMs, detailsOpened } = req.body;
+  if (!quotaId) return res.status(400).json({ error: 'quotaId is required' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const quotaRow = await getEligibleQuota(client, quotaId, req.user);
+    if (!quotaRow) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quota not found or unavailable.' });
+    }
+    const validation = await validateVotingProblemSet(client, {
+      quotaId,
+      userId: req.user.id,
+      bucket,
+      shownProblemIds,
+      selectedProblemId,
+      requireSelected: true
+    });
+    if (!validation.ok) {
+      await client.query('ROLLBACK');
+      return res.status(validation.status).json({ error: validation.error });
+    }
+    const duplicate = await client.query(
+      `SELECT id FROM comparison_votes
+       WHERE voter_id = $1
+         AND quota_id = $2
+         AND vote_bucket = $3
+         AND shown_key = $4
+         AND is_skipped = FALSE
+       LIMIT 1`,
+      [req.user.id, quotaId, bucket, validation.shownKey]
+    );
+    if (duplicate.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This exact comparison set has already been submitted.' });
+    }
+
+    const progressBefore = await getVotingProgress(client, quotaRow, req.user.id);
+    const required = bucket === 'quota_pool' ? progressBefore.quotaPool.required : progressBefore.globalPool.required;
+    const rawCompleted = bucket === 'quota_pool' ? progressBefore.quotaPool.rawCompleted : progressBefore.globalPool.rawCompleted;
+    const optional = rawCompleted >= required;
+    const responseMs = getInt(responseTimeMs, 0);
+    const lowConfidence = responseMs > 0 && responseMs < 3000;
+
+    const vote = await client.query(
+      `INSERT INTO comparison_votes (
+        voter_id, quota_id, vote_bucket, shown_problem_ids, shown_key, selected_problem_id,
+        response_time_ms, details_opened, low_confidence, is_optional
+       )
+       VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        req.user.id,
+        quotaId,
+        bucket,
+        validation.ids,
+        validation.shownKey,
+        selectedProblemId,
+        responseMs || null,
+        !!detailsOpened,
+        lowConfidence,
+        optional
+      ]
+    );
+
+    for (const problemId of validation.ids) {
+      const selected = problemId === selectedProblemId;
+      await client.query(
+        `INSERT INTO comparison_vote_items (vote_id, problem_id, was_selected, wins_awarded, losses_awarded)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [vote.rows[0].id, problemId, selected, selected ? 2 : 0, selected ? 0 : 1]
+      );
+      await client.query(
+        `UPDATE problems
+         SET comparison_appearances = comparison_appearances + 1,
+             comparison_wins = comparison_wins + $1,
+             comparison_losses = comparison_losses + $2
+         WHERE id = $3`,
+        [selected ? 2 : 0, selected ? 0 : 1, problemId]
+      );
+    }
+
+    const progress = await getVotingProgress(client, quotaRow, req.user.id);
+    await client.query('COMMIT');
+    res.json({ success: true, progress, optional, lowConfidence });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Failed to submit comparison vote:', err);
+    res.status(500).json({ error: 'Failed to submit comparison vote' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/voting/skip', authenticateToken, async (req, res) => {
+  if (req.user.role === 'guest') return res.sendStatus(403);
+  const { quotaId, bucket, shownProblemIds, reason, responseTimeMs, detailsOpened } = req.body;
+  if (!quotaId) return res.status(400).json({ error: 'quotaId is required' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const quotaRow = await getEligibleQuota(client, quotaId, req.user);
+    if (!quotaRow) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quota not found or unavailable.' });
+    }
+    const validation = await validateVotingProblemSet(client, {
+      quotaId,
+      userId: req.user.id,
+      bucket,
+      shownProblemIds,
+      selectedProblemId: null,
+      requireSelected: false
+    });
+    if (!validation.ok) {
+      await client.query('ROLLBACK');
+      return res.status(validation.status).json({ error: validation.error });
+    }
+    await client.query(
+      `INSERT INTO comparison_votes (
+        voter_id, quota_id, vote_bucket, shown_problem_ids, shown_key,
+        response_time_ms, details_opened, is_skipped, skip_reason
+       )
+       VALUES ($1, $2, $3, $4::uuid[], $5, $6, $7, TRUE, $8)`,
+      [
+        req.user.id,
+        quotaId,
+        bucket,
+        validation.ids,
+        validation.shownKey,
+        getInt(responseTimeMs, 0) || null,
+        !!detailsOpened,
+        reason || null
+      ]
+    );
+    const progress = await getVotingProgress(client, quotaRow, req.user.id);
+    await client.query('COMMIT');
+    res.json({ success: true, progress });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Failed to skip comparison set:', err);
+    res.status(500).json({ error: 'Failed to skip comparison set' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1473,18 +2129,7 @@ app.get('/api/quotas', authenticateToken, async (req, res) => {
       `, [req.user.id]);
     }
 
-    const quotas = result.rows.map(q => ({
-      id: q.id,
-      name: q.name,
-      target: q.target_count,
-      voteTarget: q.vote_target || 3,
-      instructions: q.instructions,
-      dueDate: q.due_date ? new Date(q.due_date).getTime() : null,
-      quotaType: q.quota_type || 'formal',
-      assignmentMode: q.assignment_mode || 'global',
-      isEnabled: q.is_enabled !== false,
-      assignedUserIds: q.assigned_user_ids || []
-    }));
+    const quotas = result.rows.map(mapQuotaRow);
     res.json(quotas);
   } catch (err) {
     console.error('Failed to fetch quotas:', err);
@@ -1495,7 +2140,21 @@ app.get('/api/quotas', authenticateToken, async (req, res) => {
 app.post('/api/quotas', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
 
-  const { name, target, voteTarget, instructions, dueDate, quotaType, assignmentMode, isEnabled, assignedUserIds } = req.body;
+  const {
+    name,
+    target,
+    voteTarget,
+    quotaPoolVoteTarget,
+    globalPoolVoteTarget,
+    minVotingPoolSize,
+    votingEnabled,
+    instructions,
+    dueDate,
+    quotaType,
+    assignmentMode,
+    isEnabled,
+    assignedUserIds
+  } = req.body;
 
   const client = await pool.connect();
   try {
@@ -1504,13 +2163,20 @@ app.post('/api/quotas', authenticateToken, async (req, res) => {
     const qt = quotaType || 'formal';
     const am = assignmentMode || 'global';
     const enabled = isEnabled !== false;
-    const vt = voteTarget || 3;
+    const quotaVotes = qt === 'general' ? 0 : getInt(quotaPoolVoteTarget ?? voteTarget, 16);
+    const globalVotes = qt === 'general' ? 0 : getInt(globalPoolVoteTarget, 4);
+    const vt = quotaVotes + globalVotes;
+    const minPool = Math.max(3, getInt(minVotingPoolSize, 15));
+    const votingOn = votingEnabled !== false;
     const tgt = (qt === 'general') ? 0 : (target || 5);
 
     const result = await client.query(
-      `INSERT INTO quotas (name, target_count, vote_target, instructions, due_date, quota_type, assignment_mode, is_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [name, tgt, vt, instructions, dateVal, qt, am, enabled]
+      `INSERT INTO quotas (
+        name, target_count, vote_target, quota_pool_vote_target, global_pool_vote_target,
+        min_voting_pool_size, voting_enabled, instructions, due_date, quota_type, assignment_mode, is_enabled
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      [name, tgt, vt, quotaVotes, globalVotes, minPool, votingOn, instructions, dateVal, qt, am, enabled]
     );
     const row = result.rows[0];
 
@@ -1526,18 +2192,7 @@ app.post('/api/quotas', authenticateToken, async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json({
-      id: row.id,
-      name: row.name,
-      target: row.target_count,
-      voteTarget: row.vote_target,
-      instructions: row.instructions,
-      dueDate: row.due_date ? new Date(row.due_date).getTime() : null,
-      quotaType: row.quota_type,
-      assignmentMode: row.assignment_mode,
-      isEnabled: row.is_enabled,
-      assignedUserIds: ids
-    });
+    res.json({ ...mapQuotaRow(row), assignedUserIds: ids });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
@@ -1550,7 +2205,21 @@ app.post('/api/quotas', authenticateToken, async (req, res) => {
 app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
   const { id } = req.params;
-  const { name, target, voteTarget, instructions, dueDate, quotaType, assignmentMode, isEnabled, assignedUserIds } = req.body;
+  const {
+    name,
+    target,
+    voteTarget,
+    quotaPoolVoteTarget,
+    globalPoolVoteTarget,
+    minVotingPoolSize,
+    votingEnabled,
+    instructions,
+    dueDate,
+    quotaType,
+    assignmentMode,
+    isEnabled,
+    assignedUserIds
+  } = req.body;
 
   const client = await pool.connect();
   try {
@@ -1559,14 +2228,29 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
     const qt = quotaType || 'formal';
     const am = assignmentMode || 'global';
     const enabled = isEnabled !== false;
-    const vt = voteTarget || 3;
+    const quotaVotes = qt === 'general' ? 0 : getInt(quotaPoolVoteTarget ?? voteTarget, 3);
+    const globalVotes = qt === 'general' ? 0 : getInt(globalPoolVoteTarget, 0);
+    const vt = quotaVotes + globalVotes;
+    const minPool = Math.max(3, getInt(minVotingPoolSize, 15));
+    const votingOn = votingEnabled !== false;
     const tgt = (qt === 'general') ? 0 : (target || 5);
 
     const result = await client.query(
-      `UPDATE quotas SET name = $1, target_count = $2, vote_target = $3, instructions = $4, due_date = $5,
-       quota_type = $6, assignment_mode = $7, is_enabled = $8
-       WHERE id = $9 RETURNING *`,
-      [name, tgt, vt, instructions, dateVal, qt, am, enabled, id]
+      `UPDATE quotas
+       SET name = $1,
+           target_count = $2,
+           vote_target = $3,
+           quota_pool_vote_target = $4,
+           global_pool_vote_target = $5,
+           min_voting_pool_size = $6,
+           voting_enabled = $7,
+           instructions = $8,
+           due_date = $9,
+           quota_type = $10,
+           assignment_mode = $11,
+           is_enabled = $12
+       WHERE id = $13 RETURNING *`,
+      [name, tgt, vt, quotaVotes, globalVotes, minPool, votingOn, instructions, dateVal, qt, am, enabled, id]
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -1587,18 +2271,7 @@ app.put('/api/quotas/:id', authenticateToken, async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json({
-      id: row.id,
-      name: row.name,
-      target: row.target_count,
-      voteTarget: row.vote_target,
-      instructions: row.instructions,
-      dueDate: row.due_date ? new Date(row.due_date).getTime() : null,
-      quotaType: row.quota_type,
-      assignmentMode: row.assignment_mode,
-      isEnabled: row.is_enabled,
-      assignedUserIds: ids
-    });
+    res.json({ ...mapQuotaRow(row), assignedUserIds: ids });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode, Notification, NotificationType } from './types';
+import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode, Notification, NotificationType, VoteBucket, VotingQuotaProgress, VotingTriple } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
@@ -60,7 +60,8 @@ import {
   Activity,
   Briefcase,
   Eye,
-  EyeOff
+  EyeOff,
+  Shuffle
 } from 'lucide-react';
 
 // --- STAGGER ANIMATIONS ---
@@ -316,7 +317,7 @@ export default function App() {
 
   // --- Session State ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [view, setView] = useState<'dashboard' | 'pool' | 'submit' | 'admin' | 'composer' | 'waitlist'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'pool' | 'submit' | 'admin' | 'composer' | 'waitlist' | 'voting'>('dashboard');
   const [waitlistTab, setWaitlistTab] = useState<'pending' | 'deleted'>('pending');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -371,12 +372,25 @@ export default function App() {
   // Quota management state
   const [isCreatingQuota, setIsCreatingQuota] = useState(false);
   const [newQuotaForm, setNewQuotaForm] = useState<Partial<Quota> & { assignedUserIds: string[] }>({
-    name: '', target: 5, voteTarget: 3, instructions: '', quotaType: 'formal',
+    name: '', target: 5, voteTarget: 20, quotaPoolVoteTarget: 16, globalPoolVoteTarget: 4,
+    minVotingPoolSize: 15, votingEnabled: true, instructions: '', quotaType: 'formal',
     assignmentMode: 'global', isEnabled: true, assignedUserIds: []
   });
   const [expandedQuotaProgressId, setExpandedQuotaProgressId] = useState<string | null>(null);
   // Which quota is selected for the submission form
   const [selectedSubmissionQuotaId, setSelectedSubmissionQuotaId] = useState<string>('');
+
+  // Guided comparison voting state
+  const [votingQuotas, setVotingQuotas] = useState<VotingQuotaProgress[]>([]);
+  const [votingQuotaId, setVotingQuotaId] = useState<string>('');
+  const [votingTriple, setVotingTriple] = useState<VotingTriple | null>(null);
+  const [votingBucketMode, setVotingBucketMode] = useState<VoteBucket | 'auto'>('auto');
+  const [votingLoading, setVotingLoading] = useState(false);
+  const [votingStartedAt, setVotingStartedAt] = useState<number>(Date.now());
+  const [voteReady, setVoteReady] = useState(false);
+  const [votingDetailsOpen, setVotingDetailsOpen] = useState(false);
+  const [votingExpandedProblemId, setVotingExpandedProblemId] = useState<string | null>(null);
+  const [skipReason, setSkipReason] = useState('already_seen');
   
   // Round Create New State
   const [newRoundName, setNewRoundName] = useState('');
@@ -635,6 +649,28 @@ export default function App() {
     }
   }, [quotas, poolFilterQuota, composerSourceQuota, contributionFilterQuota]);
 
+  useEffect(() => {
+    if ((view === 'voting' || view === 'dashboard') && currentUser && currentUser.role !== 'guest') {
+      loadVotingQuotas();
+    }
+  }, [view, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view === 'voting' && votingQuotaId && !votingTriple && !votingLoading) {
+      loadVotingTriple(votingQuotaId, 'auto');
+    }
+  }, [view, votingQuotaId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!votingTriple || votingTriple.status !== 'ready') {
+      setVoteReady(false);
+      return;
+    }
+    setVoteReady(false);
+    const timer = window.setTimeout(() => setVoteReady(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [votingTriple?.problems?.map(p => p.id).join(':')]);
+
   const isOffWaitlist = (p: Problem) => p.status === 'approved' || p.status === 'accepted';
 
   // Update Users submitted & voted count locally based on ACTIVE QUOTA
@@ -684,7 +720,21 @@ export default function App() {
   }, [composerDetailProblemId]);
 
   // --- Helpers ---
-  const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || { id: 'default', target: 5, voteTarget: 3, name: 'Default', instructions: '', dueDate: null };
+  const getActiveQuota = () => quotas.find(q => q.id === activeQuotaId) || quotas[0] || {
+    id: 'default',
+    target: 5,
+    voteTarget: 20,
+    quotaPoolVoteTarget: 16,
+    globalPoolVoteTarget: 4,
+    minVotingPoolSize: 15,
+    votingEnabled: true,
+    name: 'Default',
+    instructions: '',
+    dueDate: null,
+    quotaType: 'formal' as QuotaType,
+    assignmentMode: 'global' as AssignmentMode,
+    isEnabled: true
+  };
   const getFormatDate = (ts: number | null) => ts ? new Date(ts).toLocaleDateString() : 'No Deadline';
   const getErrorMessage = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
   const canCurrentUserUseQuota = (q: Quota) => {
@@ -869,7 +919,11 @@ export default function App() {
         id: editingQuotaId,
         name: editQuotaForm.name || '',
         target: editQuotaForm.target ?? 5,
-        voteTarget: editQuotaForm.voteTarget ?? 3,
+        voteTarget: (editQuotaForm.quotaPoolVoteTarget ?? editQuotaForm.voteTarget ?? 3) + (editQuotaForm.globalPoolVoteTarget ?? 0),
+        quotaPoolVoteTarget: editQuotaForm.quotaPoolVoteTarget ?? editQuotaForm.voteTarget ?? 3,
+        globalPoolVoteTarget: editQuotaForm.globalPoolVoteTarget ?? 0,
+        minVotingPoolSize: editQuotaForm.minVotingPoolSize ?? 15,
+        votingEnabled: editQuotaForm.votingEnabled !== false,
         instructions: editQuotaForm.instructions || '',
         dueDate: editQuotaForm.dueDate || null,
         quotaType: editQuotaForm.quotaType || 'formal',
@@ -892,7 +946,11 @@ export default function App() {
       await api.createQuota({
         name: newQuotaForm.name,
         target: newQuotaForm.target ?? 5,
-        voteTarget: newQuotaForm.voteTarget ?? 3,
+        voteTarget: (newQuotaForm.quotaPoolVoteTarget ?? 16) + (newQuotaForm.globalPoolVoteTarget ?? 4),
+        quotaPoolVoteTarget: newQuotaForm.quotaPoolVoteTarget ?? 16,
+        globalPoolVoteTarget: newQuotaForm.globalPoolVoteTarget ?? 4,
+        minVotingPoolSize: newQuotaForm.minVotingPoolSize ?? 15,
+        votingEnabled: newQuotaForm.votingEnabled !== false,
         instructions: newQuotaForm.instructions || '',
         dueDate: newQuotaForm.dueDate || null,
         quotaType: newQuotaForm.quotaType || 'formal',
@@ -902,7 +960,7 @@ export default function App() {
       });
       await refreshData();
       setIsCreatingQuota(false);
-      setNewQuotaForm({ name: '', target: 5, voteTarget: 3, instructions: '', quotaType: 'formal', assignmentMode: 'global', isEnabled: true, assignedUserIds: [] });
+      setNewQuotaForm({ name: '', target: 5, voteTarget: 20, quotaPoolVoteTarget: 16, globalPoolVoteTarget: 4, minVotingPoolSize: 15, votingEnabled: true, instructions: '', quotaType: 'formal', assignmentMode: 'global', isEnabled: true, assignedUserIds: [] });
       showToast({ variant: 'success', title: 'Quota created', message: 'The new cycle is ready.' });
     } catch (e) {
       console.error("Failed to create quota", e);
@@ -919,6 +977,87 @@ export default function App() {
       const target = u.customTargets?.[q.id] || q.target;
       return { user: u, submitted, target };
     }).sort((a, b) => b.submitted - a.submitted);
+  };
+
+  const loadVotingQuotas = async () => {
+    if (!currentUser || currentUser.role === 'guest') return;
+    try {
+      const data = await api.getVotingQuotas();
+      setVotingQuotas(data);
+      if (!votingQuotaId && data.length > 0) {
+        setVotingQuotaId(data[0].quota.id);
+      }
+    } catch (e) {
+      console.error('Failed to load voting quotas', e);
+      showToast({ variant: 'error', title: "Couldn't load voting", message: getErrorMessage(e, 'Please try again.') });
+    }
+  };
+
+  const loadVotingTriple = async (quotaId = votingQuotaId, bucket: VoteBucket | 'auto' = votingBucketMode) => {
+    if (!quotaId || !currentUser || currentUser.role === 'guest') return;
+    setVotingLoading(true);
+    setVoteReady(false);
+    setVotingDetailsOpen(false);
+    setVotingExpandedProblemId(null);
+    try {
+      const next = await api.getNextVotingTriple(quotaId, bucket);
+      setVotingTriple(next);
+      setVotingStartedAt(Date.now());
+      setVotingBucketMode(bucket);
+      await loadVotingQuotas();
+    } catch (e) {
+      console.error('Failed to load voting set', e);
+      showToast({ variant: 'error', title: "Couldn't load voting set", message: getErrorMessage(e, 'Please try again.') });
+    } finally {
+      setVotingLoading(false);
+    }
+  };
+
+  const handleSelectVotingQuota = (quotaId: string) => {
+    setVotingQuotaId(quotaId);
+    setVotingBucketMode('auto');
+    loadVotingTriple(quotaId, 'auto');
+  };
+
+  const handleSubmitComparisonVote = async (problemId: string) => {
+    if (!votingTriple || votingTriple.status !== 'ready') return;
+    try {
+      const result = await api.submitComparisonVote({
+        quotaId: votingTriple.quotaId,
+        bucket: votingTriple.bucket,
+        shownProblemIds: votingTriple.problems.map(p => p.id),
+        selectedProblemId: problemId,
+        responseTimeMs: Date.now() - votingStartedAt,
+        detailsOpened: votingDetailsOpen
+      });
+      showToast({
+        variant: result.lowConfidence ? 'warning' : 'success',
+        title: result.optional ? 'Optional choice recorded' : 'Choice recorded',
+        message: result.lowConfidence ? 'This very fast review was marked low-confidence.' : 'Next comparison is ready.'
+      });
+      await loadVotingQuotas();
+      await loadVotingTriple(votingTriple.quotaId, 'auto');
+    } catch (e) {
+      showToast({ variant: 'error', title: "Couldn't record choice", message: getErrorMessage(e, 'Please try again.') });
+    }
+  };
+
+  const handleSkipComparison = async () => {
+    if (!votingTriple || votingTriple.status !== 'ready') return;
+    try {
+      await api.skipComparisonSet({
+        quotaId: votingTriple.quotaId,
+        bucket: votingTriple.bucket,
+        shownProblemIds: votingTriple.problems.map(p => p.id),
+        reason: skipReason,
+        responseTimeMs: Date.now() - votingStartedAt,
+        detailsOpened: votingDetailsOpen
+      });
+      showToast({ variant: 'info', title: 'Set skipped', message: 'Skip did not count toward your quota.' });
+      await loadVotingTriple(votingTriple.quotaId, votingBucketMode);
+    } catch (e) {
+      showToast({ variant: 'error', title: "Couldn't skip set", message: getErrorMessage(e, 'Please try again.') });
+    }
   };
 
   const switchQuota = (id: string) => {
@@ -3112,6 +3251,12 @@ tex += `\\end{longtable}
   ]
     .filter(p => contributionFilterQuota === 'All' || p.quotaId === contributionFilterQuota)
     .sort((a, b) => b.createdAt - a.createdAt);
+  const selectedVotingProgress = votingQuotas.find(v => v.quota.id === votingQuotaId) || votingTriple?.progress || null;
+  const selectedVotingQuota = selectedVotingProgress?.quota || null;
+  const activeVotingProgress = votingTriple?.progress || selectedVotingProgress;
+  const currentVoteBucket = votingTriple?.bucket || (votingBucketMode === 'auto' ? 'quota_pool' : votingBucketMode);
+  const formatVoteBucket = (bucket: VoteBucket) => bucket === 'quota_pool' ? 'Quota pool' : 'Global pool';
+  const getProblemSourceName = (problem: Problem) => quotas.find(q => q.id === problem.quotaId)?.name || (problem.quotaId ? 'Previous quota' : 'General submission');
 
   return (
     <div className="h-screen overflow-hidden bg-[#F8F9FA] text-slate-900 flex font-sans selection:bg-indigo-100 selection:text-indigo-900">
@@ -3153,6 +3298,15 @@ tex += `\\end{longtable}
                 label="Problem Pool"
                 active={view === 'pool'}
                 onClick={() => setView('pool')}
+            />
+          )}
+
+          {!isGuest && (
+            <NavItem
+                icon={<Shuffle />}
+                label="Voting"
+                active={view === 'voting'}
+                onClick={() => setView('voting')}
             />
           )}
 
@@ -3328,8 +3482,10 @@ tex += `\\end{longtable}
                        const myCount = problems.filter(p => p.authorId === currentUser.id && p.quotaId === q.id && isOffWaitlist(p)).length;
                        const myTarget = currentUser.customTargets?.[q.id] || q.target;
                        const pct = myTarget > 0 ? Math.min((myCount / myTarget) * 100, 100) : 0;
-                       const myVotes = problems.filter(p => p.quotaId === q.id && p.authorId !== currentUser.id && p.votedBy?.includes(currentUser.id)).length;
-                       const votePct = q.voteTarget > 0 ? Math.min((myVotes / q.voteTarget) * 100, 100) : 0;
+                       const votingProgress = votingQuotas.find(v => v.quota.id === q.id);
+                       const myVotes = votingProgress?.totalCompleted ?? problems.filter(p => p.quotaId === q.id && p.authorId !== currentUser.id && p.votedBy?.includes(currentUser.id)).length;
+                       const myVoteTarget = votingProgress?.totalRequired ?? q.voteTarget;
+                       const votePct = myVoteTarget > 0 ? Math.min((myVotes / myVoteTarget) * 100, 100) : 0;
                        const isActive = activeQuotaId === q.id;
                        let statusLabel = 'Not started';
                        let statusCls = 'text-slate-400 bg-slate-50 border-slate-200';
@@ -3361,10 +3517,10 @@ tex += `\\end{longtable}
                                  <div className={`h-full rounded-full transition-all duration-500 ${myTarget > 0 && myCount >= myTarget ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} />
                                </div>
                              </div>
-                             {q.voteTarget > 0 && (
+                             {myVoteTarget > 0 && (
                                <div>
                                  <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase mb-1">
-                                   <span>Votes</span><span>{myVotes} / {q.voteTarget}</span>
+                                   <span>Votes</span><span>{myVotes} / {myVoteTarget}</span>
                                  </div>
                                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                                    <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${votePct}%` }} />
@@ -3526,6 +3682,230 @@ tex += `\\end{longtable}
                     </AnimatePresence>
                  </div>
              </div>
+          </motion.div>
+        )}
+
+        {/* VIEW: GUIDED VOTING */}
+        {view === 'voting' && !isGuest && (
+          <motion.div variants={containerVar} initial="hidden" animate="show" className="max-w-7xl mx-auto space-y-5 pb-10">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Voting</h1>
+                <p className="text-sm text-slate-500 mt-1">Pick the strongest problem from each set of three. Author names are hidden here.</p>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => loadVotingQuotas()} className="gap-2">
+                <RotateCcw className="w-3.5 h-3.5" /> Refresh
+              </Button>
+            </div>
+
+            <div className="grid lg:grid-cols-[320px_1fr] gap-5">
+              <motion.aside variants={itemVar} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+                <div className="p-4 border-b border-slate-100">
+                  <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wide">Choose quota</h2>
+                </div>
+                {votingQuotas.length === 0 ? (
+                  <div className="p-6 text-sm text-slate-400">You have no active voting quotas.</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {votingQuotas.map(item => {
+                      const q = item.quota;
+                      const active = q.id === votingQuotaId;
+                      const writingPct = item.writingRequired > 0 ? Math.min((item.writingCompleted / item.writingRequired) * 100, 100) : 100;
+                      const votePct = item.totalRequired > 0 ? Math.min((item.totalCompleted / item.totalRequired) * 100, 100) : 100;
+                      return (
+                        <button
+                          key={q.id}
+                          onClick={() => handleSelectVotingQuota(q.id)}
+                          className={`w-full text-left p-4 transition-colors ${active ? 'bg-indigo-50/80' : 'bg-white hover:bg-slate-50'}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-sm text-slate-900 truncate">{q.name}</span>
+                            {item.isComplete && <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />}
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            <div>
+                              <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                <span>Writing</span><span>{item.writingCompleted} / {item.writingRequired}</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{ width: `${writingPct}%` }} /></div>
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                <span>Voting</span><span>{item.totalCompleted} / {item.totalRequired}</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${votePct}%` }} /></div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </motion.aside>
+
+              <motion.section variants={itemVar} className="space-y-5">
+                {!selectedVotingQuota ? (
+                  <div className="bg-white rounded-xl border border-dashed border-slate-200 p-10 text-center text-slate-400">
+                    Select a quota to begin guided comparison voting.
+                  </div>
+                ) : (
+                  <>
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <h2 className="text-xl font-bold text-slate-900">{selectedVotingQuota.name} Voting</h2>
+                          <p className="text-xs text-slate-500 mt-1">Next vote type: <span className="font-bold text-slate-700">{formatVoteBucket(currentVoteBucket as VoteBucket)}</span></p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {(['auto', 'quota_pool', 'global_pool'] as const).map(mode => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => { setVotingBucketMode(mode); loadVotingTriple(selectedVotingQuota.id, mode); }}
+                              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${votingBucketMode === mode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                            >
+                              {mode === 'auto' ? 'Next needed' : formatVoteBucket(mode)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {activeVotingProgress && (
+                        <div className="grid sm:grid-cols-3 gap-3 mt-5">
+                          {[
+                            ['Quota pool', activeVotingProgress.quotaPool.completed, activeVotingProgress.quotaPool.required, 'bg-indigo-500'],
+                            ['Global pool', activeVotingProgress.globalPool.completed, activeVotingProgress.globalPool.required, 'bg-emerald-500'],
+                            ['Total votes', activeVotingProgress.totalCompleted, activeVotingProgress.totalRequired, 'bg-slate-800']
+                          ].map(([label, done, required, bar]) => {
+                            const pct = Number(required) > 0 ? Math.min((Number(done) / Number(required)) * 100, 100) : 100;
+                            return (
+                              <div key={label as string} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                                <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-2">
+                                  <span>{label}</span><span>{done} / {required}</span>
+                                </div>
+                                <div className="h-1.5 bg-white rounded-full overflow-hidden"><div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} /></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {activeVotingProgress?.isComplete && (
+                        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 font-medium">
+                          Quota complete. You can keep reviewing; extra choices are optional but still improve rankings.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="font-bold text-slate-900">Pick the strongest problem for this round</h3>
+                          <p className="text-xs text-slate-500 mt-1">Triple source: {formatVoteBucket(currentVoteBucket as VoteBucket)}. Skip does not count toward quota.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={skipReason}
+                            onChange={e => setSkipReason(e.target.value)}
+                            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 outline-none"
+                          >
+                            <option value="already_seen">Already seen</option>
+                            <option value="all_unsuitable">All unsuitable</option>
+                            <option value="unclear_statements">Unclear statements</option>
+                            <option value="too_hard_to_compare">Too hard to compare</option>
+                            <option value="other">Other</option>
+                          </select>
+                          <Button size="sm" variant="ghost" onClick={handleSkipComparison} disabled={!votingTriple || votingTriple.status !== 'ready' || votingLoading}>Skip set</Button>
+                          <Button size="sm" variant="secondary" onClick={() => loadVotingTriple(selectedVotingQuota.id, votingBucketMode)} disabled={votingLoading}>
+                            {votingLoading ? 'Loading...' : 'New set'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {votingLoading ? (
+                        <div className="py-16 text-center text-sm text-slate-400">Loading comparison set...</div>
+                      ) : votingTriple?.status === 'blocked' || votingTriple?.status === 'complete' ? (
+                        <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+                          <AlertCircle className="w-7 h-7 mx-auto text-slate-300 mb-3" />
+                          <p className="text-sm font-semibold text-slate-700">{votingTriple.message || 'No comparison set is available right now.'}</p>
+                          {typeof votingTriple.eligibleCount === 'number' && typeof votingTriple.minEligible === 'number' && (
+                            <p className="text-xs text-slate-400 mt-1">Eligible pool: {votingTriple.eligibleCount} / {votingTriple.minEligible}</p>
+                          )}
+                        </div>
+                      ) : votingTriple?.status === 'ready' ? (
+                        <>
+                          {!voteReady && (
+                            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+                              Review the set briefly. Vote buttons unlock after 3 seconds.
+                            </div>
+                          )}
+                          <div className="grid xl:grid-cols-3 gap-4">
+                            {votingTriple.problems.map(problem => {
+                              const expanded = votingExpandedProblemId === problem.id;
+                              return (
+                                <article key={problem.id} className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col min-h-[360px]">
+                                  <div className="p-4 border-b border-slate-100">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <h4 className="font-bold text-slate-900 text-sm leading-snug line-clamp-2">
+                                        <MathText text={problem.title} />
+                                      </h4>
+                                      <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 shrink-0">D {Number(problem.difficulty || 0).toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[10px] text-slate-500">
+                                      {(problem.topics || []).map(t => <span key={t} className="rounded bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 py-0.5 font-bold">{t}</span>)}
+                                      <span className="rounded bg-slate-50 border border-slate-200 px-1.5 py-0.5">{getProblemSourceName(problem)}</span>
+                                      <span className="rounded bg-slate-50 border border-slate-200 px-1.5 py-0.5">{problem.commentCount || 0} comments</span>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 flex-1 overflow-hidden">
+                                    <MathText text={problem.statement} className={`${expanded ? '' : 'line-clamp-[12]'} text-sm leading-relaxed text-slate-800 font-serif whitespace-pre-wrap`} />
+                                    {expanded && (
+                                      <div className="mt-4 grid gap-3">
+                                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Answer</p>
+                                          <MathText text={problem.answerKey || 'No answer provided.'} className="text-xs text-slate-700 whitespace-pre-wrap" />
+                                        </div>
+                                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Solution Outline</p>
+                                          <MathText text={problem.solution || 'No solution provided.'} className="text-xs text-slate-700 whitespace-pre-wrap" />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="p-4 border-t border-slate-100 flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      onClick={() => {
+                                        setVotingDetailsOpen(true);
+                                        setVotingExpandedProblemId(expanded ? null : problem.id);
+                                      }}
+                                      className="flex-1"
+                                    >
+                                      {expanded ? 'Hide details' : 'Details'}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleSubmitComparisonVote(problem.id)}
+                                      disabled={!voteReady || votingLoading}
+                                      className="flex-1"
+                                    >
+                                      Choose this problem
+                                    </Button>
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="py-16 text-center text-sm text-slate-400">Choose a quota to load a voting set.</div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </motion.section>
+            </div>
           </motion.div>
         )}
 
@@ -4565,18 +4945,30 @@ tex += `\\end{longtable}
                        )}
                        <div className="flex gap-3">
                          <div>
-                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Problems Required</label>
                            <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.target ?? 5} onChange={e => setNewQuotaForm({...newQuotaForm, target: parseInt(e.target.value)})} />
                          </div>
                          <div>
-                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
-                           <input type="number" min="0" className="w-16 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.voteTarget ?? 3} onChange={e => setNewQuotaForm({...newQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Quota Pool Votes</label>
+                           <input type="number" min="0" className="w-20 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.quotaPoolVoteTarget ?? 16} onChange={e => setNewQuotaForm({...newQuotaForm, quotaPoolVoteTarget: parseInt(e.target.value)})} />
+                         </div>
+                         <div>
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Global Pool Votes</label>
+                           <input type="number" min="0" className="w-20 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.globalPoolVoteTarget ?? 4} onChange={e => setNewQuotaForm({...newQuotaForm, globalPoolVoteTarget: parseInt(e.target.value)})} />
+                         </div>
+                         <div>
+                           <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Min Pool</label>
+                           <input type="number" min="3" className="w-20 p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none text-center font-mono" value={newQuotaForm.minVotingPoolSize ?? 15} onChange={e => setNewQuotaForm({...newQuotaForm, minVotingPoolSize: parseInt(e.target.value)})} />
                          </div>
                          <div className="flex-1">
                            <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
                            <input type="date" className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white outline-none" value={newQuotaForm.dueDate ? new Date(newQuotaForm.dueDate).toISOString().split('T')[0] : ''} onChange={e => setNewQuotaForm({...newQuotaForm, dueDate: e.target.valueAsNumber || null})} />
                          </div>
                        </div>
+                       <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                         <input type="checkbox" checked={newQuotaForm.votingEnabled !== false} onChange={e => setNewQuotaForm({...newQuotaForm, votingEnabled: e.target.checked})} className="accent-indigo-600" />
+                         Voting enabled for this quota
+                       </label>
                      </>
                    )}
                    <div className="flex justify-end gap-2 pt-1">
@@ -4650,18 +5042,30 @@ tex += `\\end{longtable}
                                )}
                                <div className="flex gap-3">
                                  <div>
-                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sub Target</label>
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Problems Required</label>
                                    <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.target ?? 5} onChange={e => setEditQuotaForm({...editQuotaForm, target: parseInt(e.target.value)})} />
                                  </div>
                                  <div>
-                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Vote Target</label>
-                                   <input type="number" min="0" className="w-16 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.voteTarget ?? 3} onChange={e => setEditQuotaForm({...editQuotaForm, voteTarget: parseInt(e.target.value)})} />
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Quota Pool Votes</label>
+                                   <input type="number" min="0" className="w-20 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.quotaPoolVoteTarget ?? editQuotaForm.voteTarget ?? 3} onChange={e => setEditQuotaForm({...editQuotaForm, quotaPoolVoteTarget: parseInt(e.target.value)})} />
+                                 </div>
+                                 <div>
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Global Pool Votes</label>
+                                   <input type="number" min="0" className="w-20 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.globalPoolVoteTarget ?? 0} onChange={e => setEditQuotaForm({...editQuotaForm, globalPoolVoteTarget: parseInt(e.target.value)})} />
+                                 </div>
+                                 <div>
+                                   <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Min Pool</label>
+                                   <input type="number" min="3" className="w-20 p-2 border border-indigo-200 rounded text-sm bg-white outline-none text-center font-mono" value={editQuotaForm.minVotingPoolSize ?? 15} onChange={e => setEditQuotaForm({...editQuotaForm, minVotingPoolSize: parseInt(e.target.value)})} />
                                  </div>
                                  <div className="flex-1">
                                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Due Date</label>
                                    <input type="date" className="w-full p-2 border border-indigo-200 rounded text-sm bg-white outline-none" value={editQuotaForm.dueDate ? new Date(editQuotaForm.dueDate).toISOString().split('T')[0] : ''} onChange={e => setEditQuotaForm({...editQuotaForm, dueDate: e.target.valueAsNumber || null})} />
                                  </div>
                                </div>
+                               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                                 <input type="checkbox" checked={editQuotaForm.votingEnabled !== false} onChange={e => setEditQuotaForm({...editQuotaForm, votingEnabled: e.target.checked})} className="accent-indigo-600" />
+                                 Voting enabled for this quota
+                               </label>
                              </>
                            )}
                            <div className="flex justify-end gap-2">
@@ -4688,7 +5092,7 @@ tex += `\\end{longtable}
                                )}
                              </div>
                              <div className="text-[10px] text-slate-400 mt-0.5 flex gap-3">
-                               {q.quotaType === 'formal' && <span>Target: {q.target} • Votes: {q.voteTarget}</span>}
+                               {q.quotaType === 'formal' && <span>Problems: {q.target} - Quota votes: {q.quotaPoolVoteTarget ?? q.voteTarget} - Global votes: {q.globalPoolVoteTarget ?? 0}</span>}
                                <span>{totalSubmitted} submissions</span>
                                {q.assignmentMode !== 'global' && <span>{totalAssigned} assigned</span>}
                                {q.dueDate && <span className="text-amber-600">Due {getFormatDate(q.dueDate)}</span>}

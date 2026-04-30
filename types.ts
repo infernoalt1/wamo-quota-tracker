@@ -1,5 +1,6 @@
 export type QuotaType = 'formal' | 'general';
 export type AssignmentMode = 'global' | 'selected';
+export type VoteBucket = 'quota_pool' | 'global_pool';
 
 export interface ProblemValidation {
   isAcceptable: boolean;
@@ -30,12 +31,46 @@ export interface Quota {
   name: string;
   target: number;
   voteTarget: number;
+  quotaPoolVoteTarget: number;
+  globalPoolVoteTarget: number;
+  minVotingPoolSize: number;
+  votingEnabled: boolean;
   instructions: string;
   dueDate: number | null;
   quotaType: QuotaType;
   assignmentMode: AssignmentMode;
   isEnabled: boolean;
   assignedUserIds?: string[];
+}
+
+export interface VotingBucketProgress {
+  completed: number;
+  rawCompleted: number;
+  required: number;
+}
+
+export interface VotingQuotaProgress {
+  quota: Quota;
+  writingCompleted: number;
+  writingRequired: number;
+  quotaPool: VotingBucketProgress;
+  globalPool: VotingBucketProgress;
+  totalCompleted: number;
+  totalRawCompleted: number;
+  totalRequired: number;
+  isComplete: boolean;
+}
+
+export interface VotingTriple {
+  status: 'ready' | 'blocked' | 'complete';
+  quotaId: string;
+  bucket: VoteBucket;
+  nextBucket: VoteBucket;
+  problems: Problem[];
+  progress: VotingQuotaProgress;
+  eligibleCount?: number;
+  minEligible?: number;
+  message?: string;
 }
 
 export interface QuotaUserProgress {
@@ -81,6 +116,9 @@ export interface Problem {
   roundOrderIndexes?: Record<string, number>;
   version: number;
   commentCount?: number;
+  comparisonAppearances?: number;
+  comparisonWins?: number;
+  comparisonLosses?: number;
   deletedAt?: number | null;
   deletedBy?: string | null;
   deletedByName?: string | null;

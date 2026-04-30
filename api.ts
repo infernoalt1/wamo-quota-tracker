@@ -1,5 +1,5 @@
 
-import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment, Notification } from './types';
+import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment, Notification, VoteBucket, VotingQuotaProgress, VotingTriple } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -7,7 +7,7 @@ const USE_MOCK_BACKEND = false;
 // Prefer an explicit API URL when the frontend and backend are deployed separately.
 // Otherwise, keep the existing local-dev and same-origin production behavior.
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/+$/, '');
-const isLocalDev = window.location.hostname === 'localhost' && window.location.port === '5173';
+const isLocalDev = ['localhost', '127.0.0.1'].includes(window.location.hostname) && window.location.port === '5173';
 const API_BASE_URL = configuredApiUrl || (isLocalDev ? 'http://localhost:3000' : '');
 
 const ROUND_TARGET_CACHE_KEY = 'probfair_round_target_sizes';
@@ -32,6 +32,19 @@ const rememberRoundTargetSize = (roundId: string | undefined, targetSize: number
   const cache = readRoundTargetCache();
   cache[roundId] = getSafeRoundSize(targetSize);
   localStorage.setItem(ROUND_TARGET_CACHE_KEY, JSON.stringify(cache));
+};
+
+const readApiError = async (res: Response, fallback: string) => {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await res.json().catch(() => null);
+    return data?.error || data?.rejectionReason || fallback;
+  }
+  const text = await res.text().catch(() => '');
+  if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+    return `${fallback}. The API returned HTML instead of JSON; check that the backend server is running and the frontend is using the correct API URL.`;
+  }
+  return text || fallback;
 };
 
 const normalizeRound = (round: any, fallbackTargetSize = 10): Round => {
@@ -278,6 +291,63 @@ export const api = {
       const data = await res.json().catch(() => null);
       throw new Error(data?.error || 'Vote failed');
     }
+  },
+
+  getVotingQuotas: async (): Promise<VotingQuotaProgress[]> => {
+    if (USE_MOCK_BACKEND) return [];
+    const res = await fetch(`${API_BASE_URL}/api/voting/quotas`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error(await readApiError(res, 'Failed to fetch voting quotas'));
+    return res.json();
+  },
+
+  getNextVotingTriple: async (quotaId: string, bucket: VoteBucket | 'auto' = 'auto'): Promise<VotingTriple> => {
+    if (USE_MOCK_BACKEND) throw new Error('Mock voting is not implemented');
+    const params = new URLSearchParams({ quotaId, bucket });
+    const res = await fetch(`${API_BASE_URL}/api/voting/next?${params.toString()}`, { headers: getAuthHeader() });
+    if (!res.ok) {
+      throw new Error(await readApiError(res, 'Failed to fetch voting set'));
+    }
+    return res.json();
+  },
+
+  submitComparisonVote: async (payload: {
+    quotaId: string;
+    bucket: VoteBucket;
+    shownProblemIds: string[];
+    selectedProblemId: string;
+    responseTimeMs?: number;
+    detailsOpened?: boolean;
+  }): Promise<{ success: boolean; progress: VotingQuotaProgress; optional: boolean; lowConfidence: boolean }> => {
+    if (USE_MOCK_BACKEND) throw new Error('Mock voting is not implemented');
+    const res = await fetch(`${API_BASE_URL}/api/voting/submit`, {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      throw new Error(await readApiError(res, 'Failed to submit comparison vote'));
+    }
+    return res.json();
+  },
+
+  skipComparisonSet: async (payload: {
+    quotaId: string;
+    bucket: VoteBucket;
+    shownProblemIds: string[];
+    reason?: string;
+    responseTimeMs?: number;
+    detailsOpened?: boolean;
+  }): Promise<{ success: boolean; progress: VotingQuotaProgress }> => {
+    if (USE_MOCK_BACKEND) throw new Error('Mock voting is not implemented');
+    const res = await fetch(`${API_BASE_URL}/api/voting/skip`, {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      throw new Error(await readApiError(res, 'Failed to skip comparison set'));
+    }
+    return res.json();
   },
 
   resetVotes: async (): Promise<void> => {
