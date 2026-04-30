@@ -83,6 +83,7 @@ const initDB = async () => {
         tag TEXT,
         description TEXT,
         target_size INTEGER DEFAULT 10,
+        finalized BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -206,6 +207,7 @@ const initDB = async () => {
       
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS tag TEXT;
       ALTER TABLE rounds ADD COLUMN IF NOT EXISTS target_size INTEGER DEFAULT 10;
+      ALTER TABLE rounds ADD COLUMN IF NOT EXISTS finalized BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS vote_target INTEGER DEFAULT 3;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS quota_pool_vote_target INTEGER;
       ALTER TABLE quotas ADD COLUMN IF NOT EXISTS global_pool_vote_target INTEGER;
@@ -265,6 +267,24 @@ const initDB = async () => {
           voting_enabled = FALSE
       WHERE quota_type = 'general';
 
+      UPDATE comparison_vote_items
+      SET wins_awarded = 1
+      WHERE was_selected = TRUE AND wins_awarded > 1;
+
+      UPDATE problems p
+      SET comparison_appearances = COALESCE(stats.appearances, 0),
+          comparison_wins = COALESCE(stats.wins, 0),
+          comparison_losses = COALESCE(stats.losses, 0)
+      FROM (
+        SELECT problem_id,
+               COUNT(*)::int AS appearances,
+               SUM(wins_awarded)::int AS wins,
+               SUM(losses_awarded)::int AS losses
+        FROM comparison_vote_items
+        GROUP BY problem_id
+      ) stats
+      WHERE p.id = stats.problem_id;
+
       UPDATE votes v
       SET invalid_reason = 'self_vote',
           invalidated_at = COALESCE(v.invalidated_at, CURRENT_TIMESTAMP)
@@ -280,7 +300,7 @@ const initDB = async () => {
         WHERE v.problem_id = p.id
           AND v.invalid_reason IS NULL
           AND v.user_id IS DISTINCT FROM p.author_id
-      ), 0);
+      ), 0) + COALESCE(p.comparison_wins, 0);
     `);
 
     // --- MIGRATION: Notifications table (for existing databases) ---
@@ -615,6 +635,45 @@ async function getVotingProgress(client, quotaRow, userId) {
   };
 }
 
+async function getVotingProgressForUsers(client, quotaRow, users) {
+  const q = mapQuotaRow(quotaRow);
+  if (users.length === 0) return [];
+  const userIds = users.map(u => u.id);
+  const voteCounts = await client.query(
+    `SELECT voter_id, vote_bucket, COUNT(*)::int AS count
+     FROM comparison_votes
+     WHERE quota_id = $1
+       AND voter_id = ANY($2::uuid[])
+       AND is_valid = TRUE
+       AND is_skipped = FALSE
+     GROUP BY voter_id, vote_bucket`,
+    [q.id, userIds]
+  );
+  const countsByUser = new Map();
+  for (const userId of userIds) countsByUser.set(userId, { quota_pool: 0, global_pool: 0 });
+  for (const row of voteCounts.rows) {
+    const counts = countsByUser.get(row.voter_id) || { quota_pool: 0, global_pool: 0 };
+    counts[row.vote_bucket] = parseInt(row.count || '0', 10);
+    countsByUser.set(row.voter_id, counts);
+  }
+  return users.map(user => {
+    const counts = countsByUser.get(user.id) || { quota_pool: 0, global_pool: 0 };
+    const quotaDone = Math.min(counts.quota_pool, q.quotaPoolVoteTarget);
+    const globalDone = Math.min(counts.global_pool, q.globalPoolVoteTarget);
+    return {
+      userId: user.id,
+      quotaId: q.id,
+      quotaPoolCompleted: quotaDone,
+      quotaPoolRequired: q.quotaPoolVoteTarget,
+      globalPoolCompleted: globalDone,
+      globalPoolRequired: q.globalPoolVoteTarget,
+      totalCompleted: quotaDone + globalDone,
+      totalRequired: q.voteTarget,
+      isComplete: counts.quota_pool >= q.quotaPoolVoteTarget && counts.global_pool >= q.globalPoolVoteTarget
+    };
+  });
+}
+
 function chooseNextBucket(progress, requestedBucket) {
   if (VALID_VOTE_BUCKETS.has(requestedBucket)) return requestedBucket;
   const quotaReq = progress.quotaPool.required;
@@ -632,13 +691,23 @@ function chooseNextBucket(progress, requestedBucket) {
 async function getEligibleProblemCount(client, quotaId, userId, bucket) {
   const params = [userId, quotaId];
   const quotaFilter = bucket === 'quota_pool' ? 'p.quota_id = $2' : 'p.quota_id IS DISTINCT FROM $2';
+  const finalizedRoundFilter = bucket === 'global_pool'
+    ? `AND NOT EXISTS (
+         SELECT 1
+         FROM problem_rounds pr
+         JOIN rounds r ON r.id = pr.round_id
+         WHERE pr.problem_id = p.id
+           AND r.finalized = TRUE
+       )`
+    : '';
   const result = await client.query(
     `SELECT COUNT(*)::int AS count
      FROM problems p
      WHERE p.deleted_at IS NULL
        AND p.status IN ('approved', 'accepted')
        AND p.author_id IS DISTINCT FROM $1
-       AND ${quotaFilter}`,
+       AND ${quotaFilter}
+       ${finalizedRoundFilter}`,
     params
   );
   return parseInt(result.rows[0]?.count || '0', 10);
@@ -646,6 +715,15 @@ async function getEligibleProblemCount(client, quotaId, userId, bucket) {
 
 async function getCandidateProblems(client, quotaId, userId, bucket) {
   const quotaFilter = bucket === 'quota_pool' ? 'p.quota_id = $2' : 'p.quota_id IS DISTINCT FROM $2';
+  const finalizedRoundFilter = bucket === 'global_pool'
+    ? `AND NOT EXISTS (
+         SELECT 1
+         FROM problem_rounds pr
+         JOIN rounds r ON r.id = pr.round_id
+         WHERE pr.problem_id = p.id
+           AND r.finalized = TRUE
+       )`
+    : '';
   const result = await client.query(
     `SELECT p.*, q.name as source_name, u.name as author_name,
         (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
@@ -658,6 +736,7 @@ async function getCandidateProblems(client, quotaId, userId, bucket) {
        AND p.status IN ('approved', 'accepted')
        AND p.author_id IS DISTINCT FROM $1
        AND ${quotaFilter}
+       ${finalizedRoundFilter}
      GROUP BY p.id, q.name, u.name
      ORDER BY voting_appearances ASC, p.comparison_appearances ASC, random()
      LIMIT 24`,
@@ -694,11 +773,11 @@ function pickTriple(candidates, seenKeys) {
     if (triple.length < 3) {
       triple.push(...shuffled.filter(c => !triple.some(t => t.id === c.id)).slice(0, 3 - triple.length));
     }
-    if (triple.length === 3 && !seenKeys.has(getShownKey(triple.map(p => p.id)))) {
+    if (triple.length === 3 && new Set(triple.map(p => p.id)).size === 3 && !seenKeys.has(getShownKey(triple.map(p => p.id)))) {
       return triple.sort(() => Math.random() - 0.5);
     }
   }
-  return pool.slice(0, 3).sort(() => Math.random() - 0.5);
+  return [...new Map(pool.map(p => [p.id, p])).values()].slice(0, 3).sort(() => Math.random() - 0.5);
 }
 
 async function validateVotingProblemSet(client, { quotaId, userId, bucket, shownProblemIds, selectedProblemId, requireSelected }) {
@@ -929,7 +1008,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
             WHERE votes.problem_id = problems.id
               AND votes.invalid_reason IS NULL
               AND votes.user_id IS DISTINCT FROM problems.author_id
-          )
+          ) + COALESCE(problems.comparison_wins, 0)
           WHERE id IN (SELECT problem_id FROM votes WHERE user_id = $1)
         `, [id]);
     }
@@ -993,7 +1072,7 @@ app.get('/api/problems', authenticateToken, async (req, res) => {
         WHERE v.problem_id = p.id
           AND v.invalid_reason IS NULL
           AND v.user_id IS DISTINCT FROM p.author_id
-      ), 0) as valid_score,
+      ), 0) + COALESCE(p.comparison_wins, 0) as valid_score,
       (SELECT array_agg(v.user_id) FROM votes v WHERE v.problem_id = p.id AND v.invalid_reason IS NULL AND v.user_id IS DISTINCT FROM p.author_id) as voted_by,
       (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
       (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
@@ -1053,7 +1132,7 @@ app.get('/api/problems/deleted', authenticateToken, async (req, res) => {
           WHERE v.problem_id = p.id
             AND v.invalid_reason IS NULL
             AND v.user_id IS DISTINCT FROM p.author_id
-        ), 0) as valid_score,
+        ), 0) + COALESCE(p.comparison_wins, 0) as valid_score,
         (SELECT array_agg(v.user_id) FROM votes v WHERE v.problem_id = p.id AND v.invalid_reason IS NULL AND v.user_id IS DISTINCT FROM p.author_id) as voted_by,
         (SELECT COUNT(*) FROM comments WHERE problem_id = p.id) as comment_count,
         (SELECT array_agg(round_id) FROM problem_rounds WHERE problem_id = p.id) as round_ids,
@@ -1623,6 +1702,7 @@ app.post('/api/rounds/reorder', authenticateToken, async (req, res) => {
 
 app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
   if (req.user.role === 'guest') return res.sendStatus(403);
+  return res.status(410).json({ error: 'Direct upvoting is disabled. Please use the Voting tab.' });
 
   const client = await pool.connect();
   try {
@@ -1650,7 +1730,7 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
            WHERE v.problem_id = p.id
              AND v.invalid_reason IS NULL
              AND v.user_id IS DISTINCT FROM p.author_id
-         ), 0)
+         ), 0) + COALESCE(p.comparison_wins, 0)
          WHERE p.id = $1`,
         [id]
       );
@@ -1684,7 +1764,7 @@ app.post('/api/problems/:id/vote', authenticateToken, async (req, res) => {
          WHERE v.problem_id = p.id
            AND v.invalid_reason IS NULL
            AND v.user_id IS DISTINCT FROM p.author_id
-       ), 0)
+       ), 0) + COALESCE(p.comparison_wins, 0)
        WHERE p.id = $1`,
       [id]
     );
@@ -1843,6 +1923,40 @@ app.get('/api/voting/quotas', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/voting/admin-progress', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'director') return res.sendStatus(403);
+  const client = await pool.connect();
+  try {
+    const [quotaResult, userResult] = await Promise.all([
+      client.query(`
+        SELECT q.*,
+          array_agg(qa.user_id) FILTER (WHERE qa.user_id IS NOT NULL) as assigned_user_ids
+        FROM quotas q
+        LEFT JOIN quota_assignments qa ON qa.quota_id = q.id
+        WHERE q.is_enabled = TRUE AND q.quota_type = 'formal'
+        GROUP BY q.id
+        ORDER BY q.created_at DESC
+      `),
+      client.query(`SELECT id, name, role FROM users WHERE role != 'guest' ORDER BY name`)
+    ]);
+
+    const users = userResult.rows;
+    const byQuota = {};
+    for (const quota of quotaResult.rows) {
+      const eligibleUsers = (quota.assignment_mode || 'global') === 'global'
+        ? users
+        : users.filter(u => (quota.assigned_user_ids || []).includes(u.id));
+      byQuota[quota.id] = await getVotingProgressForUsers(client, quota, eligibleUsers);
+    }
+    res.json(byQuota);
+  } catch (err) {
+    console.error('Failed to fetch admin voting progress:', err);
+    res.status(500).json({ error: 'Failed to fetch admin voting progress' });
+  } finally {
+    client.release();
+  }
+});
+
 app.get('/api/voting/next', authenticateToken, async (req, res) => {
   if (req.user.role === 'guest') return res.sendStatus(403);
   const { quotaId, bucket = 'auto' } = req.query;
@@ -1920,6 +2034,19 @@ app.get('/api/voting/next', authenticateToken, async (req, res) => {
 
     const seenKeys = await recentShownKeys(client, quotaId, req.user.id, selectedBucket);
     const triple = pickTriple(candidates, seenKeys);
+    if (triple.length !== 3 || new Set(triple.map(p => p.id)).size !== 3) {
+      return res.json({
+        status: 'blocked',
+        quotaId,
+        bucket: selectedBucket,
+        nextBucket: selectedBucket,
+        problems: [],
+        progress,
+        eligibleCount,
+        minEligible: 3,
+        message: 'Not enough distinct eligible problems to show a comparison.'
+      });
+    }
     res.json({
       status: 'ready',
       quotaId,
@@ -2011,15 +2138,16 @@ app.post('/api/voting/submit', authenticateToken, async (req, res) => {
       await client.query(
         `INSERT INTO comparison_vote_items (vote_id, problem_id, was_selected, wins_awarded, losses_awarded)
          VALUES ($1, $2, $3, $4, $5)`,
-        [vote.rows[0].id, problemId, selected, selected ? 2 : 0, selected ? 0 : 1]
+        [vote.rows[0].id, problemId, selected, selected ? 1 : 0, selected ? 0 : 1]
       );
       await client.query(
         `UPDATE problems
          SET comparison_appearances = comparison_appearances + 1,
              comparison_wins = comparison_wins + $1,
-             comparison_losses = comparison_losses + $2
+             comparison_losses = comparison_losses + $2,
+             score = score + $1
          WHERE id = $3`,
-        [selected ? 2 : 0, selected ? 0 : 1, problemId]
+        [selected ? 1 : 0, selected ? 0 : 1, problemId]
       );
     }
 
@@ -2295,6 +2423,7 @@ app.get('/api/rounds', authenticateToken, async (req, res) => {
             name: r.name,
             tag: r.tag,
             description: r.description,
+            finalized: r.finalized === true,
             createdAt: new Date(r.created_at).getTime(),
             problemCount: parseInt(r.problem_count || '0'),
             targetSize: parseInt(r.target_size || '10')
@@ -2317,6 +2446,7 @@ app.post('/api/rounds', authenticateToken, async (req, res) => {
             name: r.name,
             tag: r.tag,
             description: r.description,
+            finalized: r.finalized === true,
             createdAt: new Date(r.created_at).getTime(),
             problemCount: 0,
             targetSize: parseInt(r.target_size || '10')
@@ -2346,6 +2476,7 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
             name: r.name,
             tag: r.tag,
             description: r.description,
+            finalized: r.finalized === true,
             createdAt: new Date(r.created_at).getTime(),
             targetSize: parseInt(r.target_size || '10'),
             // problemCount is missing here but usually update doesn't need it immediately or can refetch
@@ -2353,6 +2484,32 @@ app.put('/api/rounds/:id', authenticateToken, async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).json({error: "Update round failed"});
+    }
+});
+
+app.patch('/api/rounds/:id/finalized', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
+    const { id } = req.params;
+    const finalized = req.body?.finalized === true;
+    try {
+        const result = await pool.query(
+            `UPDATE rounds SET finalized = $1 WHERE id = $2 RETURNING *`,
+            [finalized, id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({error: "Round not found"});
+        const r = result.rows[0];
+        res.json({
+            id: r.id,
+            name: r.name,
+            tag: r.tag,
+            description: r.description,
+            finalized: r.finalized === true,
+            createdAt: new Date(r.created_at).getTime(),
+            targetSize: parseInt(r.target_size || '10')
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({error: "Finalize round failed"});
     }
 });
 

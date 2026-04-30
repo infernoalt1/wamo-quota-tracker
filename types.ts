@@ -12,6 +12,7 @@ export interface Round {
   name: string;
   tag?: string;
   description: string;
+  finalized?: boolean;
   createdAt?: number;
 
   /**
@@ -57,6 +58,18 @@ export interface VotingQuotaProgress {
   globalPool: VotingBucketProgress;
   totalCompleted: number;
   totalRawCompleted: number;
+  totalRequired: number;
+  isComplete: boolean;
+}
+
+export interface VotingUserProgress {
+  userId: string;
+  quotaId: string;
+  quotaPoolCompleted: number;
+  quotaPoolRequired: number;
+  globalPoolCompleted: number;
+  globalPoolRequired: number;
+  totalCompleted: number;
   totalRequired: number;
   isComplete: boolean;
 }

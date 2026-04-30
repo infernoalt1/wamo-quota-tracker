@@ -1,5 +1,5 @@
 
-import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment, Notification, VoteBucket, VotingQuotaProgress, VotingTriple } from './types';
+import { Problem, User, Quota, Round, ProblemStatus, Topic, Comment, Notification, VoteBucket, VotingQuotaProgress, VotingTriple, VotingUserProgress } from './types';
 
 // --- CONFIGURATION ---
 const USE_MOCK_BACKEND = false;
@@ -68,6 +68,7 @@ const normalizeRound = (round: any, fallbackTargetSize = 10): Round => {
   return {
     ...round,
     targetSize,
+    finalized: round.finalized === true || round.status === 'finalized',
     // This is the actual number currently assigned, if the backend provides it.
     // Do not use it as the round capacity.
     problemCount: Number(round.problemCount ?? round.problem_count ?? 0),
@@ -300,6 +301,13 @@ export const api = {
     return res.json();
   },
 
+  getAdminVotingProgress: async (): Promise<Record<string, VotingUserProgress[]>> => {
+    if (USE_MOCK_BACKEND) return {};
+    const res = await fetch(`${API_BASE_URL}/api/voting/admin-progress`, { headers: getAuthHeader() });
+    if (!res.ok) throw new Error(await readApiError(res, 'Failed to fetch admin voting progress'));
+    return res.json();
+  },
+
   getNextVotingTriple: async (quotaId: string, bucket: VoteBucket | 'auto' = 'auto'): Promise<VotingTriple> => {
     if (USE_MOCK_BACKEND) throw new Error('Mock voting is not implemented');
     const params = new URLSearchParams({ quotaId, bucket });
@@ -494,6 +502,17 @@ export const api = {
 
     if (!res.ok) throw new Error("Update round failed");
     rememberRoundTargetSize(round.id, targetSize);
+  },
+
+  setRoundFinalized: async (roundId: string, finalized: boolean): Promise<Round> => {
+    if (USE_MOCK_BACKEND) return {} as Round;
+    const res = await fetch(`${API_BASE_URL}/api/rounds/${roundId}/finalized`, {
+      method: 'PATCH',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finalized })
+    });
+    if (!res.ok) throw new Error(await readApiError(res, 'Update round status failed'));
+    return normalizeRound(await res.json());
   },
 
   deleteRound: async (id: string): Promise<void> => {

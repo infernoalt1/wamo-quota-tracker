@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode, Notification, NotificationType, VoteBucket, VotingQuotaProgress, VotingTriple } from './types';
+import { Problem, User, Quota, Round, Topic, ProblemStatus, Comment, QuotaType, AssignmentMode, Notification, NotificationType, VoteBucket, VotingQuotaProgress, VotingTriple, VotingUserProgress } from './types';
 import { Button } from './components/Button';
 import { ProblemCard } from './components/ProblemCard';
 import { MathText } from './components/MathText';
@@ -390,7 +390,7 @@ export default function App() {
   const [voteReady, setVoteReady] = useState(false);
   const [votingDetailsOpen, setVotingDetailsOpen] = useState(false);
   const [votingExpandedProblemId, setVotingExpandedProblemId] = useState<string | null>(null);
-  const [skipReason, setSkipReason] = useState('already_seen');
+  const [adminVotingProgress, setAdminVotingProgress] = useState<Record<string, VotingUserProgress[]>>({});
   
   // Round Create New State
   const [newRoundName, setNewRoundName] = useState('');
@@ -656,6 +656,12 @@ export default function App() {
   }, [view, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (view === 'admin' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'director')) {
+      loadAdminVotingProgress();
+    }
+  }, [view, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (view === 'voting' && votingQuotaId && !votingTriple && !votingLoading) {
       loadVotingTriple(votingQuotaId, 'auto');
     }
@@ -902,6 +908,23 @@ export default function App() {
       }
   };
 
+  const toggleRoundFinalized = async (round: Round) => {
+      if (currentUser?.role !== 'admin') return;
+      const nextFinalized = !round.finalized;
+      if (nextFinalized && !window.confirm('Finalize this round? Its problems will be excluded from global pool voting.')) return;
+      try {
+          const updatedRound = await api.setRoundFinalized(round.id, nextFinalized);
+          setRounds(prev => prev.map(r => r.id === round.id ? { ...r, finalized: updatedRound.finalized } : r));
+          showToast({
+            variant: 'success',
+            title: nextFinalized ? 'Round finalized' : 'Round reopened',
+            message: nextFinalized ? 'Its problems are now excluded from global pool voting.' : 'Draft-round problems can appear in global pool voting again.'
+          });
+      } catch (e) {
+          showToast({ variant: 'error', title: "Couldn't update round", message: getErrorMessage(e, 'Please try again.') });
+      }
+  };
+
   const startEditQuota = (q: Quota) => {
     setEditingQuotaId(q.id);
     setEditQuotaForm(q);
@@ -975,8 +998,18 @@ export default function App() {
     return eligibleUsers.map(u => {
       const submitted = problems.filter(p => p.authorId === u.id && p.quotaId === q.id && isOffWaitlist(p)).length;
       const target = u.customTargets?.[q.id] || q.target;
-      return { user: u, submitted, target };
+      const voting = adminVotingProgress[q.id]?.find(v => v.userId === u.id) || null;
+      return { user: u, submitted, target, voting };
     }).sort((a, b) => b.submitted - a.submitted);
+  };
+
+  const loadAdminVotingProgress = async () => {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'director')) return;
+    try {
+      setAdminVotingProgress(await api.getAdminVotingProgress());
+    } catch (e) {
+      console.error('Failed to load admin voting progress', e);
+    }
   };
 
   const loadVotingQuotas = async () => {
@@ -1036,6 +1069,8 @@ export default function App() {
         message: result.lowConfidence ? 'This very fast review was marked low-confidence.' : 'Next comparison is ready.'
       });
       await loadVotingQuotas();
+      await refreshData();
+      await loadAdminVotingProgress();
       await loadVotingTriple(votingTriple.quotaId, 'auto');
     } catch (e) {
       showToast({ variant: 'error', title: "Couldn't record choice", message: getErrorMessage(e, 'Please try again.') });
@@ -1049,7 +1084,6 @@ export default function App() {
         quotaId: votingTriple.quotaId,
         bucket: votingTriple.bucket,
         shownProblemIds: votingTriple.problems.map(p => p.id),
-        reason: skipReason,
         responseTimeMs: Date.now() - votingStartedAt,
         detailsOpened: votingDetailsOpen
       });
@@ -3804,17 +3838,6 @@ tex += `\\end{longtable}
                           <p className="text-xs text-slate-500 mt-1">Triple source: {formatVoteBucket(currentVoteBucket as VoteBucket)}. Skip does not count toward quota.</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <select
-                            value={skipReason}
-                            onChange={e => setSkipReason(e.target.value)}
-                            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 outline-none"
-                          >
-                            <option value="already_seen">Already seen</option>
-                            <option value="all_unsuitable">All unsuitable</option>
-                            <option value="unclear_statements">Unclear statements</option>
-                            <option value="too_hard_to_compare">Too hard to compare</option>
-                            <option value="other">Other</option>
-                          </select>
                           <Button size="sm" variant="ghost" onClick={handleSkipComparison} disabled={!votingTriple || votingTriple.status !== 'ready' || votingLoading}>Skip set</Button>
                           <Button size="sm" variant="secondary" onClick={() => loadVotingTriple(selectedVotingQuota.id, votingBucketMode)} disabled={votingLoading}>
                             {votingLoading ? 'Loading...' : 'New set'}
@@ -3996,7 +4019,14 @@ tex += `\\end{longtable}
                                                 <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100">
                                                     <FolderOpen className="w-5 h-5" />
                                                 </div>
-                                                {r.tag && <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase border border-slate-200">{r.tag}</span>}
+                                                <div className="flex gap-1.5">
+                                                  {r.finalized ? (
+                                                    <span className="text-[10px] font-bold bg-emerald-50 px-2 py-0.5 rounded text-emerald-700 uppercase border border-emerald-200">Finalized</span>
+                                                  ) : (
+                                                    <span className="text-[10px] font-bold bg-amber-50 px-2 py-0.5 rounded text-amber-700 uppercase border border-amber-200">Draft</span>
+                                                  )}
+                                                  {r.tag && <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase border border-slate-200">{r.tag}</span>}
+                                                </div>
                                             </div>
                                             <h3 className="font-bold text-slate-900 text-lg leading-tight mt-3">{r.name}</h3>
                                             <p className="text-xs text-slate-500 mt-2 line-clamp-2">{r.description || 'No description.'}</p>
@@ -4055,11 +4085,22 @@ tex += `\\end{longtable}
                       ) : (
                           <div className="flex-1 min-w-0 flex items-center gap-3">
                               <h1 className="text-xl font-bold text-slate-900 truncate tracking-tight">{composerSelectedRound?.name}</h1>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${composerSelectedRound?.finalized ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                {composerSelectedRound?.finalized ? 'Finalized' : 'Draft'}
+                              </span>
                               {composerSelectedRound?.tag && <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-100">{composerSelectedRound.tag}</span>}
                               
                               <div className="flex gap-1 ml-2">
                                   <button onClick={() => { setIsEditingRound(true); setEditRoundForm(composerSelectedRound || {}); }} className="text-slate-400 hover:text-indigo-600 p-1.5 hover:bg-slate-100 rounded transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
                                   <button onClick={deleteRound} className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-slate-100 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                  {currentUser.role === 'admin' && composerSelectedRound && (
+                                    <button
+                                      onClick={() => toggleRoundFinalized(composerSelectedRound)}
+                                      className={`px-2 py-1.5 rounded text-[10px] font-bold border transition-colors ${composerSelectedRound.finalized ? 'text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100' : 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
+                                    >
+                                      {composerSelectedRound.finalized ? 'Reopen draft' : 'Finalize round'}
+                                    </button>
+                                  )}
                               </div>
                           </div>
                       )}
@@ -5099,7 +5140,10 @@ tex += `\\end{longtable}
                              </div>
                            </div>
                            <div className="flex items-center gap-1 shrink-0">
-                             <button onClick={() => setExpandedQuotaProgressId(isExpanded ? null : q.id)}
+                             <button onClick={() => {
+                               setExpandedQuotaProgressId(isExpanded ? null : q.id);
+                               if (!isExpanded) loadAdminVotingProgress();
+                             }}
                                className={`p-1.5 rounded transition-colors text-xs font-bold flex items-center gap-1 border ${isExpanded ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:text-indigo-600 hover:border-indigo-200'}`}
                                title="View progress">
                                <BarChart2 className="w-3.5 h-3.5" />
@@ -5129,11 +5173,14 @@ tex += `\\end{longtable}
                              <p className="text-xs text-slate-400 italic">No users assigned.</p>
                            ) : (
                              <div className="space-y-2">
-                               {progressData.map(({ user: u, submitted, target }) => {
+                               {progressData.map(({ user: u, submitted, target, voting }) => {
                                  const pct = target > 0 ? Math.min((submitted / target) * 100, 100) : 0;
+                                 const voteDone = voting?.totalCompleted ?? 0;
+                                 const voteRequired = voting?.totalRequired ?? q.voteTarget;
+                                 const votePct = voteRequired > 0 ? Math.min((voteDone / voteRequired) * 100, 100) : 100;
                                  let badge = 'Not started'; let badgeCls = 'text-slate-400 bg-slate-100';
-                                 if (submitted > 0 && submitted < target) { badge = 'In progress'; badgeCls = 'text-indigo-600 bg-indigo-50'; }
-                                 if (target > 0 && submitted >= target) { badge = 'Complete'; badgeCls = 'text-emerald-600 bg-emerald-50'; }
+                                 if (submitted > 0 || voteDone > 0) { badge = 'In progress'; badgeCls = 'text-indigo-600 bg-indigo-50'; }
+                                 if ((target === 0 || submitted >= target) && (voteRequired === 0 || voteDone >= voteRequired)) { badge = 'Complete'; badgeCls = 'text-emerald-600 bg-emerald-50'; }
                                  if (target > 0 && submitted > target) { badge = 'Exceeded'; badgeCls = 'text-purple-600 bg-purple-50'; }
                                  return (
                                    <div key={u.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-slate-100">
@@ -5141,12 +5188,15 @@ tex += `\\end{longtable}
                                        {u.name.charAt(0)}
                                      </div>
                                      <span className="text-xs font-semibold text-slate-800 w-28 truncate">{u.name}</span>
-                                     <div className="flex-1">
-                                       <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                     <div className="flex-1 space-y-1">
+                                       <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden" title={`Writing ${submitted}/${target}`}>
                                          <div className={`h-full rounded-full transition-all ${target > 0 && submitted >= target ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} />
                                        </div>
+                                       <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden" title={`Voting ${voteDone}/${voteRequired}`}>
+                                         <div className={`h-full rounded-full transition-all ${voteRequired > 0 && voteDone >= voteRequired ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${votePct}%` }} />
+                                       </div>
                                      </div>
-                                     <span className="text-[10px] font-mono text-slate-500 w-12 text-right">{submitted}/{target}</span>
+                                     <span className="text-[10px] font-mono text-slate-500 w-20 text-right">{submitted}/{target} · {voteDone}/{voteRequired}</span>
                                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${badgeCls}`}>{badge}</span>
                                    </div>
                                  );
@@ -5224,6 +5274,9 @@ tex += `\\end{longtable}
                                 const uTarget = u.customTargets?.[activeQuotaId] ?? activeQuota.target;
                                 const isAssigned = activeQuota.assignmentMode === 'global' || activeQuota.assignedUserIds?.includes(u.id);
                                 const uCount = u.submittedCount || 0;
+                                const activeVoting = adminVotingProgress[activeQuotaId]?.find(v => v.userId === u.id);
+                                const activeVoteCount = activeVoting?.totalCompleted ?? u.voteCount ?? 0;
+                                const activeVoteTarget = activeVoting?.totalRequired ?? voteTarget;
                                 
                                 return (
                                     <tr key={u.id} className="hover:bg-slate-50/50">
@@ -5267,8 +5320,8 @@ tex += `\\end{longtable}
                                                         <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-indigo-500 h-full shadow-[0_0_8px_rgba(99,102,241,0.5)]" style={{ width: `${uTarget === 0 ? 100 : Math.min((u.submittedCount / uTarget) * 100, 100)}%` }}></div></div>
                                                     </div>
                                                     <div>
-                                                        <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Voting</span> <span>{u.voteCount}/{voteTarget}</span></div>
-                                                        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-emerald-500 h-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${voteTarget === 0 ? 100 : Math.min(((u.voteCount || 0) / voteTarget) * 100, 100)}%` }}></div></div>
+                                                        <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400 mb-0.5"><span>Voting</span> <span>{activeVoteCount}/{activeVoteTarget}</span></div>
+                                                        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className="bg-emerald-500 h-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" style={{ width: `${activeVoteTarget === 0 ? 100 : Math.min((activeVoteCount / activeVoteTarget) * 100, 100)}%` }}></div></div>
                                                     </div>
                                                 </div>
                                             ) : (

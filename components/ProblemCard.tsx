@@ -140,19 +140,12 @@ export const ProblemCard: React.FC<ProblemCardProps> = ({
       <div className="flex flex-row items-stretch">
         {/* Vote Sidebar */}
         <div className="flex flex-col items-center p-3 border-r border-slate-100 bg-slate-50/50 w-16 gap-1 shrink-0">
-           <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={(e) => { e.stopPropagation(); onUpvote(problem.id); }}
-              disabled={votingDisabled}
-              title={isOwnProblem ? 'You cannot vote for your own problem.' : hasVoted ? 'Remove vote' : 'Vote for this problem'}
-              className={`flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg transition-colors ${
-                 hasVoted && !readOnly
-                   ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-100'
-                   : votingDisabled ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm'
-              }`}
+           <div
+              title="Voting happens in the Voting tab."
+              className="flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg text-slate-400 bg-white/70 ring-1 ring-slate-100"
            >
-              <ThumbsUp className={`w-4 h-4 ${hasVoted ? 'fill-current' : ''}`} />
-           </motion.button>
+              <ThumbsUp className="w-4 h-4" />
+           </div>
            <span className={`font-bold text-sm tabular-nums tracking-tight ${score > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
               {score}
            </span>
