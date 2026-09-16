@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f4f1ea" />
+  <meta name="description" content="Play Contact, the fast multiplayer word game, in your browser." />
+  <title>Contact — multiplayer word game</title>
+  <link rel="stylesheet" href="/game/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/game" aria-label="Contact home">CONTACT<span>.</span></a>
+      <div class="connection" id="connectionStatus"><i></i><span>connecting</span></div>
+    </header>
+
+    <main>
+      <section id="landingView" class="landing">
+        <div class="landing-copy">
+          <p class="eyebrow">multiplayer word game</p>
+          <h1>Get on the same<br />wavelength.</h1>
+          <p class="lede">One player guards a secret word. Everyone else reveals it one letter at a time by making contact on the same clue.</p>
+          <ol class="mini-rules">
+            <li><span>01</span><p>Post a clue for a word that starts with the revealed letters.</p></li>
+            <li><span>02</span><p>If you know the clue word, lock in your answer and call Contact.</p></li>
+            <li><span>03</span><p>Match before the Word Master blocks you to reveal the next letter.</p></li>
+          </ol>
+        </div>
+
+        <div class="join-panel">
+          <div class="field-group">
+            <label for="nameInput">Your name</label>
+            <input id="nameInput" maxlength="24" autocomplete="nickname" placeholder="e.g. Maya" />
+          </div>
+
+          <fieldset class="avatar-fieldset">
+            <legend>Pick a mark</legend>
+            <div id="avatarPicker" class="avatar-picker" aria-label="Choose an avatar"></div>
+          </fieldset>
+
+          <button id="createBtn" class="button primary big" type="button">Create a room</button>
+
+          <div class="or"><span>or join a room</span></div>
+          <form id="joinForm" class="join-row">
+            <label class="sr-only" for="roomInput">Room code</label>
+            <input id="roomInput" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" />
+            <button class="button dark" type="submit">Join</button>
+          </form>
+          <p class="micro">No account. No download. Best with 3–10 players.</p>
+        </div>
+      </section>
+
+      <section id="roomView" class="room-view hidden" aria-live="polite">
+        <div class="room-head">
+          <div>
+            <p class="eyebrow">room</p>
+            <div class="room-code-line">
+              <h2 id="roomCode">------</h2>
+              <button id="copyInviteBtn" class="text-button" type="button">Copy invite</button>
+            </div>
+          </div>
+          <button id="leaveBtn" class="text-button quiet" type="button">Leave</button>
+        </div>
+
+        <div class="game-grid">
+          <aside class="panel players-panel">
+            <div class="panel-title"><span>Players</span><span id="playerCount">0 / 10</span></div>
+            <div id="playerList" class="player-list"></div>
+          </aside>
+
+          <section class="game-main">
+            <div id="lobbyCard" class="stage-card"></div>
+            <div id="gameCard" class="hidden"></div>
+          </section>
+
+          <aside class="panel activity-panel">
+            <div class="panel-title"><span>Room activity</span><span>live</span></div>
+            <div id="activityList" class="activity-list"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <template id="avatarTemplate">
+    <button class="avatar-option" type="button"><span></span></button>
+  </template>
+
+  <script type="module" src="/game/app.js"></script>
+</body>
+</html>
