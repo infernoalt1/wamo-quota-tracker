@@ -35,10 +35,10 @@ const activityList = $('#activityList');
 const toast = $('#toast');
 
 function getSessionId() {
-  let value = localStorage.getItem(SESSION_KEY);
+  let value = sessionStorage.getItem(SESSION_KEY);
   if (!value) {
     value = `p_${crypto.randomUUID().replaceAll('-', '')}`;
-    localStorage.setItem(SESSION_KEY, value);
+    sessionStorage.setItem(SESSION_KEY, value);
   }
   return value;
 }
@@ -99,6 +99,8 @@ function connect(afterOpen) {
     if (message.type === 'error') return showToast(message.message || 'Something went wrong.');
     if (message.type === 'notice') return showToast(message.message || '');
     if (message.type === 'joined') {
+      clearTimeout(state.toastTimer);
+      toast.classList.remove('show');
       state.joinedCode = message.code;
       history.replaceState({}, '', `/game/room/${message.code}`);
       landingView.classList.add('hidden');
@@ -107,12 +109,17 @@ function connect(afterOpen) {
     }
     if (message.type === 'state') {
       state.room = message.room;
-      state.room.serverNow = message.serverNow;
+      state.clockOffset = message.serverNow - Date.now();
       renderRoom();
     }
   });
 
-  ws.addEventListener('close', () => {
+  ws.addEventListener('close', (event) => {
+    if (event.code === 4001) {
+      state.intentionalClose = true;
+      setConnection('offline', 'Open in another tab');
+      return;
+    }
     setConnection('offline', 'reconnecting');
     if (!state.intentionalClose) {
       clearTimeout(state.reconnectTimer);
@@ -191,7 +198,7 @@ function renderPlayers() {
     return `<div class="player ${p.connected ? '' : 'offline'}">
       <span class="player-mark" data-avatar="${escapeHtml(p.avatar)}"></span>
       <div class="player-name">${escapeHtml(p.name)}<small>${p.connected ? role : 'offline'}</small></div>
-      <span class="player-score">${p.wins}</span>
+
     </div>`;
   }).join('');
 }
@@ -208,22 +215,24 @@ function renderLobby() {
   gameCard.classList.add('hidden');
   lobbyCard.classList.remove('hidden');
 
-  if (room.phase === 'lobby') {
-    const options = room.players.filter((p) => p.connected).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-    const hostControls = me().isHost ? `<div class="master-picker">
-      <label for="masterSelect">Choose the first Word Master</label>
-      <select id="masterSelect">${options}</select>
-      <button id="startRoundBtn" class="button primary big" type="button" ${room.players.filter((p) => p.connected).length < 3 ? 'disabled' : ''}>Start round</button>
-      ${room.players.filter((p) => p.connected).length < 3 ? '<p class="micro">Waiting for at least 3 connected players.</p>' : ''}
-    </div>` : '<p class="micro">The host will choose the Word Master when everyone is in.</p>';
-
-    lobbyCard.innerHTML = `<p class="eyebrow">Lobby</p>
-      <h3>${room.players.filter((p) => p.connected).length < 3 ? 'Bring in a few friends.' : 'Ready when you are.'}</h3>
-      <p>Share room <strong>${escapeHtml(room.code)}</strong>. The game works best when everyone is also on voice chat.</p>
-      <div class="lobby-people">${room.players.map((p) => `<span class="pill">${escapeHtml(p.name)}${p.connected ? '' : ' · offline'}</span>`).join('')}</div>
-      ${hostControls}`;
-
-    $('#startRoundBtn')?.addEventListener('click', () => send({ type: 'start_round', masterId: $('#masterSelect').value }));
+  if (room.phase === 'lobby' || room.phase === 'round_end') {
+    const finished = room.phase === 'round_end';
+    const options = room.players.filter(p => p.connected).map(p => '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>').join('');
+    lobbyCard.innerHTML = `<p class="eyebrow">${finished ? 'Round ' + room.round + ' complete' : 'Lobby'}</p>
+      <h3>${finished ? (room.winner === 'master' ? 'Word Master wins!' : 'Contactors win!') : 'Round setup'}</h3>
+      ${finished ? '<div class="secret-reveal">' + escapeHtml(room.revealedSecret) + '</div>' : ''}
+      ${me().isHost ? `<form id="roundForm" class="master-picker">
+        <label for="masterSelect">Word Master</label>
+        <select id="masterSelect" required><option value="">Choose a player</option>${options}</select>
+        <label for="roundMinutes">Time limit · minutes</label>
+        <input id="roundMinutes" type="number" min="1" max="60" step="1" required value="${room.roundMinutes || 5}" />
+        <button class="button primary big" type="submit" ${room.players.filter(p => p.connected).length < 3 ? 'disabled' : ''}>${finished ? 'Start next round' : 'Start round'}</button>
+        ${room.players.filter(p => p.connected).length < 3 ? '<p class="micro">Waiting for at least 3 players.</p>' : ''}
+      </form>` : '<p>Waiting for the host to choose the Word Master.</p>'}`;
+    $('#roundForm')?.addEventListener('submit', event => {
+      event.preventDefault();
+      send({ type: 'start_round', masterId: $('#masterSelect').value, roundMinutes: Number($('#roundMinutes').value) });
+    });
     return;
   }
 
@@ -250,33 +259,12 @@ function renderLobby() {
     return;
   }
 
-  if (room.phase === 'round_end') {
-    const host = me().isHost;
-    const nextId = (() => {
-      const players = room.players;
-      const start = Math.max(0, players.findIndex((p) => p.id === room.masterId));
-      for (let step = 1; step <= players.length; step += 1) {
-        const p = players[(start + step) % players.length];
-        if (p.connected) return p.id;
-      }
-      return room.masterId;
-    })();
-    const next = playerById(nextId);
-    lobbyCard.innerHTML = `<div class="round-end">
-      <p class="eyebrow">Round ${room.round} complete</p>
-      <h3>${room.winner === 'contactors' ? 'Contactors win.' : 'Word Master wins.'}</h3>
-      <div class="secret-reveal">${escapeHtml(room.revealedSecret || '')}</div>
-      <p>${escapeHtml(room.roundMessage || '')}</p>
-      ${host ? `<button id="nextRoundBtn" class="button primary" type="button">Next round · ${escapeHtml(next?.name || 'choose master')}</button>` : '<p class="micro">Waiting for the host to start the next round.</p>'}
-    </div>`;
-    $('#nextRoundBtn')?.addEventListener('click', () => send({ type: 'start_round', masterId: nextId }));
-  }
 }
 
 function renderWordProgress() {
   const prefix = state.room.prefix || '';
   const letters = [...prefix].map((char) => `<span class="word-letter revealed">${escapeHtml(char)}</span>`);
-  letters.push('<span class="word-letter unknown">…</span>');
+  letters.push('<span class="word-letter unknown">?</span>');
   return letters.join('');
 }
 
@@ -303,10 +291,16 @@ function renderClue(clue) {
     actions = `<div class="countdown" data-countdown="${clue.id}" data-end="${clue.countdownEndsAt}">
       <span>${escapeHtml(contactor?.name || 'Someone')} called Contact</span>
       <strong>3.0</strong>
-    </div>${isMaster ? `<form class="block-form" data-block-form="${clue.id}">
-      <input name="guess" maxlength="40" autocomplete="off" placeholder="Block with the clue word…" aria-label="Block guess" />
+    </div>`;
+  }
+  if (isMaster && ['open', 'countdown'].includes(clue.status)) {
+    actions += `<form class="block-form" data-block-form="${clue.id}">
+      <input name="guess" maxlength="40" autocomplete="off" placeholder="Clue word" aria-label="Block guess" />
       <button class="button primary" type="submit">Block</button>
-    </form>` : ''}`;
+    </form>`;
+  }
+  if (!isMaster && ['open', 'countdown'].includes(clue.status)) {
+    actions += `<button class="button ghost skip-button" data-skip="${clue.id}" ${clue.mySkipVote ? 'disabled' : ''}>${clue.mySkipVote ? 'Voted to skip' : 'Skip clue'} · ${clue.skipVotes}/${clue.skipRequired}</button>`;
   }
 
   let result = '';
@@ -338,13 +332,14 @@ function renderGame() {
 
   const master = playerById(room.masterId);
   const mine = me();
-  const composer = mine.isMaster ? `<div class="composer">
-      <div class="composer-label">Defend the word</div>
-      <p class="micro">Watch the clues. When someone calls Contact, you have 3 seconds to type the clue word and block them.</p>
+  const activeClue = room.clues.some(c => ['open', 'countdown'].includes(c.status));
+  const composer = (mine.isMaster || activeClue) ? `<div class="composer">
+      <div class="composer-label">${mine.isMaster ? 'Word Master' : 'Clue in play'}</div>
+      <p class="micro">${mine.isMaster ? 'Block the active clue with its word at any time.' : 'Resolve or vote to skip the current clue.'}</p>
     </div>` : `<div class="composer">
       <div class="composer-label">Post a clue</div>
       <form id="clueForm" class="composer-grid">
-        <textarea id="clueText" maxlength="180" placeholder="A clue your friends might get before the Master…" aria-label="Clue"></textarea>
+        <textarea id="clueText" maxlength="180" placeholder="Your clue" aria-label="Clue"></textarea>
         <input id="clueTarget" maxlength="40" autocomplete="off" placeholder="hidden word" aria-label="Hidden target word" />
         <button class="button primary" type="submit">Post clue</button>
       </form>
@@ -354,12 +349,12 @@ function renderGame() {
   gameCard.innerHTML = `<div class="round-card">
     <div class="round-top">
       <div class="round-kicker"><span>Round ${room.round}</span><span>Master · ${escapeHtml(master?.name || '')}</span></div>
-      <div class="word-progress">${renderWordProgress()}</div>
+      <div class="round-clock" id="roundClock" aria-label="Time remaining"></div><div class="word-progress">${renderWordProgress()}</div>
       ${mine.isMaster ? `<div class="master-secret">Your word: <strong>${escapeHtml(mine.secretWord || '')}</strong></div>` : ''}
-      ${!mine.isMaster ? `<div class="game-actions"><span class="micro">Think you know the whole word?</span><form id="directForm" class="inline-form"><input id="directInput" maxlength="40" autocomplete="off" placeholder="full word" aria-label="Direct guess" /><button class="button ghost" type="submit">Direct guess</button></form></div>` : ''}
+      ${!mine.isMaster ? `<div class="game-actions"><form id="directForm" class="inline-form"><input id="directInput" maxlength="40" autocomplete="off" placeholder="full word" aria-label="Direct guess" /><button class="button ghost" type="submit">Direct guess</button></form></div>` : ''}
     </div>
     ${composer}
-    <div class="clues">${room.clues.length ? room.clues.map(renderClue).join('') : '<div class="empty-state">No clues yet. Somebody has to go first.</div>'}</div>
+    <div class="clues">${room.clues.length ? room.clues.map(renderClue).join('') : '<div class="empty-state">No active clue</div>'}</div>
   </div>`;
 
   $('#clueForm')?.addEventListener('submit', (event) => {
@@ -387,32 +382,46 @@ function renderGame() {
     form.elements.guess.value = '';
   }));
 
+  $$('[data-skip]').forEach(button => button.addEventListener('click', () => send({ type: 'skip_clue', clueId: button.dataset.skip })));
   updateCountdowns();
 }
 
 function updateCountdowns() {
-  const serverOffset = Date.now() - (state.room?.serverNow || Date.now());
-  const tick = () => {
-    let active = false;
-    $$('[data-countdown]').forEach((el) => {
-      const end = Number(el.dataset.end || 0);
-      const left = Math.max(0, end - (Date.now() - serverOffset));
-      const strong = $('strong', el);
-      if (strong) strong.textContent = (left / 1000).toFixed(1);
-      if (left > 0) active = true;
-    });
-    if (active) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  const now = Date.now() + (state.clockOffset || 0);
+  $$('[data-countdown]').forEach(el => {
+    $('strong', el).textContent = (Math.max(0, Number(el.dataset.end) - now) / 1000).toFixed(1);
+  });
+  const clock = $('#roundClock');
+  if (clock) {
+    const seconds = Math.ceil(Math.max(0, state.room.roundEndsAt - now) / 1000);
+    clock.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    clock.classList.toggle('urgent', seconds <= 30);
+  }
 }
+setInterval(updateCountdowns, 100);
 
 function renderRoom() {
   if (!state.room) return;
+  const scope = state.room.code + ':' + state.room.round + ':' + state.room.phase;
+  const values = new Map();
+  const key = el => el.id || (el.closest('form')?.dataset.blockForm || el.closest('form')?.dataset.contactForm || '') + ':' + el.name;
+  const focused = document.activeElement;
+  const focusKey = focused?.matches('input, textarea, select') ? key(focused) : null;
+  const selection = focused?.selectionStart;
+  if (state.renderScope === scope) $$('input, textarea, select', roomView).forEach(el => values.set(key(el), el.value));
+  state.renderScope = scope;
   roomCode.textContent = state.room.code;
   renderPlayers();
   renderActivity();
   if (state.room.phase === 'playing') renderGame();
   else renderLobby();
+  $$('input, textarea, select', roomView).forEach(el => {
+    if (values.has(key(el))) el.value = values.get(key(el));
+    if (values.has(key(el)) && key(el) === focusKey) {
+      el.focus();
+      if (typeof selection === 'number' && ['text', 'password', 'textarea'].includes(el.type)) el.setSelectionRange(selection, selection);
+    }
+  });
 }
 
 createBtn.addEventListener('click', () => {
@@ -447,7 +456,7 @@ leaveBtn.addEventListener('click', () => {
   state.socket?.close();
   state.room = null;
   state.joinedCode = '';
-  history.replaceState({}, '', '/');
+  history.replaceState({}, '', '/game');
   roomView.classList.add('hidden');
   landingView.classList.remove('hidden');
   setConnection('offline', 'offline');

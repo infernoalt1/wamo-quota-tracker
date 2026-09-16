@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 export function setupContactGame(app, server, rootDir) {
-const wss = new WebSocketServer({ server, path: '/game/ws' });
+const wss = new WebSocketServer({ server, path: '/game/ws', maxPayload: 8192 });
 
 const MAX_PLAYERS = 10;
 const ROOM_TTL_MS = 30 * 60 * 1000;
@@ -59,10 +59,6 @@ function getPlayer(room, sessionId) {
   return room.players.find((p) => p.id === sessionId);
 }
 
-function currentMaster(room) {
-  return getPlayer(room, room.masterId);
-}
-
 function pushEvent(room, text, tone = 'neutral') {
   room.events.unshift({ id: id('e_'), text, tone, at: Date.now() });
   room.events = room.events.slice(0, 40);
@@ -81,6 +77,8 @@ function publicState(room, viewerId) {
       hostId: room.hostId,
       masterId: room.masterId,
       prefix: room.secretWord ? room.secretWord.slice(0, room.revealedCount).toUpperCase() : '',
+      roundMinutes: room.roundMinutes,
+      roundEndsAt: room.roundEndsAt,
       winner: room.winner,
       roundMessage: room.roundMessage,
       revealedSecret: room.phase === 'round_end' ? room.secretWord?.toUpperCase() : null,
@@ -89,7 +87,6 @@ function publicState(room, viewerId) {
         name: p.name,
         avatar: p.avatar,
         connected: p.connected,
-        wins: p.wins,
         isHost: p.id === room.hostId,
         isMaster: p.id === room.masterId
       })),
@@ -100,6 +97,9 @@ function publicState(room, viewerId) {
         status: clue.status,
         contactorId: clue.contactorId,
         countdownEndsAt: clue.countdownEndsAt,
+        skipVotes: eligibleVoters(room).filter(p => clue.skipVotes.has(p.id)).length,
+        skipRequired: Math.floor(eligibleVoters(room).length / 2) + 1,
+        mySkipVote: clue.skipVotes.has(viewerId),
         resultWord: ['matched', 'blocked', 'missed'].includes(clue.status) ? clue.target.toUpperCase() : null,
         myTarget: clue.authorId === viewerId ? clue.target.toUpperCase() : null,
         myContactGuess: clue.contactorId === viewerId ? clue.contactGuess?.toUpperCase() : null
@@ -132,16 +132,6 @@ function broadcast(room) {
   }
 }
 
-function nextConnectedPlayerId(room, afterId) {
-  if (!room.players.length) return null;
-  const start = Math.max(0, room.players.findIndex((p) => p.id === afterId));
-  for (let step = 1; step <= room.players.length; step += 1) {
-    const p = room.players[(start + step) % room.players.length];
-    if (p.connected) return p.id;
-  }
-  return null;
-}
-
 function clearClueTimers(room) {
   for (const clue of room.clues) {
     if (clue.timer) clearTimeout(clue.timer);
@@ -150,30 +140,34 @@ function clearClueTimers(room) {
 }
 
 function endRound(room, winner, message) {
+  if (room.phase !== 'playing') return;
   clearClueTimers(room);
+  clearTimeout(room.roundTimer);
+  room.roundTimer = null;
+  room.roundEndsAt = null;
+  for (const clue of room.clues) {
+    if (['open', 'countdown'].includes(clue.status)) clue.status = 'cancelled';
+    clue.countdownEndsAt = null;
+  }
   room.phase = 'round_end';
   room.winner = winner;
   room.roundMessage = message;
-  if (winner === 'contactors') {
-    for (const player of room.players) {
-      if (player.id !== room.masterId) player.wins += 1;
-    }
-  } else if (winner === 'master') {
-    const master = currentMaster(room);
-    if (master) master.wins += 1;
-  }
   pushEvent(room, message, winner === 'contactors' ? 'good' : 'accent');
   broadcast(room);
 }
 
 function resolveContact(room, clueId) {
   const clue = room.clues.find((c) => c.id === clueId);
-  if (!clue || clue.status !== 'countdown') return;
+  if (room.phase !== 'playing' || expireRound(room) || !clue || clue.status !== 'countdown') return;
   clue.timer = null;
   clue.countdownEndsAt = null;
 
   if (clue.contactGuess === clue.target) {
     clue.status = 'matched';
+    if (clue.target === room.secretWord) {
+      endRound(room, 'contactors', 'Contact on the secret word. Contactors win.');
+      return;
+    }
     room.revealedCount = Math.min(room.secretWord.length, room.revealedCount + 1);
     pushEvent(room, `Contact made on “${clue.target.toUpperCase()}”.`, 'good');
     if (room.revealedCount >= room.secretWord.length) {
@@ -203,6 +197,7 @@ function attachPlayer(ws, room, player) {
 }
 
 function createRoom(ws, message) {
+  if (ws.roomCode) return sendError(ws, 'Leave your current room first.');
   const sessionId = String(message.sessionId || '');
   const name = cleanName(message.name);
   if (!validateSessionId(sessionId)) return sendError(ws, 'Refresh the page and try again.');
@@ -215,7 +210,6 @@ function createRoom(ws, message) {
     avatar: cleanAvatar(message.avatar),
     connected: true,
     lastSeen: Date.now(),
-    wins: 0,
     ws
   };
   const room = {
@@ -232,7 +226,10 @@ function createRoom(ws, message) {
     clues: [],
     events: [],
     winner: null,
-    roundMessage: ''
+    roundMessage: '',
+    roundMinutes: 5,
+    roundEndsAt: null,
+    roundTimer: null
   };
   rooms.set(code, room);
   ws.roomCode = code;
@@ -243,6 +240,7 @@ function createRoom(ws, message) {
 }
 
 function joinRoom(ws, message) {
+  if (ws.roomCode) return sendError(ws, 'Leave your current room first.');
   const sessionId = String(message.sessionId || '');
   const code = String(message.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
   const name = cleanName(message.name);
@@ -260,8 +258,7 @@ function joinRoom(ws, message) {
       avatar: cleanAvatar(message.avatar),
       connected: true,
       lastSeen: Date.now(),
-      wins: 0,
-      ws
+        ws
     };
     room.players.push(player);
     pushEvent(room, `${name} joined the room.`);
@@ -279,7 +276,8 @@ function withRoom(ws, fn) {
   const room = rooms.get(ws.roomCode);
   if (!room) return sendError(ws, 'That room no longer exists.');
   const player = getPlayer(room, ws.sessionId);
-  if (!player) return sendError(ws, 'You are no longer in this room.');
+  if (!player || player.ws !== ws) return sendError(ws, 'You are no longer in this room.');
+  if (expireRound(room)) return sendError(ws, 'Time is up.');
   fn(room, player);
 }
 
@@ -289,12 +287,15 @@ function startRound(ws, message) {
     if (room.phase !== 'lobby' && room.phase !== 'round_end') return sendError(ws, 'Finish the current round first.');
     if (connectedPlayers(room).length < 3) return sendError(ws, 'You need at least 3 connected players.');
 
-    let masterId = String(message.masterId || '');
-    if (room.phase === 'round_end' && !masterId) masterId = nextConnectedPlayerId(room, room.masterId);
+    const masterId = String(message.masterId || '');
+    const minutes = Number(message.roundMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) return sendError(ws, 'Choose a time limit from 1 to 60 minutes.');
     const master = getPlayer(room, masterId);
     if (!master?.connected) return sendError(ws, 'Choose a connected Word Master.');
 
     clearClueTimers(room);
+    room.roundMinutes = minutes;
+    room.roundEndsAt = null;
     room.round += 1;
     room.phase = 'picking';
     room.masterId = master.id;
@@ -316,6 +317,9 @@ function setSecret(ws, message) {
     room.secretWord = word;
     room.revealedCount = 1;
     room.phase = 'playing';
+    room.roundEndsAt = Date.now() + room.roundMinutes * 60_000;
+    room.roundTimer = setTimeout(() => expireRound(room), room.roundMinutes * 60_000);
+    room.roundTimer.unref?.();
     pushEvent(room, `Round ${room.round} started. The word begins with ${word[0].toUpperCase()}.`, 'accent');
     broadcast(room);
   });
@@ -325,13 +329,13 @@ function addClue(ws, message) {
   withRoom(ws, (room, player) => {
     if (room.phase !== 'playing') return sendError(ws, 'The round is not active.');
     if (player.id === room.masterId) return sendError(ws, 'The Word Master cannot submit clues.');
+    if (room.clues.some(c => ['open', 'countdown'].includes(c.status))) return sendError(ws, 'Resolve or skip the current clue first.');
     const text = cleanText(message.text);
     const target = normalizeWord(message.target);
     const prefix = room.secretWord.slice(0, room.revealedCount);
     if (text.length < 3) return sendError(ws, 'Give the room a little more of a clue.');
     if (target.length < 2) return sendError(ws, 'Enter the word your clue points to.');
     if (!target.startsWith(prefix)) return sendError(ws, `Your target must start with ${prefix.toUpperCase()}.`);
-    if (target === room.secretWord) return sendError(ws, 'Use Direct Guess if you think you know the secret word.');
 
     room.clues.unshift({
       id: id('c_'),
@@ -339,6 +343,7 @@ function addClue(ws, message) {
       text,
       target,
       status: 'open',
+      skipVotes: new Set(),
       contactorId: null,
       contactGuess: '',
       countdownEndsAt: null,
@@ -376,8 +381,10 @@ function blockClue(ws, message) {
   withRoom(ws, (room, player) => {
     if (room.phase !== 'playing' || player.id !== room.masterId) return sendError(ws, 'Only the Word Master can block.');
     const clue = room.clues.find((c) => c.id === message.clueId);
-    if (!clue || clue.status !== 'countdown' || !clue.countdownEndsAt || Date.now() >= clue.countdownEndsAt) {
-      return sendError(ws, 'That contact window has closed.');
+    if (!clue || !['open', 'countdown'].includes(clue.status)) return sendError(ws, 'That clue is no longer active.');
+    if (clue.status === 'countdown' && Date.now() >= clue.countdownEndsAt) {
+      resolveContact(room, clue.id);
+      return sendError(ws, 'That contact has resolved.');
     }
     const guess = normalizeWord(message.guess);
     if (!guess) return sendError(ws, 'Type the word you think the clue means.');
@@ -389,6 +396,10 @@ function blockClue(ws, message) {
     clue.timer = null;
     clue.countdownEndsAt = null;
     clue.status = 'blocked';
+    if (clue.target === room.secretWord) {
+      endRound(room, 'contactors', 'The clue named the secret word. Contactors win.');
+      return;
+    }
     pushEvent(room, `${player.name} blocked “${clue.target.toUpperCase()}”.`, 'accent');
     broadcast(room);
   });
@@ -407,6 +418,49 @@ function directGuess(ws, message) {
     }
     pushEvent(room, `${player.name} made a wrong direct guess.`, 'neutral');
     send(ws, { type: 'notice', message: 'Wrong direct guess.' });
+    broadcast(room);
+  });
+}
+
+function expireRound(room) {
+  if (room.phase !== 'playing' || Date.now() < room.roundEndsAt) return false;
+  endRound(room, 'master', 'Time is up. Word Master wins.');
+  return true;
+}
+
+function eligibleVoters(room) {
+  return connectedPlayers(room).filter(p => p.id !== room.masterId);
+}
+
+function checkSkip(room) {
+  if (room.phase !== 'playing' || expireRound(room)) return;
+  const clue = room.clues.find(c => ['open', 'countdown'].includes(c.status));
+  if (!clue) return;
+  if (clue.status === 'countdown' && Date.now() >= clue.countdownEndsAt) {
+    resolveContact(room, clue.id);
+    return;
+  }
+  const voters = eligibleVoters(room);
+  const votes = voters.filter(p => clue.skipVotes.has(p.id)).length;
+  if (votes <= voters.length / 2) return;
+  clearTimeout(clue.timer);
+  clue.timer = null;
+  clue.countdownEndsAt = null;
+  clue.status = 'skipped';
+  pushEvent(room, 'Clue skipped by majority vote.');
+}
+
+function skipClue(ws, message) {
+  withRoom(ws, (room, player) => {
+    if (room.phase !== 'playing' || player.id === room.masterId) return sendError(ws, 'Only contactors can vote to skip.');
+    const clue = room.clues.find(c => c.id === message.clueId);
+    if (!clue || !['open', 'countdown'].includes(clue.status)) return sendError(ws, 'That clue is no longer active.');
+    if (clue.status === 'countdown' && Date.now() >= clue.countdownEndsAt) {
+      resolveContact(room, clue.id);
+      return sendError(ws, 'That contact has resolved.');
+    }
+    clue.skipVotes.add(player.id);
+    checkSkip(room);
     broadcast(room);
   });
 }
@@ -437,6 +491,7 @@ wss.on('connection', (ws) => {
       case 'set_secret': return setSecret(ws, message);
       case 'add_clue': return addClue(ws, message);
       case 'call_contact': return callContact(ws, message);
+      case 'skip_clue': return skipClue(ws, message);
       case 'block_clue': return blockClue(ws, message);
       case 'direct_guess': return directGuess(ws, message);
       default: return sendError(ws, 'Unknown action.');
@@ -458,6 +513,7 @@ wss.on('connection', (ws) => {
       pushEvent(room, 'Word Master selection reset because they disconnected.');
     }
     transferHostIfNeeded(room);
+    checkSkip(room);
     broadcast(room);
   });
 });
@@ -481,6 +537,7 @@ const cleanup = setInterval(() => {
     transferHostIfNeeded(room);
     if (!room.players.length || (connectedPlayers(room).length === 0 && now - room.updatedAt > ROOM_TTL_MS)) {
       clearClueTimers(room);
+      clearTimeout(room.roundTimer);
       rooms.delete(code);
     }
   }
@@ -488,5 +545,16 @@ const cleanup = setInterval(() => {
 cleanup.unref();
 
 
-return { wss, rooms };
+function dispose() {
+  clearInterval(heartbeat);
+  clearInterval(cleanup);
+  for (const room of rooms.values()) {
+    clearClueTimers(room);
+    clearTimeout(room.roundTimer);
+  }
+  for (const ws of wss.clients) ws.terminate();
+  wss.close();
+}
+server.once('close', dispose);
+return { wss, rooms, dispose };
 }
