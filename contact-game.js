@@ -98,7 +98,7 @@ function publicState(room, viewerId) {
         contactorId: clue.contactorId,
         countdownEndsAt: clue.countdownEndsAt,
         skipVotes: eligibleVoters(room).filter(p => clue.skipVotes.has(p.id)).length,
-        skipRequired: Math.floor(eligibleVoters(room).length / 2) + 1,
+        skipRequired: Math.max(1, Math.floor(connectedPlayers(room).length / 2)),
         mySkipVote: clue.skipVotes.has(viewerId),
         resultWord: ['matched', 'blocked', 'missed'].includes(clue.status) ? clue.target.toUpperCase() : null,
         myTarget: clue.authorId === viewerId ? clue.target.toUpperCase() : null,
@@ -175,8 +175,10 @@ function resolveContact(room, clueId) {
       return;
     }
   } else {
-    clue.status = 'missed';
-    pushEvent(room, `Contact missed on “${clue.target.toUpperCase()}”.`, 'neutral');
+    clue.status = 'open';
+    clue.contactorId = null;
+    clue.contactGuess = '';
+    pushEvent(room, 'Contact missed. The clue is still open.', 'neutral');
   }
   broadcast(room);
 }
@@ -434,15 +436,25 @@ function eligibleVoters(room) {
 
 function checkSkip(room) {
   if (room.phase !== 'playing' || expireRound(room)) return;
-  const clue = room.clues.find(c => ['open', 'countdown'].includes(c.status));
+
+  const clue = room.clues.find(c =>
+    ['open', 'countdown'].includes(c.status)
+  );
   if (!clue) return;
-  if (clue.status === 'countdown' && Date.now() >= clue.countdownEndsAt) {
+
+  if (
+    clue.status === 'countdown' &&
+    Date.now() >= clue.countdownEndsAt
+  ) {
     resolveContact(room, clue.id);
     return;
   }
+
   const voters = eligibleVoters(room);
   const votes = voters.filter(p => clue.skipVotes.has(p.id)).length;
-  if (votes <= voters.length / 2) return;
+  const required = Math.max(1, Math.floor(connectedPlayers(room).length / 2));
+  if (votes < required) return;
+
   clearTimeout(clue.timer);
   clue.timer = null;
   clue.countdownEndsAt = null;
