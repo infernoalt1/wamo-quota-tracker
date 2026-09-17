@@ -3,85 +3,42 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#edf3ff" />
-  <meta name="description" content="Play Contact, the fast multiplayer word game, in your browser." />
-  <title>Contact — multiplayer word game</title>
-  <link rel="stylesheet" href="/game/styles.css" />
+  <meta name="theme-color" content="#c9defa" />
+  <meta name="description" content="Play Contact with friends." />
+  <title>Contact</title>
+  <link rel="stylesheet" href="/game/stage-v3.css" />
 </head>
-<body>
+<body data-phase="landing">
   <div class="shell">
     <header class="topbar">
-      <a class="brand" href="/game" aria-label="Contact home">CONTACT<span>.</span></a>
-      <div class="connection" id="connectionStatus"><i></i><span>connecting</span></div>
+      <a class="brand" href="/game" aria-label="Contact home">CONTACT</a>
+      <div class="connection" id="connectionStatus"><i></i><span>Connecting</span></div>
     </header>
-
     <main>
       <section id="landingView" class="landing">
-        <div class="landing-copy">
-          <h1>CONTACT</h1>
-          <div class="hero-tiles" aria-hidden="true"><span>C</span><span>O</span><span>?</span></div>
-        </div>
-        <div class="join-panel">
-          <div class="field-group">
-            <label for="nameInput">Your name</label>
-            <input id="nameInput" maxlength="24" autocomplete="nickname" placeholder="e.g. Maya" />
-          </div>
-
-          <fieldset class="avatar-fieldset">
-            <legend>Pick a mark</legend>
-            <div id="avatarPicker" class="avatar-picker" aria-label="Choose an avatar"></div>
-          </fieldset>
-
-          <button id="createBtn" class="button primary big" type="button">Create a room</button>
-
-          <div class="or"><span>or join a room</span></div>
-          <form id="joinForm" class="join-row">
-            <label class="sr-only" for="roomInput">Room code</label>
-            <input id="roomInput" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" />
-            <button class="button dark" type="submit">Join</button>
-          </form>
+        <div class="join-panel panel">
+          <h1>Join the game</h1>
+          <label for="nameInput">Your name</label>
+          <input id="nameInput" maxlength="24" autocomplete="nickname" placeholder="Name" />
+          <fieldset class="avatar-fieldset"><legend>Your avatar</legend><div id="avatarPicker" class="avatar-picker"></div></fieldset>
+          <button id="createBtn" class="button red big" type="button">Create Room</button>
+          <div class="or">or join a room</div>
+          <form id="joinForm" class="join-row"><label class="sr-only" for="roomInput">Room code</label><input id="roomInput" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ROOM CODE" /><button class="button blue" type="submit">Join</button></form>
           <p class="micro">3–10 players</p>
         </div>
       </section>
-
-      <section id="roomView" class="room-view hidden" aria-live="polite">
-        <div class="room-head">
-          <div>
-            <p class="eyebrow">room</p>
-            <div class="room-code-line">
-              <h2 id="roomCode">------</h2>
-              <button id="copyInviteBtn" class="text-button" type="button">Copy invite</button>
-            </div>
-          </div>
-          <button id="leaveBtn" class="text-button quiet" type="button">Leave</button>
-        </div>
-
+      <section id="roomView" class="room-view hidden">
+        <div class="room-head"><div class="room-code-pod"><span>Room Code</span><div><h2 id="roomCode">------</h2><button id="copyInviteBtn" type="button" aria-label="Copy invite link" title="Copy invite link">▢</button></div></div><div id="headerClock"></div></div>
+        <button id="leaveBtn" class="text-button leave" type="button">Leave</button>
         <div class="game-grid">
-          <aside class="panel players-panel">
-            <div class="panel-title"><span>Players</span><span id="playerCount">0 / 10</span></div>
-            <div id="playerList" class="player-list"></div>
-          </aside>
-
-          <section class="game-main">
-            <div id="lobbyCard" class="stage-card"></div>
-            <div id="gameCard" class="hidden"></div>
-          </section>
-
-          <aside class="panel activity-panel">
-            <div class="panel-title"><span>Room activity</span><span>live</span></div>
-            <div id="activityList" class="activity-list"></div>
-          </aside>
+          <aside class="panel players-panel"><div class="panel-title"><h2>Players</h2><span id="playerCount">0 / 10</span></div><div id="playerList" class="player-list"></div></aside>
+          <section class="game-main"><div id="lobbyCard"></div><div id="gameCard" class="hidden"></div></section>
+          <aside class="right-rail"><div id="sideTools"></div><section class="panel activity-panel"><h3>Recent activity</h3><div id="activityList" class="activity-list"></div></section></aside>
         </div>
       </section>
     </main>
   </div>
-
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-  <template id="avatarTemplate">
-    <button class="avatar-option" type="button"><span></span></button>
-  </template>
-
-  <script type="module" src="/game/app.js"></script>
+  <script type="module" src="/game/stage-v3.js"></script>
 </body>
 </html>
