@@ -33,7 +33,7 @@
         <div class="game-grid">
           <aside class="panel players-panel"><div class="panel-title"><h2>Players</h2><span id="playerCount">0 / 10</span></div><div id="playerList" class="player-list"></div></aside>
           <section class="game-main"><div id="lobbyCard"></div><div id="gameCard" class="hidden"></div></section>
-          <aside class="right-rail"><div id="sideTools"></div><section class="panel activity-panel"><h3>Recent activity</h3><div id="activityList" class="activity-list"></div></section></aside>
+          <aside class="right-rail"><div id="sideTools"></div><details id="chatPanel" class="panel chat-panel" open><summary>Room chat <span id="chatUnread" aria-label="Unread messages"></span></summary><div id="chatMessages" class="chat-messages" role="log" aria-live="polite"></div><form id="chatForm"><label class="sr-only" for="chatInput">Message the room</label><input id="chatInput" maxlength="300" autocomplete="off" placeholder="Message the room…" required /><button class="button blue" type="submit">Send</button></form></details><section class="panel activity-panel"><h3>Recent activity</h3><div id="activityList" class="activity-list"></div></section></aside>
         </div>
       </section>
     </main>

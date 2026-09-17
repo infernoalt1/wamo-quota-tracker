@@ -31,12 +31,12 @@ function cleanName(value) {
 }
 
 function cleanAvatar(value) {
-  const allowed = new Set(['orb', 'bolt', 'star', 'moon', 'wave', 'flower', 'diamond', 'cross']);
+  const allowed = new Set(['orb', 'bolt', 'star', 'moon', 'wave', 'flower', 'diamond', 'cross', 'bear', 'tiger', 'lion', 'rabbit', 'owl', 'penguin', 'unicorn', 'dragon', 'turtle', 'whale', 'dog', 'raccoon']);
   return allowed.has(value) ? value : 'orb';
 }
 
 function normalizeWord(value) {
-  return String(value || '').trim().toLowerCase().replace(/[^a-z'-]/g, '').slice(0, 40);
+  return String(value || '').trim().toLowerCase().replace(/[^a-z'-]/g, '');
 }
 
 function cleanText(value, max = 180) {
@@ -78,6 +78,8 @@ function publicState(room, viewerId) {
       masterId: room.masterId,
       prefix: room.secretWord ? room.secretWord.slice(0, room.revealedCount).toUpperCase() : '',
       roundMinutes: room.roundMinutes,
+      maxWordLength: room.maxWordLength,
+      chat: room.chat,
       roundEndsAt: room.roundEndsAt,
       winner: room.winner,
       roundMessage: room.roundMessage,
@@ -97,10 +99,11 @@ function publicState(room, viewerId) {
         status: clue.status,
         contactorId: clue.contactorId,
         countdownEndsAt: clue.countdownEndsAt,
-        skipVotes: eligibleVoters(room).filter(p => clue.skipVotes.has(p.id)).length,
-        skipRequired: Math.max(1, Math.floor(connectedPlayers(room).length / 2)),
+        skipVotes: eligibleVoters(room, clue).filter(p => clue.skipVotes.has(p.id)).length,
+        skipRequired: Math.max(1, Math.ceil(eligibleVoters(room, clue).length / 2)),
         mySkipVote: clue.skipVotes.has(viewerId),
         resultWord: ['matched', 'blocked', 'missed'].includes(clue.status) ? clue.target.toUpperCase() : null,
+        resultGuess: ['matched', 'missed'].includes(clue.status) ? clue.contactGuess.toUpperCase() : null,
         myTarget: clue.authorId === viewerId ? clue.target.toUpperCase() : null,
         myContactGuess: clue.contactorId === viewerId ? clue.contactGuess?.toUpperCase() : null
       })),
@@ -175,10 +178,8 @@ function resolveContact(room, clueId) {
       return;
     }
   } else {
-    clue.status = 'open';
-    clue.contactorId = null;
-    clue.contactGuess = '';
-    pushEvent(room, 'Contact missed. The clue is still open.', 'neutral');
+    clue.status = 'missed';
+    pushEvent(room, 'No match — clue removed.', 'neutral');
   }
   broadcast(room);
 }
@@ -230,6 +231,8 @@ function createRoom(ws, message) {
     winner: null,
     roundMessage: '',
     roundMinutes: 5,
+    maxWordLength: null,
+    chat: [],
     roundEndsAt: null,
     roundTimer: null
   };
@@ -292,11 +295,14 @@ function startRound(ws, message) {
     const masterId = String(message.masterId || '');
     const minutes = Number(message.roundMinutes);
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) return sendError(ws, 'Choose a time limit from 1 to 60 minutes.');
+    const maxWordLength = message.maxWordLength == null || message.maxWordLength === '' ? null : Number(message.maxWordLength);
+    if (maxWordLength !== null && (!Number.isInteger(maxWordLength) || maxWordLength < 3 || maxWordLength > 40)) return sendError(ws, 'Choose a word limit from 3 to 40, or leave it blank.');
     const master = getPlayer(room, masterId);
     if (!master?.connected) return sendError(ws, 'Choose a connected Word Master.');
 
     clearClueTimers(room);
     room.roundMinutes = minutes;
+    room.maxWordLength = maxWordLength;
     room.roundEndsAt = null;
     room.round += 1;
     room.phase = 'picking';
@@ -315,6 +321,7 @@ function setSecret(ws, message) {
   withRoom(ws, (room, player) => {
     if (room.phase !== 'picking' || player.id !== room.masterId) return sendError(ws, 'You are not choosing the word right now.');
     const word = normalizeWord(message.word);
+    if (word.length > (room.maxWordLength || 40)) return sendError(ws, 'Words must be at most ' + (room.maxWordLength || 40) + ' characters.');
     if (word.length < 3) return sendError(ws, 'Use a word with at least 3 letters.');
     room.secretWord = word;
     room.revealedCount = 1;
@@ -334,6 +341,7 @@ function addClue(ws, message) {
     if (room.clues.some(c => ['open', 'countdown'].includes(c.status))) return sendError(ws, 'Resolve or skip the current clue first.');
     const text = cleanText(message.text);
     const target = normalizeWord(message.target);
+    if (target.length > (room.maxWordLength || 40)) return sendError(ws, 'Words must be at most ' + (room.maxWordLength || 40) + ' characters.');
     const prefix = room.secretWord.slice(0, room.revealedCount);
     if (text.length < 3) return sendError(ws, 'Give the room a little more of a clue.');
     if (target.length < 2) return sendError(ws, 'Enter the word your clue points to.');
@@ -365,6 +373,7 @@ function callContact(ws, message) {
     if (!clue || clue.status !== 'open') return sendError(ws, 'That clue is no longer open.');
     if (clue.authorId === player.id) return sendError(ws, 'Someone else has to contact your clue.');
     const guess = normalizeWord(message.guess);
+    if (guess.length > (room.maxWordLength || 40)) return sendError(ws, 'Words must be at most ' + (room.maxWordLength || 40) + ' characters.');
     if (!guess) return sendError(ws, 'Enter your target word before calling Contact.');
     const prefix = room.secretWord.slice(0, room.revealedCount);
     if (!guess.startsWith(prefix)) return sendError(ws, `Your guess must start with ${prefix.toUpperCase()}.`);
@@ -389,6 +398,7 @@ function blockClue(ws, message) {
       return sendError(ws, 'That contact has resolved.');
     }
     const guess = normalizeWord(message.guess);
+    if (guess.length > (room.maxWordLength || 40)) return sendError(ws, 'Words must be at most ' + (room.maxWordLength || 40) + ' characters.');
     if (!guess) return sendError(ws, 'Type the word you think the clue means.');
     if (guess !== clue.target) {
       send(ws, { type: 'notice', message: 'Not the clue word.' });
@@ -412,6 +422,7 @@ function directGuess(ws, message) {
     if (room.phase !== 'playing') return sendError(ws, 'The round is not active.');
     if (player.id === room.masterId) return sendError(ws, 'The Word Master already knows the word.');
     const guess = normalizeWord(message.guess);
+    if (guess.length > (room.maxWordLength || 40)) return sendError(ws, 'Words must be at most ' + (room.maxWordLength || 40) + ' characters.');
     if (!guess) return sendError(ws, 'Enter your full-word guess.');
     if (guess === room.secretWord) {
       pushEvent(room, `${player.name} guessed the secret word.`, 'good');
@@ -430,8 +441,8 @@ function expireRound(room) {
   return true;
 }
 
-function eligibleVoters(room) {
-  return connectedPlayers(room).filter(p => p.id !== room.masterId);
+function eligibleVoters(room, clue) {
+  return connectedPlayers(room).filter(p => p.id !== room.masterId && p.id !== clue?.authorId);
 }
 
 function checkSkip(room) {
@@ -450,9 +461,9 @@ function checkSkip(room) {
     return;
   }
 
-  const voters = eligibleVoters(room);
+  const voters = eligibleVoters(room, clue);
   const votes = voters.filter(p => clue.skipVotes.has(p.id)).length;
-  const required = Math.max(1, Math.floor(connectedPlayers(room).length / 2));
+  const required = Math.max(1, Math.ceil(voters.length / 2));
   if (votes < required) return;
 
   clearTimeout(clue.timer);
@@ -471,8 +482,28 @@ function skipClue(ws, message) {
       resolveContact(room, clue.id);
       return sendError(ws, 'That contact has resolved.');
     }
+    if (clue.authorId === player.id) {
+      clearTimeout(clue.timer);
+      clue.timer = null;
+      clue.countdownEndsAt = null;
+      clue.status = 'skipped';
+      pushEvent(room, `${player.name} skipped their clue.`);
+      return broadcast(room);
+    }
     clue.skipVotes.add(player.id);
     checkSkip(room);
+    broadcast(room);
+  });
+}
+
+function sendChat(ws, message) {
+  withRoom(ws, (room, player) => {
+    const text = cleanText(message.text, 300);
+    if (!text) return sendError(ws, 'Enter a message.');
+    if (player.lastChatAt && Date.now() - player.lastChatAt < 750) return sendError(ws, 'Please wait a moment between messages.');
+    player.lastChatAt = Date.now();
+    room.chat.push({ id: id('m_'), playerId: player.id, name: player.name, avatar: player.avatar, text, at: Date.now() });
+    room.chat = room.chat.slice(-100);
     broadcast(room);
   });
 }
@@ -505,6 +536,7 @@ wss.on('connection', (ws) => {
       case 'call_contact': return callContact(ws, message);
       case 'skip_clue': return skipClue(ws, message);
       case 'block_clue': return blockClue(ws, message);
+      case 'chat': return sendChat(ws, message);
       case 'direct_guess': return directGuess(ws, message);
       default: return sendError(ws, 'Unknown action.');
     }

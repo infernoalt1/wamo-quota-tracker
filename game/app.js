@@ -1,9 +1,11 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-const AVATARS = ['orb', 'bolt', 'star', 'moon', 'wave', 'flower', 'diamond', 'cross'];
+const AVATARS = ['orb', 'bolt', 'star', 'moon', 'wave', 'flower', 'diamond', 'cross', 'bear', 'tiger', 'lion', 'rabbit', 'owl', 'penguin', 'unicorn', 'dragon', 'turtle', 'whale', 'dog', 'raccoon'];
 const FACES = { orb:'Panda', bolt:'Fox', star:'Robot', moon:'Cat', wave:'Frog', flower:'Purple robot', diamond:'Koala', cross:'Octopus' };
-const face = avatar => `<span class="avatar-face" data-face="${AVATARS.includes(avatar) ? avatar : 'orb'}" aria-hidden="true"></span>`;
+const EXTRA_FACES = {bear:['Bear','🐻'],tiger:['Tiger','🐯'],lion:['Lion','🦁'],rabbit:['Rabbit','🐰'],owl:['Owl','🦉'],penguin:['Penguin','🐧'],unicorn:['Unicorn','🦄'],dragon:['Dragon','🐲'],turtle:['Turtle','🐢'],whale:['Whale','🐳'],dog:['Dog','🐶'],raccoon:['Raccoon','🦝']};
+Object.entries(EXTRA_FACES).forEach(([key,value]) => FACES[key] = value[0]);
+const face = avatar => EXTRA_FACES[avatar] ? `<span class="avatar-face emoji-avatar" aria-hidden="true">${EXTRA_FACES[avatar][1]}</span>` : `<span class="avatar-face" data-face="${AVATARS.includes(avatar) ? avatar : 'orb'}" aria-hidden="true"></span>`;
 const SESSION_KEY = 'contact_room_session';
 const PROFILE_KEY = 'contact_room_profile';
 
@@ -215,7 +217,7 @@ function renderSummary() {
     <div class="summary-row"><span>Round time</span><strong>${escapeHtml(minutes)} min</strong></div>
     <div class="summary-row"><span>Word Master</span><strong>${escapeHtml(playerById(selected)?.name || 'Not selected')}</strong></div>
     <div class="summary-row"><span>Skip voting</span><strong>Half of others</strong></div>
-    <div class="summary-code"><span>Room code</span><strong>${room.code}</strong></div></section>`;
+    <div class="summary-row"><span>Max word length</span><strong>${escapeHtml($('#maxWordLength')?.value || room.maxWordLength || 'No custom limit')}</strong></div><div class="summary-code"><span>Room code</span><strong>${room.code}</strong></div></section>`;
 }
 
 function bindSetup() {
@@ -240,6 +242,7 @@ function bindSetup() {
   $$('[data-minutes]').forEach(button => button.addEventListener('click', () => { $('#roundMinutes').value = button.dataset.minutes; refresh(); }));
   select.addEventListener('change', refresh);
   $('#roundMinutes').addEventListener('input', refresh);
+  $('#maxWordLength')?.addEventListener('input', refresh);
   $('#randomMaster')?.addEventListener('click', () => {
     const players = state.room.players.filter(p => p.connected);
     select.value = players[Math.floor(Math.random()*players.length)].id;
@@ -257,12 +260,12 @@ function renderLobby() {
     const finished = room.phase === 'round_end';
     const connected = room.players.filter(p => p.connected);
     lobbyCard.innerHTML = `<div class="setup-surface"><h1>${finished ? (room.winner === 'master' ? 'Word Master wins!' : 'Contactors win!') : 'Ready to Play?'}</h1>
-      ${finished ? `<div class="secret-reveal">${escapeHtml(room.revealedSecret)}</div>` : ''}
+      ${finished ? `<div class="secret-reveal">${escapeHtml(room.revealedSecret)}</div>${renderContactReveal(room.clues.find(c => ['matched','missed'].includes(c.status)))}` : ''}
       ${me().isHost ? `<form id="roundForm">
         <div class="setup-row"><h2><span class="setup-icon">◷</span>Round time</h2><div class="time-options">${[3,5,8,10].map(n => `<button type="button" class="time-pill" data-minutes="${n}">${n} min</button>`).join('')}<label class="custom-time"><span>Custom</span><input id="roundMinutes" aria-label="Time limit in minutes" type="number" min="1" max="60" step="1" required value="${room.roundMinutes || 5}" /></label></div></div>
         <div class="setup-row master-row"><h2><span class="setup-icon">♛</span>Word Master</h2><div class="master-options">${connected.map(p => `<button type="button" class="master-choice" data-master="${p.id}">${face(p.avatar)}<span>${escapeHtml(p.name)}</span><b aria-hidden="true">♛</b></button>`).join('')}</div>
         <label class="sr-only" for="masterSelect">Word Master</label><select id="masterSelect" class="select-fallback" tabindex="-1" aria-hidden="true"><option value="">Choose a player</option>${connected.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}</select></div>
-        <div class="setup-row skip-setting"><h2><span class="setup-icon">⏩</span>Skip voting</h2><span class="enabled-pill">On</span><p class="skip-rule">Author can skip instantly. Otherwise, half of the other contactors must vote, rounded up.</p></div>
+        <div class="setup-row"><h2>Word length</h2><label class="word-limit-label" for="maxWordLength">Maximum characters<input id="maxWordLength" type="number" min="3" max="40" step="1" value="${room.maxWordLength || ''}" placeholder="Optional" /><small>Blank = no custom limit (40 maximum). Applies to all words and guesses.</small></label></div><div class="setup-row skip-setting"><h2><span class="setup-icon">⏩</span>Skip voting</h2><span class="enabled-pill">On</span><p class="skip-rule">Author can skip instantly. Otherwise, half of the other contactors must vote, rounded up.</p></div>
         <div class="rule-note">Only one active clue at a time.</div><div class="timeout-note">♛ &nbsp; Time runs out — Word Master wins.</div>
         <div class="setup-actions"><button id="randomMaster" type="button" class="button glass">⤨ &nbsp; Pick random</button><button class="button red start-button" type="submit" ${connected.length<3 ? 'disabled' : ''}>▶ &nbsp; ${finished ? 'Next Round' : 'Start Round'}</button></div>
         ${connected.length<3 ? '<p class="waiting-note">Waiting for at least 3 players.</p>' : ''}
@@ -270,13 +273,13 @@ function renderLobby() {
     $('#roundForm')?.addEventListener('submit', event => {
       event.preventDefault();
       if (!$('#masterSelect').value) return showToast('Choose a Word Master.');
-      send({type:'start_round',masterId:$('#masterSelect').value,roundMinutes:Number($('#roundMinutes').value)});
+      send({type:'start_round',masterId:$('#masterSelect').value,roundMinutes:Number($('#roundMinutes').value),maxWordLength:$('#maxWordLength').value || null});
     });
     return;
   }
   const master = playerById(room.masterId);
   lobbyCard.innerHTML = `<div class="setup-surface picking"><span class="master-emblem">♛</span><p class="eyebrow">Round ${room.round}</p><h1>${me().isMaster ? 'Choose your word' : `${escapeHtml(master?.name || 'Word Master')} is choosing`}</h1>
-    ${me().isMaster ? `<form id="secretForm" class="inline-form"><label class="sr-only" for="secretInput">Secret word</label><input id="secretInput" type="password" maxlength="40" autocomplete="off" placeholder="Secret word" required /><button class="button blue" type="submit">Lock it in</button></form>` : '<div class="waiting-orbit"></div>'}</div>`;
+    ${me().isMaster ? `<form id="secretForm" class="inline-form"><label class="sr-only" for="secretInput">Secret word</label><input id="secretInput" type="password" maxlength="${room.maxWordLength || 40}" autocomplete="off" placeholder="Secret word" required /><button class="button blue" type="submit">Lock it in</button></form>` : '<div class="waiting-orbit"></div>'}</div>`;
   $('#secretForm')?.addEventListener('submit', event => {event.preventDefault();send({type:'set_secret',word:$('#secretInput').value});});
 }
 
@@ -285,6 +288,13 @@ function renderWordProgress() {
   const letters = [...prefix].map((char) => `<span class="word-letter revealed">${escapeHtml(char)}</span>`);
   letters.push('<span class="word-letter unknown">?</span>');
   return letters.join('');
+}
+
+function renderContactReveal(clue) {
+  if (!clue || !['countdown','matched','missed'].includes(clue.status)) return '';
+  const pending = clue.status === 'countdown';
+  const card = (id, role, word) => { const player = playerById(id); return `<div class="answer-card">${face(player?.avatar)}<span>${escapeHtml(player?.name || 'Player')}<small>${role}</small></span><strong>${pending ? 'Answer locked' : escapeHtml(word)}</strong></div>`; };
+  return `<section class="contact-reveal result-${clue.status}" aria-live="polite"><p>${pending ? 'Contact in progress · Answers reveal together' : clue.status === 'matched' ? (state.room.phase === 'round_end' ? 'Match' : 'Match! Next letter unlocked') : 'No match — clue removed'}</p><div class="answer-grid">${card(clue.authorId, 'Clue giver', clue.resultWord)}${card(clue.contactorId, 'Contactor', clue.resultGuess)}</div></section>`;
 }
 
 function renderGame() {
@@ -298,16 +308,19 @@ function renderGame() {
   gameCard.innerHTML = `<div class="word-stage"><div class="word-progress" aria-label="Revealed prefix">${renderWordProgress()}</div><div class="round-label">Round ${room.round} · ${escapeHtml(playerById(room.masterId)?.name)} is Word Master</div></div>
     <article class="clue-stage ${clue?.status === 'countdown' ? 'contact-live' : ''}">
       <div class="clue-stage-top">${clue ? face(author?.avatar) : '<span class="stage-symbol">✦</span>'}<span>${clue ? `${escapeHtml(author?.name)}’s clue` : 'Next clue'}</span><span class="clue-status">${clue?.status === 'countdown' ? 'Contact in progress' : clue ? 'Open' : ''}</span></div>
-      <div class="clue-body"><p class="clue-text">${clue ? escapeHtml(clue.text) : 'Waiting for a clue'}</p>${clue?.status==='countdown' ? `<div class="countdown" data-countdown="${clue.id}" data-end="${clue.countdownEndsAt}"><strong>3.0</strong></div>` : ''}</div>
+      <div class="clue-body"><p class="clue-text">${clue ? escapeHtml(clue.text) : 'Waiting for a clue'}</p>${clue?.status==='countdown' ? `<div class="countdown" data-countdown="${clue.id}" data-end="${clue.countdownEndsAt}"><strong>3</strong></div>` : ''}</div>
       <div class="stage-status"><i></i>${clue ? (clue.status==='countdown' ? `${escapeHtml(playerById(clue.contactorId)?.name)} called Contact` : 'Clue in play') : last ? `${escapeHtml(last.status)}${last.resultWord ? ' · '+escapeHtml(last.resultWord) : ''}` : 'No active clue'}${clue?.myTarget ? `<span class="private-target">Your target: ${escapeHtml(clue.myTarget)}</span>` : ''}</div>
     </article>
-    ${!mine.isMaster ? `<div class="action-deck"><button id="contactAction" class="button blue action-button" ${canContact ? '' : 'disabled'}><span aria-hidden="true">♟♟</span>Contact</button><button id="directAction" class="button glass action-button"><span aria-hidden="true">•••</span>Direct Guess</button><button class="button red action-button" data-skip="${clue?.id || ''}" ${!clue || clue.mySkipVote ? 'disabled' : ''}><span aria-hidden="true">⏩</span>${clue?.authorId === mine.id ? 'Skip Clue' : clue?.mySkipVote ? 'Voted' : 'Skip Vote'}</button></div>` : '<div class="master-banner">♛ &nbsp; Word Master</div>'}
-    ${room.clues.length > (clue ? 1 : 0) ? `<details class="clue-history"><summary>Previous clues</summary>${room.clues.filter(c=>c!==clue).slice(0,8).map(c=>`<div><span>${escapeHtml(c.text)}</span><strong>${escapeHtml(c.status)}${c.resultWord ? ' · '+escapeHtml(c.resultWord) : ''}</strong></div>`).join('')}</details>` : ''}`;
-  $('#sideTools').innerHTML = `${mine.isMaster ? `<section class="panel tool-panel"><h3><span class="red-icon">♛</span> Word Master tools</h3><div class="master-secret">Your word <strong>${escapeHtml(mine.secretWord)}</strong></div>${clue ? `<form class="block-form" data-block-form="${clue.id}"><label for="blockGuess">Clue word</label><input id="blockGuess" name="guess" maxlength="40" autocomplete="off" placeholder="Enter the clue word" required /><button class="button red" type="submit">⊘ &nbsp; Block Clue</button></form>` : '<p class="micro">Waiting for a clue.</p>'}</section>` : ''}
-    ${!mine.isMaster ? `${!clue ? `<section class="panel tool-panel"><h3>✎ &nbsp; Submit a clue</h3><form id="clueForm"><fieldset ${clue ? 'disabled' : ''}><label for="clueText">Public clue</label><textarea id="clueText" maxlength="180" placeholder="Write your clue" required></textarea><label for="clueTarget">Hidden target word</label><input id="clueTarget" maxlength="40" autocomplete="off" placeholder="Starts with ${escapeHtml(room.prefix)}" required /><button class="button blue" type="submit">➤ &nbsp; Submit Clue</button></fieldset></form></section>` : ''}
-    ${canContact ? `<section class="panel tool-panel contact-panel"><h3>Contact</h3><form data-contact-form="${clue.id}"><label for="contactGuess">Your target word</label><input id="contactGuess" name="guess" maxlength="40" autocomplete="off" required /><button class="button blue" type="submit">Call Contact</button></form></section>` : ''}
-    <section class="panel tool-panel direct-panel ${state.directOpen ? '' : 'hidden'}"><h3>Direct guess</h3><form id="directForm"><label class="sr-only" for="directInput">Full secret word</label><input id="directInput" maxlength="40" autocomplete="off" placeholder="Full secret word" required /><button class="button glass" type="submit">Guess</button></form></section>` : ''}
+    ${renderContactReveal(clue || last)}
+    ${!mine.isMaster ? `<div class="action-deck"><button id="contactAction" class="button blue action-button" ${canContact ? '' : 'disabled'}><span aria-hidden="true">♟♟</span>Contact</button><button id="directAction" class="button glass action-button"><span aria-hidden="true">•••</span>Direct Guess</button><button class="button red action-button" data-skip="${clue?.id || ''}" ${!clue || (clue.mySkipVote && clue.authorId !== mine.id) ? 'disabled' : ''}><span aria-hidden="true">⏩</span>${clue?.authorId === mine.id ? 'Skip my clue' : clue?.mySkipVote ? 'Voted' : 'Skip Vote'}</button></div>` : '<div class="master-banner">♛ &nbsp; Word Master</div>'}
+    ${room.clues.length > (clue ? 1 : 0) ? `<details class="clue-history"><summary>Previous clues</summary>${room.clues.filter(c=>c!==clue).slice(0,8).map(c=>`<div><span>${escapeHtml(c.text)}</span><strong>${escapeHtml(c.status)}${c.resultWord ? ' · '+escapeHtml(c.resultWord) : ''}${c.resultGuess ? ' / '+escapeHtml(c.resultGuess) : ''}</strong></div>`).join('')}</details>` : ''}`;
+  $('#sideTools').innerHTML = `${mine.isMaster ? `<section class="panel tool-panel"><h3><span class="red-icon">♛</span> Word Master tools</h3><div class="master-secret">Your word <strong>${escapeHtml(mine.secretWord)}</strong></div>${clue ? `<form class="block-form" data-block-form="${clue.id}"><label for="blockGuess">Clue word</label><input id="blockGuess" name="guess" maxlength="${room.maxWordLength || 40}" autocomplete="off" placeholder="Enter the clue word" required /><button class="button red" type="submit">⊘ &nbsp; Block Clue</button></form>` : '<p class="micro">Waiting for a clue.</p>'}</section>` : ''}
+    ${!mine.isMaster ? `${!clue ? `<section class="panel tool-panel"><h3>✎ &nbsp; Submit a clue</h3><form id="clueForm"><fieldset ${clue ? 'disabled' : ''}><label for="clueText">Public clue</label><textarea id="clueText" maxlength="180" placeholder="Write your clue" required></textarea><label for="clueTarget">Hidden target word</label><input id="clueTarget" maxlength="${room.maxWordLength || 40}" autocomplete="off" placeholder="Starts with ${escapeHtml(room.prefix)}" required /><button class="button blue" type="submit">➤ &nbsp; Submit Clue</button></fieldset></form></section>` : ''}
+    ${canContact ? `<section class="panel tool-panel contact-panel"><h3>Contact</h3><form data-contact-form="${clue.id}"><label for="contactGuess">Your target word</label><input id="contactGuess" name="guess" maxlength="${room.maxWordLength || 40}" autocomplete="off" required /><button class="button blue" type="submit">Call Contact</button></form></section>` : ''}
+    <section class="panel tool-panel direct-panel ${state.directOpen ? '' : 'hidden'}"><h3>Direct guess</h3><form id="directForm"><label class="sr-only" for="directInput">Full secret word</label><input id="directInput" maxlength="${room.maxWordLength || 40}" autocomplete="off" placeholder="Full secret word" required /><button class="button glass" type="submit">Guess</button></form></section>` : ''}
     ${clue ? `<section class="panel vote-panel"><h3>♟ &nbsp; Skip vote</h3><div class="vote-count"><span>Other players’ votes</span><strong>${clue.skipVotes} / ${clue.skipRequired}</strong></div><progress max="${Math.max(1, clue.skipRequired)}" value="${clue.skipVotes}" aria-label="Skip votes"></progress></section>` : ''}`;
+  const contactPanel = $('.contact-panel');
+  if (contactPanel) gameCard.insertBefore(contactPanel, $('.action-deck'));
   $('#clueForm')?.addEventListener('submit', event => {
     event.preventDefault();send({type:'add_clue',text:$('#clueText').value,target:$('#clueTarget').value});
     $('#clueTarget').focus();
@@ -330,7 +343,7 @@ function renderGame() {
 function updateCountdowns() {
   const now = Date.now() + (state.clockOffset || 0);
   $$('[data-countdown]').forEach(el => {
-    $('strong', el).textContent = (Math.max(0, Number(el.dataset.end) - now) / 1000).toFixed(1);
+    $('strong', el).textContent = String(Math.max(1, Math.ceil((Number(el.dataset.end) - now) / 1000)));
   });
   const clock = $('#roundClock');
   if (clock) {
@@ -340,6 +353,37 @@ function updateCountdowns() {
   }
 }
 setInterval(updateCountdowns, 100);
+
+let lastChatId = null;
+let unreadChat = 0;
+function renderChat() {
+  if (!state.room) return;
+  const panel = $('#chatPanel'), list = $('#chatMessages');
+  const messages = state.room.chat || [];
+  const latest = messages.at(-1)?.id || null;
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
+  if (latest !== lastChatId || !list.innerHTML) {
+    if (!panel.open && lastChatId) unreadChat += messages.filter(m => m.at > (state.lastChatAt || 0) && m.playerId !== me().id).length;
+    list.innerHTML = messages.length ? messages.map(m => `<div class="chat-message">${face(m.avatar)}<div><b>${escapeHtml(m.name)}</b><time>${escapeHtml(formatTime(m.at))}</time><p>${escapeHtml(m.text)}</p></div></div>`).join('') : '<p class="micro">Say hello to the room.</p>';
+    lastChatId = latest;
+    state.lastChatAt = messages.at(-1)?.at || 0;
+    if (nearBottom || messages.at(-1)?.playerId === me().id) list.scrollTop = list.scrollHeight;
+  }
+  if (panel.open) unreadChat = 0;
+  $('#chatUnread').textContent = unreadChat ? String(unreadChat) : '';
+}
+if (matchMedia('(max-width: 660px)').matches) $('#chatPanel').open = false;
+$('#chatPanel').addEventListener('toggle', renderChat);
+$('#chatForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const input = $('#chatInput');
+  if (!input.value.trim()) return;
+  if (state.socket?.readyState !== WebSocket.OPEN) return showToast('Reconnecting — try sending again shortly.');
+  if (state.lastChatSentAt && Date.now() - state.lastChatSentAt < 800) return showToast('Please wait a moment between messages.');
+  state.lastChatSentAt = Date.now();
+  send({type:'chat',text:input.value});
+  input.value = '';
+});
 
 function renderRoom() {
   if (!state.room) return;
@@ -356,6 +400,7 @@ function renderRoom() {
   roomCode.textContent = state.room.code;
   renderPlayers();
   renderActivity();
+  renderChat();
   if (state.room.phase === 'playing') renderGame();
   else renderLobby();
   document.body.dataset.phase = state.room.phase;
@@ -411,6 +456,8 @@ leaveBtn.addEventListener('click', () => {
   state.intentionalClose = true;
   state.socket?.close();
   state.room = null;
+  lastChatId = null; unreadChat = 0; state.lastChatAt = 0;
+  $('#chatMessages').innerHTML = ''; $('#chatInput').value = '';
   document.body.dataset.phase = 'landing';
   $('#sideTools').innerHTML = '';
   $('#headerClock').innerHTML = '';
