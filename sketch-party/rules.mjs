@@ -1,11 +1,18 @@
-// A large completion reward, with a smaller timer-normalized speed bonus.
-export function guessPoints(remainingMs, durationMs) {
-  const fraction = Math.max(0, Math.min(1, remainingMs / durationMs));
-  return 300 + 10 * Math.round(20 * fraction);
+// All awards are computed once, at turn end, using the original duration.
+export function guessPoints(elapsedMs, firstGuessMs, durationMs) {
+  const elapsed=Math.max(0,Math.min(durationMs,elapsedMs));
+  const lag=Math.max(0,elapsed-firstGuessMs);
+  return Math.round(400+200*(1-elapsed/durationMs)+200*Math.exp(-lag/(.2*durationMs)));
 }
-// Fixed starting audience: leaving cannot inflate the artist's reward.
-export function artistPoints(solved, eligible) {
-  return eligible > 0 ? Math.round(1000 * Math.min(solved, eligible) / eligible) : 0;
+export function artistPoints(guessTimes, eligible, durationMs) {
+  if(!eligible)return 0;
+  const speed=guessTimes.reduce((sum,t)=>sum+Math.max(0,Math.min(1,1-t/durationMs)),0);
+  return Math.round((1000*guessTimes.length+200*speed)/eligible);
+}
+export function wordHint(word, positions, elapsedMs, durationMs) {
+  const count=elapsedMs>=2*durationMs/3?2:elapsedMs>=durationMs/3?1:0;
+  const shown=new Set(positions.slice(0,count));
+  return [...word].map((c,i)=>/[a-z0-9]/i.test(c)&&!shown.has(i)?'_':c).join('');
 }
 export function emojiAvatar(value) {
   const text = String(value ?? '').trim();

@@ -1,46 +1,34 @@
 # Sketch Party
 
-An independent multiplayer drawing and guessing game. Everything lives in this folder; no parent-project dependencies or changes are required.
+Standalone drawing and guessing game, also mounted by the parent Express app at `/sketch-party/`.
 
-## Run
+Run with Node.js 20+: `npm start` from this folder, then open http://localhost:3210. No game dependencies are required. Run regression tests with `npm test`.
 
-With Node.js 20 or newer, open a terminal in this folder:
-
-```sh
-npm start
-```
-
-Open http://localhost:3210. Create a room, copy the invite, and open it in another browser tab to test with two players. Friends on the same network can use your computer's LAN IP instead of localhost. Internet play requires hosting this server with an accessible URL and support for long-lived Server-Sent Events connections. Set `PORT` to change the default port.
-
-Features: 2–12 players, private invite codes, host controls, configurable rounds and timers, three-word selection, rotating artists, shared mouse/touch drawing, brush sizes, colors, eraser, undo, clear, live guesses, server-validated answers, time-based scoring, scoreboards, optional sound, and rematches. Each correct guess earns 100–500 points depending on time remaining; the artist earns 75 points per correct guess. Disconnected players are removed after 60 seconds.
-
-The bundled word list is original, not skribbl.io's proprietary list. Paste comma/newline-separated words or import a text file before creating a room to use your own list. At least three distinct English words are required; otherwise the original list is used. No skribbl.io branding or assets are included.
-
-Room state exists in server memory and resets on restart. This is a working small-group game, not a hardened public hosting service: there are no accounts, durable rooms, moderation, or global abuse controls. System fonts work offline. Drawing and gameplay need no third-party packages or services.
-
-```sh
-npm test
-```
-
-Tests cover room creation, joining, host permissions, word secrecy, drawing permissions, shared drawing, guessing, scoring, and round completion.
-
+On the existing Render service, push this folder and allow the deployment to finish, then open https://quota.wamomath.org/sketch-party/ and create a room. Send the room invite to friends. No tunnel is required. Restart a local server after source changes because assets are snapshotted on startup.
 
 ## Scoring
 
-There is no single objectively fairest formula. This version favors solving the drawing over tiny speed differences and keeps an artist's maximum award independent of room size.
+Scores are calculated once at the end of each drawing, with integer rounding (not multiples of ten).
 
-- Guesser: `300 + 10 * round(20 * remainingTime / turnDuration)` points. The remaining fraction is clamped to 0?1. At 100%, 75%, 50%, 25%, and 0% time left, the award is 500, 450, 400, 350, and 300. Guesses must arrive before the deadline.
-- Artist: `round(1000 * correctGuessers / startingGuessers)`. Awarded incrementally as people solve. Half the audience solving earns 500; everyone solving earns 1,000. The starting audience is fixed when the word is selected, so leaving cannot increase this award.
-- No first-place bonus, no penalty for incorrect guesses, and no repeat scoring. Speed bonuses use ten-point steps, reducing sensitivity to tiny network differences (boundaries can still separate close guesses). The server measures receipt time; this does not promise perfect latency compensation.
-- Every player gets one drawing turn per round. Longer timers preserve the same point range. Disconnections and differences in word difficulty can still affect fairness.
+For a correct guess at elapsed time t, first correct guess f, original duration T:
 
-## Emoji avatars and chat
+`round(400 + 200 * (1 - t/T) + 200 * exp(-(t-f)/(0.2*T)))`
 
-Pick a suggested emoji or paste any single emoji into the avatar field. Compound emojis, flags, skin tones, and families are supported. Use **Change emoji** in a room to update it. Your selection is remembered on this browser.
+Unsolved players get zero. For the drawer, with N eligible guessers at drawing start and successful guess times t:
 
-During drawing, the one chat panel automatically displays your group: either players still guessing, or the artist and players who already solved. Messages are routed only to that group by the server; they are not merely hidden with CSS. Switching groups clears the old group's messages from view. Correct-guess announcements are public but never include the answer. Everyone rejoins public chat during the reveal; private messages do not become public. Private history is not replayed to later solvers or reconnecting clients.
+`round((1000 * numberSolved + 200 * sum(1 - t/T)) / N)`
 
-Correct guesses display a green success strip below the canvas with the points earned, turn the player's row green, reveal the word to that player, and switch the chat to green. The board uses a compact blue-background layout inspired by the left-player / center-canvas / right-chat arrangement of skribbl.io, with original styling.
+This gives guessers 400-800 points and the artist up to 1,200. Leaving does not shrink the scoring denominator. Every remaining eligible guesser solving ends the drawing immediately; spectators do not block it. Already earned correct guesses are retained even if the player leaves. If the artist leaves, the drawing ends and recorded guesses settle normally. This is a designed balance of completion, speed, and drawing value, not a proof of globally optimal fun.
 
+## Gameplay
 
-Version 3: unified stylesheet, compact blue game layout, validated 32-emoji picker with custom emoji support, 1,000-point artist maximum, guarded success messages, and startup-snapshotted assets with no-store responses to avoid mixed frontend/backend versions. Restart the server after code changes.
+- One letter position is revealed at one-third of the timer, another at two-thirds. Positions are distinct. Short words always retain at least one hidden letter, so one- and two-letter words receive fewer hints.
+- Anyone may join an ongoing game. Mid-turn arrivals spectate until the next drawing, start with zero points, and are labeled as late arrivals in the final standings. Their drawing turn is appended to the current round.
+- Unsolved guesses are visible to everyone. The artist and correct guessers can reply only to the solved group. Spectators can read public guesses but cannot send messages during the current drawing.
+- Scores stay unchanged during drawing. Turn results show the answer and each participant's points earned. Final standings include tied ranks and departed players.
+- Play again returns to the same lobby. The host can adjust rounds, time, and custom words before starting; scores reset on Start.
+- Leave room removes a player immediately. Lost connections get five seconds to reconnect before removal. Page reloads try to resume the same player using a session-scoped token. A departing host is replaced automatically. A game with fewer than two remaining players finishes after any pending result screen.
+- Room state is in memory and resets on restart. Private chat history is not replayed on reconnect. Use one server instance; multiple instances require shared room state.
+- Emoji avatars support single Unicode emoji graphemes, including flags, skin tones, and combined emoji.
+
+The original word pack and styling are independent of skribbl.io. You may import your own comma- or newline-separated list. This app is intended for small private groups, without accounts or public-server moderation.

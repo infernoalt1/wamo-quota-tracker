@@ -1,4 +1,4 @@
-import {emojiAvatar} from './rules.mjs?v=3';
+import {emojiAvatar} from './rules.mjs?v=4';
 const $=s=>document.querySelector(s),canvas=$('#canvas'),ctx=canvas.getContext('2d');
 let auth=null,state=null,source=null,current=null,color='#283449',sound=false,overlayKey='',toastTimer,queue=Promise.resolve();
 let activeChannel='everyone',activeTurn=null;
@@ -10,9 +10,9 @@ function action(type,data){return api(type,data).catch(e=>toast(e.message));}
 function draw(s){if(!s.points.length)return;ctx.strokeStyle=s.color;ctx.fillStyle=s.color;ctx.lineWidth=s.size;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(s.points[0].x,s.points[0].y);for(const p of s.points.slice(1))ctx.lineTo(p.x,p.y);ctx.stroke();if(s.points.length===1){ctx.beginPath();ctx.arc(s.points[0].x,s.points[0].y,s.size/2,0,Math.PI*2);ctx.fill();}}
 function reset(strokes=[]){ctx.fillStyle='white';ctx.fillRect(0,0,1000,700);strokes.forEach(draw);}
 function appendMessage(m,playSound=false){const div=document.createElement('div');div.className='message '+m.kind;if(m.name){const name=document.createElement('b');name.textContent=m.name+': ';div.append(name);}div.append(document.createTextNode(m.text));$('#messages').append(div);while($('#messages').children.length>250)$('#messages').firstChild.remove();$('#messages').scrollTop=$('#messages').scrollHeight;if(playSound&&sound&&m.kind==='correct'){try{const a=new AudioContext(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=660;g.gain.value=.08;o.start();o.stop(a.currentTime+.12);o.onended=()=>a.close();}catch{}}}
-function refreshChat(){ $('#messages').replaceChildren(); chatHistory.filter(m=>!m.channel||(m.turn===activeTurn&&m.channel===activeChannel)).forEach(m=>appendMessage(m)); }
-function message(m){chatHistory.push(m);if(chatHistory.length>250)chatHistory.shift();if(!m.channel||(m.turn===activeTurn&&m.channel===activeChannel))appendMessage(m,true);}
-function celebrate(points,artist=false){if(!Number.isFinite(points)||points<=0)return;const el=$('#success');el.hidden=false;el.textContent=artist?`✎ Nice drawing! +${points.toLocaleString()} points`:`✓ You guessed it! +${points} points`;el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}
+function refreshChat(){ $('#messages').replaceChildren(); chatHistory.filter(m=>!m.channel||(m.turn===activeTurn&&(m.channel==='guessing'||m.channel===activeChannel))).forEach(m=>appendMessage(m)); }
+function message(m){chatHistory.push(m);if(chatHistory.length>250)chatHistory.shift();if(!m.channel||(m.turn===activeTurn&&(m.channel==='guessing'||m.channel===activeChannel)))appendMessage(m,true);}
+function celebrate(){const el=$('#success');el.hidden=false;el.textContent='You guessed it!';el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}
 function overlay(html){$('#overlay-content').innerHTML=html;}
 function render(s){
   const me=s.players.find(p=>p.id===s.you);
@@ -20,11 +20,12 @@ function render(s){
   if(activeChannel!==s.channel||activeTurn!==s.turn){activeChannel=s.channel;activeTurn=s.turn;refreshChat();}
   $('#chat-title').textContent=s.channel==='solved'?'You know the word!':s.channel==='guessing'?'Guesses & chat':'Room chat';
   $('#chat-badge').textContent=s.channel==='solved'?'\u2713 Solved':s.channel==='guessing'?'Guessing':'Everyone';
-  $('#chat-hint').textContent=s.channel==='solved'?'Only the artist and correct guessers can see this chat.':s.channel==='guessing'?'Only players still guessing can see this chat.':'Everyone can chat. Private turn messages stay private.';
+  $('#chat-hint').textContent=s.channel==='solved'?'You can read all guesses. Your replies go only to people who know the word.':s.channel==='guessing'?'Your guesses are visible to everyone.':'Everyone can chat. Private turn messages stay private.';
   $('.chat').classList.toggle('solved-chat',s.channel==='solved');
   $('#guess-input').placeholder=s.channel==='solved'?'Chat with the people who got it...':s.channel==='guessing'?'Type your guess here...':'Message everyone...';
-  if(me?.guessed&&['draw','reveal'].includes(s.phase)&&$('#success').hidden)celebrate(me.earned);
-  if(s.phase==='reveal'&&s.drawer===s.you&&$('#success').hidden)celebrate(me?.earned,true);
+  if(me?.guessed&&s.phase==='draw'&&$('#success').hidden)celebrate();
+  if(s.phase!=='draw')$('#success').hidden=true;
+
   state=s;$('#round').textContent=s.phase==='lobby'?'WAITING ROOM':`ROUND ${s.round} OF ${s.rounds}`;const drawer=s.players.find(p=>p.id===s.drawer);const mine=s.drawer===s.you;
   $('#turn').textContent=s.phase==='finished'?'That’s a wrap!':s.phase==='lobby'?'Good friends. Great guesses.':mine?'Your turn to draw!':`${drawer?.name||'Someone'} is drawing`;
   $('#word').textContent=s.word||s.mask||(s.phase==='choose'?'Choosing a word…':'Invite your friends');$('#timer').textContent=s.seconds||'—';$('#count').textContent=s.players.length+'/12';$('#roomcode').textContent=s.code;
@@ -32,16 +33,30 @@ function render(s){
   $('#word-label').textContent=s.phase==='draw'?(mine?'DRAW THIS':me?.guessed?'YOU GOT IT':'GUESS THIS WORD'):s.phase==='choose'?'GET READY':s.phase==='reveal'?'THE WORD WAS':'DRAW & GUESS';
   $('#timer').classList.toggle('urgent',s.phase==='draw'&&s.seconds<=10);
   document.body.dataset.phase=s.phase;
+  $('#guess-input').disabled=s.spectator;
+  $('#guess-input').placeholder=s.spectator?'Watching - play next turn':$('#guess-input').placeholder;
   $('#players').replaceChildren();const ranked=[...s.players].sort((a,b)=>b.score-a.score);
-  s.players.forEach((p,i)=>{const row=document.createElement('div');row.className='player'+(p.guessed?' correct':'')+(p.id===s.drawer?' is-drawing':'');const face=document.createElement('span');face.className='face';face.textContent=p.avatar||faces[i%faces.length];const info=document.createElement('div');info.className='info';const name=document.createElement('strong');name.textContent=p.name+(p.id===s.you?' (you)':'');const score=document.createElement('small');score.textContent=`${p.score} points ${p.id===s.drawer?' • drawing ✎':p.guessed?' • guessed ✓':''}`;info.append(name,score);const rank=document.createElement('span');rank.className='rank';rank.textContent='#'+(ranked.findIndex(q=>q.id===p.id)+1);row.append(face,info,rank);$('#players').append(row);});
-  $('#overlay').hidden=s.phase==='draw';document.querySelectorAll('.toolbar button,.toolbar input,.toolbar select').forEach(el=>el.disabled=!mine||s.phase!=='draw');$('#note').textContent=mine?'You have the pencil. Make every squiggle count.':'Watch the canvas. Your next great guess is coming.';
-  const key=[s.phase,s.drawer,s.round,s.host,s.players.length].join(':');if(key===overlayKey)return;overlayKey=key;
-  if(s.phase==='lobby'){overlay('<div class="symbol">✏️</div><h2>The gang’s all drawing.</h2><p>Share your room link and invite a friend.<br>We’ll take turns drawing and guessing.</p>');if(s.host===s.you){const btn=document.createElement('button');btn.className='primary';btn.textContent=s.players.length<2?'Waiting for a friend…':'Everybody’s here. Let’s play →';btn.disabled=s.players.length<2;btn.onclick=()=>action('start');$('#overlay-content').append(btn);}else $('#overlay-content').append('Waiting for the host to start…');}
+  s.players.forEach((p,i)=>{const row=document.createElement('div');row.className='player'+(p.guessed?' correct':'')+(p.id===s.drawer?' is-drawing':'');const face=document.createElement('span');face.className='face';face.textContent=p.avatar||faces[i%faces.length];const info=document.createElement('div');info.className='info';const name=document.createElement('strong');name.textContent=p.name+(p.id===s.you?' (you)':'');const score=document.createElement('small');score.textContent=`${p.score} points ${p.id===s.drawer?' • drawing ✎':p.guessed?' • guessed ✓':''}`;info.append(name,score);const rank=document.createElement('span');rank.className='rank';rank.textContent='#'+(1+ranked.filter(q=>q.score>p.score).length);row.append(face,info,rank);$('#players').append(row);});
+  $('#overlay').hidden=s.phase==='draw';document.querySelectorAll('.toolbar button,.toolbar input,.toolbar select').forEach(el=>el.disabled=!mine||s.phase!=='draw');$('#note').textContent=s.spectator?'You joined mid-turn. You can play from the next drawing.':mine?'You have the pencil. Make every squiggle count.':'Watch the canvas. Your next great guess is coming.';
+  const key=[s.phase,s.drawer,s.round,s.host,s.players.length,s.settingsRevision,s.turn].join(':');if(key===overlayKey)return;overlayKey=key;
+  if(s.phase==='lobby'){
+    overlay('<h2>Ready to draw?</h2><p>Invite your friends, choose your settings, and start.</p><div class="lobby-config"></div>');
+    const description=document.createElement('p');description.textContent=`${s.rounds} rounds / ${s.duration} seconds / ${s.customWords?.length||'Original'} words`;$('.lobby-config').append(description);
+    if(s.host===s.you){const settings=document.createElement('button');settings.textContent='Room settings';settings.onclick=openSettings;$('.lobby-config').append(settings);const btn=document.createElement('button');btn.className='primary';btn.textContent=s.players.length<2?'Waiting for a friend...':'Start game';btn.disabled=s.players.length<2;btn.onclick=()=>action('start');$('.lobby-config').append(btn);}else $('.lobby-config').append('Waiting for the host to start.');
+  }
   if(s.phase==='choose'){overlay(`<div class="symbol">🤔</div><h2>${mine?'Pick your masterpiece.':'A masterpiece is loading.'}</h2><p>${mine?'Choose a word you want to draw.':'Your artist is choosing a word. Get ready!'}</p><div class="choices"></div>`);s.choices.forEach(w=>{const btn=document.createElement('button');btn.textContent=w;btn.onclick=()=>action('choose',{word:w});$('.choices').append(btn);});}
-  if(s.phase==='reveal'){overlay('<div class="symbol">✨</div><h2>That was…</h2><div class="winner"></div><p>Next artist, get your drawing hand ready.</p>');$('.winner').textContent=s.word;}
-  if(s.phase==='finished'){overlay('<div class="symbol">🏆</div><h2>A round of applause.</h2><div class="winner"></div><p>The drawings were questionable. The company was excellent.</p>');$('.winner').textContent=ranked.filter(p=>p.score===ranked[0].score).map(p=>p.name).join(' & ')+' won!';if(s.host===s.you){const btn=document.createElement('button');btn.className='primary';btn.textContent='One more game →';btn.onclick=()=>action('start');$('#overlay-content').append(btn);}}
+  if(s.phase==='reveal'){
+    overlay('<h2>The word was <span id="answer-word"></span></h2><div class="result-list"></div><p>Next drawing starts shortly...</p>');$('#answer-word').textContent=s.word;
+    for(const p of [...s.results].sort((a,b)=>b.earned-a.earned))resultRow($('.result-list'),p,`+${p.earned}`,p.artist?'Artist':p.left?'Left':'');
+  }
+  if(s.phase==='finished'){
+    overlay('<h2>Final standings</h2><p id="finish-reason"></p><div class="result-list"></div>');$('#finish-reason').textContent=s.finishReason||'Game complete!';
+    const all=[...s.standings].sort((a,b)=>b.score-a.score);for(const p of all){const rank=1+all.filter(q=>q.score>p.score).length;resultRow($('.result-list'),p,p.score.toLocaleString(),`#${rank}${p.late?' / Joined late':''}${p.left?' / Left':''}`);}
+    if(s.host===s.you){const btn=document.createElement('button');btn.className='primary';btn.textContent='Play again / change settings';btn.onclick=()=>action('rematch');$('#overlay-content').append(btn);}
+  }
+
 }
-function connect(){source?.close();$('#welcome').hidden=true;$('#game').hidden=false;source=new EventSource(`events?room=${auth.room}&token=${auth.token}`);source.addEventListener('solved',e=>celebrate(JSON.parse(e.data).points));source.addEventListener('state',e=>render(JSON.parse(e.data)));source.addEventListener('drawing',e=>reset(JSON.parse(e.data)));source.addEventListener('stroke',e=>draw(JSON.parse(e.data)));source.addEventListener('chat',e=>message(JSON.parse(e.data)));source.onerror=()=>toast('Connection interrupted. Trying to reconnect…');history.replaceState(null,'',`?room=${auth.room}`);}
+function connect(){sessionStorage.setItem('sketch-session',JSON.stringify(auth));source?.close();$('#welcome').hidden=true;$('#game').hidden=false;source=new EventSource(`events?room=${auth.room}&token=${auth.token}`);source.addEventListener('solved',()=>celebrate());source.addEventListener('state',e=>render(JSON.parse(e.data)));source.addEventListener('drawing',e=>reset(JSON.parse(e.data)));source.addEventListener('stroke',e=>draw(JSON.parse(e.data)));source.addEventListener('chat',e=>message(JSON.parse(e.data)));source.onerror=async()=>{try{await api('resume');}catch{source.close();sessionStorage.removeItem('sketch-session');toast('Room expired. Refresh to create or join a room.');}};history.replaceState(null,'',`?room=${auth.room}`);}
 async function enter(kind){if(!$('#name').reportValidity())return;try{auth=await api(kind,{name:$('#name').value,avatar:$('#avatar').value,room:$('#code').value.toUpperCase(),rounds:$('#rounds').value,duration:$('#duration').value,words:$('#custom').value.split(/[,\n\r]+/)});localStorage.setItem('sketch-name',$('#name').value);localStorage.setItem('sketch-avatar',$('#avatar').value);connect();}catch(e){toast(e.message);}}
 $('#entry').onsubmit=e=>{e.preventDefault();enter('create');};$('#join').onclick=()=>enter('join');$('#name').value=localStorage.getItem('sketch-name')||'';$('#code').value=new URLSearchParams(location.search).get('room')||'';
 $('#wordfile').onchange=async e=>{if(e.target.files[0])$('#custom').value=await e.target.files[0].text();};
@@ -81,3 +96,9 @@ $('#save-avatar').onclick=async()=>{const value=previewAvatar();if(!value)return
 $('#avatar-dialog form').onsubmit=e=>{if(e.submitter?.value==='cancel')return;e.preventDefault();$('#save-avatar').click();};
 $('#score-help').onclick=()=>$('#scoring-dialog').showModal();
 
+
+function resultRow(container,p,points,detail){const row=document.createElement('div');row.className='result-row';const face=document.createElement('span');face.className='result-face';face.textContent=p.avatar;const name=document.createElement('span');name.className='result-name';name.textContent=p.name;const small=document.createElement('small');small.textContent=detail;name.append(small);const award=document.createElement('strong');award.textContent=points;row.append(face,name,award);container.append(row);}
+function openSettings(){$('#setting-rounds').value=state.rounds;$('#setting-duration').value=state.duration;$('#setting-words').value=(state.customWords||[]).join(', ');$('#settings-dialog').showModal();}
+$('#save-settings').onclick=async()=>{try{await api('settings',{rounds:$('#setting-rounds').value,duration:$('#setting-duration').value,words:$('#setting-words').value.split(/[,\n\r]+/)});$('#settings-dialog').close();}catch(e){toast(e.message);}};
+$('#leave-room').onclick=async()=>{try{await api('leave');}finally{source?.close();sessionStorage.removeItem('sketch-session');location.href=location.pathname;}};
+const remembered=sessionStorage.getItem('sketch-session');if(remembered){try{const saved=JSON.parse(remembered);const code=new URLSearchParams(location.search).get('room');if(code===saved.room){auth=saved;api('resume').then(connect).catch(()=>{auth=null;sessionStorage.removeItem('sketch-session');});}}catch{sessionStorage.removeItem('sketch-session');}}

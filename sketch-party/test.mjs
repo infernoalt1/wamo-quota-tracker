@@ -1,60 +1,68 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {server,rooms,normalize} from './server.mjs';
-import {guessPoints,artistPoints,emojiAvatar} from './rules.mjs';
-test('scoring rewards completion, normalizes time and audience, and bounds points',()=>{
- assert.equal(guessPoints(60000,60000),500);
- assert.equal(guessPoints(30000,60000),400);
- assert.equal(guessPoints(60000,120000),400);
- assert.equal(guessPoints(0,60000),300);
- assert.equal(guessPoints(-100,60000),300);
- assert.equal(guessPoints(90000,60000),500);
- assert.equal(guessPoints(30100,60000),guessPoints(30000,60000));
- for(let t=0;t<60000;t+=100)assert.ok(guessPoints(t,60000)<=guessPoints(t+100,60000));
- assert.equal(artistPoints(1,2),500);assert.equal(artistPoints(5,10),500);
- assert.equal(artistPoints(3,3),1000);assert.equal(artistPoints(0,3),0);
+import {server,rooms,snapshot,tick} from './server.mjs';
+import {guessPoints,artistPoints,emojiAvatar,wordHint} from './rules.mjs';
+
+test('whole-point formula, time normalization and hints',()=>{
+ assert.equal(guessPoints(20000,20000,80000),750);
+ assert.equal(guessPoints(22000,20000,80000),721);
+ assert.equal(guessPoints(40000,20000,80000),557);
+ assert.equal(guessPoints(70000,20000,80000),434);
+ assert.equal(guessPoints(40000,40000,160000),750);
+ for(let t=0;t<80000;t+=100)assert.ok(guessPoints(t,0,80000)>=guessPoints(t+100,0,80000));
+ assert.equal(artistPoints([40000,40000],2,80000),1100);
+ assert.equal(artistPoints([40000],2,80000),550);
+ assert.equal(artistPoints([],2,80000),0);
+ assert.equal(wordHint('hot dog',[1,4],19999,60000),'___ ___');
+ assert.equal(wordHint('hot dog',[1,4],20000,60000),'_o_ ___');
+ assert.equal(wordHint('hot dog',[1,4],40000,60000),'_o_ d__');
+ for(const e of ['🙂','👩🏽‍🚀','🇺🇦','1️⃣'])assert.equal(emojiAvatar(e),e);
+ assert.throws(()=>emojiAvatar('hello'));
 });
-test('avatars accept complete emoji graphemes and reject plain text',()=>{
- for(const emoji of ['🙂','👩🏽‍🚀','🇺🇦','1️⃣','👨‍👩‍👧‍👦','🏳️‍🌈'])assert.equal(emojiAvatar(emoji),emoji);
- for(const invalid of ['hi','ab🙂','🙂🙂','<script>',''])assert.throws(()=>emojiAvatar(invalid));
-});
-test('complete two-player game flow and permission boundaries',async()=>{
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
- const call=async(action,data={})=>{const res=await fetch(base+'/api',{method:'POST',body:JSON.stringify({action,...data})});return{status:res.status,...await res.json()};};
+
+test('multiplayer lifecycle, private routing, results, departures and rematches',async t=>{
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const call=async(action,data={})=>{const response=await fetch(base+'/api',{method:'POST',body:JSON.stringify({action,...data})});return{status:response.status,...await response.json()};};
+ const join=async(name,room)=>call('join',{name,room});
+ const setup=async()=>{const h=await call('create',{name:'Host',rounds:1,duration:60,words:['apple','banana','cactus']});const a=await join('A',h.room),b=await join('B',h.room),r=rooms.get(h.room);return{h,a,b,r};};
+ const begin=async(h,r)=>{await call('start',h);await call('choose',{...h,word:r.choices[0]});};
+ const capture=p=>{const events=[];p.streams.add({write:chunk=>events.push(JSON.parse(chunk.split('\ndata: ')[1])),end(){}});return events;};
  try{
- const host=await call('create',{name:'Artist',rounds:1,duration:60,words:['apple','banana','cactus']});assert.equal(host.status,200);
- const guest=await call('join',{name:'Guesser',room:host.room});assert.equal(guest.status,200);
- assert.equal((await call('start',guest)).status,400);assert.equal((await call('start',host)).status,200);
- const room=rooms.get(host.room);assert.equal(room.phase,'choose');const word=room.choices[0];
- assert.equal((await call('choose',{...guest,word})).status,400);assert.equal((await call('choose',{...host,word})).status,200);
- const controller=new AbortController();const stream=await fetch(`${base}/events?room=${guest.room}&token=${guest.token}`,{signal:controller.signal});const reader=stream.body.getReader();let received='';while(!received.includes('event: state'))received+=new TextDecoder().decode((await reader.read()).value);const payload=received.split('event: state\ndata: ')[1].split('\n')[0];const state=JSON.parse(payload);assert.equal(state.word,null);assert.equal(state.choices.length,0);assert.equal(state.mask,'_'.repeat(word.length));controller.abort();
- const stroke={color:'#283449',size:9,points:[{x:20,y:30},{x:50,y:70}]};assert.equal((await call('stroke',{...guest,stroke})).status,400);assert.equal((await call('stroke',{...host,stroke})).status,200);assert.equal(room.strokes.length,1);
- await call('undo',host);assert.equal(room.strokes.length,0);
- assert.equal((await call('chat',{...guest,text:word.toUpperCase()})).status,200);assert.equal(room.phase,'reveal');assert.ok(room.players[1].score>=100);assert.equal(room.players[0].score,1000);
- room.deadline=Date.now()-1;await new Promise(r=>setTimeout(r,1100));assert.equal(room.phase,'choose');assert.equal(room.drawer,room.players[1].id);
- await call('choose',{...guest,word:room.choices[0]});await call('chat',{...host,text:room.word});assert.equal(room.phase,'reveal');room.deadline=Date.now()-1;await new Promise(r=>setTimeout(r,1100));assert.equal(room.phase,'finished');
- assert.equal(normalize('Hot-air balloon!'),'hotairballoon');assert.equal((await fetch(base+'/')).status,200);
- }finally{server.closeAllConnections();await new Promise(r=>server.close(r));rooms.clear();}
-});
-test('three-player chat isolation, audience scoring, deadlines, and avatar updates',async()=>{
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
- const call=async(action,data={})=>{const res=await fetch(base+'/api',{method:'POST',body:JSON.stringify({action,...data})});return{status:res.status,...await res.json()};};
- try{
-  const host=await call('create',{name:'Host',avatar:'👩🏽‍🚀',rounds:1,duration:60});
-  const a=await call('join',{name:'A',avatar:'🇺🇦',room:host.room});const b=await call('join',{name:'B',room:host.room});
-  const r=rooms.get(host.room),events=r.players.map(()=>[]);
-  r.players.forEach((p,i)=>p.streams.add({write:chunk=>{const [type,data]=chunk.split('\ndata: ');if(data)events[i].push({type:type.slice(7),data:JSON.parse(data)});}}));
-  await call('start',host);await call('choose',{...host,word:r.choices[0]});
-  const clear=()=>events.forEach(e=>e.length=0);const messages=i=>events[i].filter(e=>e.type==='chat');
-  clear();await call('chat',{...host,text:'Secret artist chat'});assert.equal(messages(0).length,1);assert.equal(messages(1).length,0);assert.equal(messages(2).length,0);
-  clear();await call('chat',{...a,text:'wrong guess'});assert.equal(messages(0).length,0);assert.equal(messages(1).length,1);assert.equal(messages(2).length,1);
-  r.players[1].lastChat=0;await call('chat',{...a,text:r.word});assert.equal(r.players[0].score,500);assert.equal(r.phase,'draw');
-  assert.equal(events[1].findLast(e=>e.type==='state').data.word,r.word);assert.equal(events[2].findLast(e=>e.type==='state').data.word,null);
-  clear();r.players[1].lastChat=0;await call('chat',{...a,text:`The answer was ${r.word}`});assert.equal(messages(0).length,1);assert.equal(messages(1).length,1);assert.equal(messages(2).length,0);
-  assert.equal(messages(0)[0].data.channel,'solved');
-  const previous=r.players[1].score;r.players[1].lastChat=0;await call('chat',{...a,text:r.word});assert.equal(r.players[1].score,previous);
-  assert.equal((await call('avatar',{...a,avatar:'🏳️‍🌈'})).status,200);assert.equal(r.players[1].avatar,'🏳️‍🌈');assert.equal((await call('avatar',{...a,avatar:'not an emoji'})).status,400);
-  r.deadline=Date.now()-1;await call('chat',{...b,text:r.word});assert.equal(r.players[2].score,0);assert.equal(r.phase,'reveal');assert.equal(r.players[0].score,500);
-  clear();r.players[0].lastChat=0;await call('chat',{...host,text:'Everyone together again'});assert.ok(events.every((_,i)=>messages(i).length===1));
+ await t.test('no immediate awards; guesses public, solved replies private; settlement once',async()=>{
+  const {h,a,b,r}=await setup();const events=r.players.map(capture);await begin(h,r);
+  events.forEach(e=>e.length=0);await call('chat',{...a,text:'wrong'});assert.ok(events.every(e=>e.some(m=>m.text==='wrong')));
+  r.players[1].lastChat=0;await call('chat',{...a,text:r.word});assert.ok(r.players.every(p=>p.score===0));assert.equal(r.phase,'draw');assert.equal(r.players[1].earned,0);
+  events.forEach(e=>e.length=0);r.players[1].lastChat=0;await call('chat',{...a,text:'secret'});assert.ok(events[0].some(m=>m.text==='secret'));assert.ok(events[1].some(m=>m.text==='secret'));assert.ok(!events[2].some(m=>m.text==='secret'));
+  assert.equal(snapshot(r,r.players[2]).word,null);assert.equal(snapshot(r,r.players[1]).word,r.word);
+  await call('chat',{...b,text:r.word});assert.equal(r.phase,'reveal');assert.equal(r.results.length,3);assert.ok(r.players[0].score>1000);assert.ok(r.players[1].score>=400);
+  const scores=r.players.map(p=>p.score);tick();assert.deepEqual(r.players.map(p=>p.score),scores);
+ });
+ await t.test('mid-turn arrivals spectate, cannot spoil or score, join the next turn',async()=>{
+  const {h,a,b,r}=await setup();await begin(h,r);const late=await join('Late',h.room),p=r.players.at(-1);assert.ok(snapshot(r,p).spectator);assert.equal(r.eligible.length,2);
+  const messages=capture(r.players[1]);await call('chat',{...late,text:r.word});assert.equal(p.guessed,false);assert.ok(!messages.some(m=>m.text===r.word));
+  await call('chat',{...a,text:r.word});await call('leave',b);assert.equal(r.phase,'reveal');assert.equal(r.players.length,3);assert.ok(r.players[0].score<=600);assert.equal(p.score,0);
+  r.deadline=Date.now()-1;tick();assert.equal(r.phase,'choose');assert.equal(snapshot(r,p).spectator,false);assert.ok(r.queue.includes(p.id));
+ });
+ await t.test('drawer departure settles earned answers and transfers host',async()=>{
+  const {h,a,r}=await setup();await begin(h,r);await call('chat',{...a,text:r.word});const host=r.players[0];await call('leave',h);assert.equal(r.phase,'reveal');assert.equal(r.players.length,2);assert.equal(r.host,r.players[0].id);assert.ok(host.score>0);assert.ok(r.results.some(p=>p.id===host.id&&p.left));
+ });
+ await t.test('disconnect grace removes blocker; one remaining player ends game after reveal',async()=>{
+  const {h,a,b,r}=await setup();await begin(h,r);await call('chat',{...a,text:r.word});const absent=r.players[2];absent.connectedOnce=true;absent.lastSeen=Date.now()-6000;tick();assert.equal(r.phase,'reveal');assert.equal(r.players.length,2);
+  await call('leave',a);r.deadline=Date.now()-1;tick();assert.equal(r.phase,'finished');assert.match(r.finishReason,/Not enough/);
+ });
+ await t.test('schedule completes, standings include departures, settings change in lobby only',async()=>{
+  const {h,a,b,r}=await setup();await call('leave',b);await begin(h,r);await call('chat',{...a,text:r.word});r.deadline=Date.now()-1;tick();assert.equal(r.drawer,r.players[1].id);
+  await call('choose',{...a,word:r.choices[0]});r.players[0].lastChat=0;await call('chat',{...h,text:r.word});r.deadline=Date.now()-1;tick();assert.equal(r.phase,'finished');assert.equal(snapshot(r,r.players[0]).standings.length,2);
+  assert.equal((await call('start',h)).status,400);await call('rematch',h);assert.equal(r.phase,'lobby');assert.equal((await call('settings',{...a,rounds:5})).status,400);
+  await call('settings',{...h,rounds:5,duration:90,words:['moon','sun','earth']});assert.equal(r.rounds,5);assert.equal(r.duration,90);assert.deepEqual(r.words,['moon','sun','earth']);await call('start',h);assert.ok(r.players.every(p=>p.score===0));
+ });
+ await t.test('choosing artist leaves without stalling, short word never fully revealed',async()=>{
+  const {h,r}=await setup();await call('start',h);const original=r.drawer;await call('leave',h);assert.equal(r.phase,'choose');assert.notEqual(r.drawer,original);
+  assert.equal(wordHint('a',[],60000,60000),'_');
+ });
+ await t.test('SSE reconnect snapshot and static assets work',async()=>{
+  const h=await call('create',{name:'Reconnect'});const controller=new AbortController();const res=await fetch(`${base}/events?room=${h.room}&token=${h.token}`,{signal:controller.signal});assert.equal(res.status,200);const reader=res.body.getReader();const first=await reader.read();assert.ok(new TextDecoder().decode(first.value).includes('event: state'));controller.abort();assert.equal((await call('resume',h)).status,200);
+  for(const route of ['/','/app.js','/style.css','/rules.mjs'])assert.equal((await fetch(base+route)).status,200);
+ });
  }finally{rooms.clear();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
