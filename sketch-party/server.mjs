@@ -24,7 +24,7 @@ function next(r){
 }
 function choose(r,word){r.word=word;r.phase='draw';r.eligible=r.players.filter(p=>p.id!==r.drawer).map(p=>p.id);r.solved=0;r.artistAward=0;r.deadline=Date.now()+r.duration*1000;state(r);}
 function reveal(r){if(r.phase!=='draw')return;r.phase='reveal';r.deadline=Date.now()+5000;chat(r,`The word was ${r.word}.`);state(r);}
-export const server=http.createServer(async(req,res)=>{
+export async function handleRequest(req,res){
   const url=new URL(req.url,'http://localhost');
   try {
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Sketch-Version',VERSION);
@@ -76,7 +76,8 @@ export const server=http.createServer(async(req,res)=>{
     const files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/rules.mjs':'rules.mjs'};const file=files[url.pathname];if(!file){res.writeHead(404);res.end('Not found');return;}
     res.writeHead(200,{'Content-Type':file.endsWith('.js')||file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(assets.get(file));
   }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}
-});
+}
+export const server=http.createServer(handleRequest);
 const timer=setInterval(()=>{for(const r of rooms.values()){
   const gone=r.players.filter(p=>!p.streams.size&&Date.now()-p.lastSeen>60000);if(gone.length){r.players=r.players.filter(p=>!gone.includes(p));if(!r.players.length){rooms.delete(r.code);continue;}if(!r.players.some(p=>p.id===r.host))r.host=r.players[0].id;if(gone.some(p=>p.id===r.drawer)&&r.phase==='draw')reveal(r);state(r);}
   if(r.deadline&&Date.now()>=r.deadline){if(r.phase==='choose')choose(r,r.choices[0]);else if(r.phase==='draw')reveal(r);else if(r.phase==='reveal')next(r);}else state(r);

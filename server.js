@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import http from 'http';
 import { setupContactGame } from './contact-game.js';
+import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
 
 dotenv.config();
 
@@ -24,6 +25,14 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
+// Keep the standalone game's request body and event stream intact.
+app.use('/sketch-party', (req, res) => {
+  if (req.originalUrl.split('?')[0] === '/sketch-party') {
+    const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+    return res.redirect(308, '/sketch-party/' + query);
+  }
+  return handleSketchParty(req, res);
+});
 app.use(express.json({ limit: '50mb' })); // Increased limit for bulk uploads
 
 // Serve static files from the React build directory (dist)
