@@ -2,13 +2,41 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {server,rooms,snapshot,tick} from './server.mjs';
 import {guessPoints,artistPoints,emojiAvatar,wordHint} from './rules.mjs';
+import {LiveConnection,mergeChat,requestJSON} from './live-connection.mjs';
+import words from './words.mjs';
+
+test('uploaded word pack and retained authorized chat',()=>{
+ assert.equal(words.length,2312);assert.equal(new Set(words).size,2312);
+ assert.ok(words.includes('BMW'));assert.ok(words.includes('AC/DC'));assert.ok(words.includes('William Shakespeare'));assert.ok(!words.includes('word'));
+ const privateMessage={id:'private-1',channel:'solved',turn:1,text:'private conversation'};
+ const publicMessage={id:'public-1',channel:'guessing',turn:2,text:'new turn'};
+ assert.deepEqual(mergeChat([privateMessage],[privateMessage,publicMessage]),[privateMessage,publicMessage]);
+});
+
+test('transient network errors recover instead of freezing; silent stream restarts; 410 expires',async()=>{
+ class FakeSource{static instances=[];constructor(){this.listeners={};FakeSource.instances.push(this);}addEventListener(t,fn){this.listeners[t]=fn;}close(){this.closed=true;}}
+ let failure=true,expired=false,now=0;const statuses=[],received=[];
+ const live=new LiveConnection({url:'events',EventSourceClass:FakeSource,clock:()=>now,resume:async()=>{if(failure)throw new TypeError('Failed to fetch');},onStatus:s=>statuses.push(s),onEvent:(t,d)=>received.push([t,d]),onExpired:()=>expired=true});
+ try{
+  await live.recover();assert.equal(live.closed,false);assert.equal(expired,false);
+  failure=false;await live.recover();assert.equal(FakeSource.instances.length,2);
+  FakeSource.instances.at(-1).listeners.state({data:'{"phase":"draw"}'});assert.equal(statuses.at(-1),'connected');
+  now=13000;await live.checkHealth();assert.equal(FakeSource.instances.length,3);
+  FakeSource.instances[0].listeners.state({data:'{"phase":"stale"}'});assert.equal(received.length,1);
+  live.resume=async()=>{throw Object.assign(new Error('gone'),{status:410});};await live.recover();assert.equal(expired,true);assert.equal(live.closed,true);
+ }finally{live.close();}
+});
+
+test('requests carry a deadline and preserve HTTP failure status',async()=>{
+ await assert.rejects(()=>requestJSON('api',{},async(_url,options)=>{assert.ok(options.signal instanceof AbortSignal);return{ok:false,status:410,json:async()=>({error:'expired'})};}),e=>e.status===410);
+});
 
 test('whole-point formula, time normalization and hints',()=>{
- assert.equal(guessPoints(20000,20000,80000),750);
- assert.equal(guessPoints(22000,20000,80000),721);
- assert.equal(guessPoints(40000,20000,80000),557);
- assert.equal(guessPoints(70000,20000,80000),434);
- assert.equal(guessPoints(40000,40000,160000),750);
+ assert.equal(guessPoints(20000,1,80000),800);
+ assert.equal(guessPoints(22000,2,80000),590);
+ assert.equal(guessPoints(40000,3,80000),433);
+ assert.equal(guessPoints(70000,4,80000),250);
+ assert.equal(guessPoints(40000,1,160000),800);
  for(let t=0;t<80000;t+=100)assert.ok(guessPoints(t,0,80000)>=guessPoints(t+100,0,80000));
  assert.equal(artistPoints([40000,40000],2,80000),1100);
  assert.equal(artistPoints([40000],2,80000),550);
@@ -36,6 +64,10 @@ test('multiplayer lifecycle, private routing, results, departures and rematches'
   assert.equal(snapshot(r,r.players[2]).word,null);assert.equal(snapshot(r,r.players[1]).word,r.word);
   await call('chat',{...b,text:r.word});assert.equal(r.phase,'reveal');assert.equal(r.results.length,3);assert.ok(r.players[0].score>1000);assert.ok(r.players[1].score>=400);
   const scores=r.players.map(p=>p.score);tick();assert.deepEqual(r.players.map(p=>p.score),scores);
+  assert.ok(r.players[0].chatHistory.some(m=>m.text==='secret'));
+  assert.ok(r.players[1].chatHistory.some(m=>m.text==='secret'));
+  assert.ok(!r.players[2].chatHistory.some(m=>m.text==='secret'));
+  r.deadline=Date.now()-1;tick();assert.ok(r.players[1].chatHistory.some(m=>m.text==='secret'));
  });
  await t.test('mid-turn arrivals spectate, cannot spoil or score, join the next turn',async()=>{
   const {h,a,b,r}=await setup();await begin(h,r);const late=await join('Late',h.room),p=r.players.at(-1);assert.ok(snapshot(r,p).spectator);assert.equal(r.eligible.length,2);
@@ -47,7 +79,7 @@ test('multiplayer lifecycle, private routing, results, departures and rematches'
   const {h,a,r}=await setup();await begin(h,r);await call('chat',{...a,text:r.word});const host=r.players[0];await call('leave',h);assert.equal(r.phase,'reveal');assert.equal(r.players.length,2);assert.equal(r.host,r.players[0].id);assert.ok(host.score>0);assert.ok(r.results.some(p=>p.id===host.id&&p.left));
  });
  await t.test('disconnect grace removes blocker; one remaining player ends game after reveal',async()=>{
-  const {h,a,b,r}=await setup();await begin(h,r);await call('chat',{...a,text:r.word});const absent=r.players[2];absent.connectedOnce=true;absent.lastSeen=Date.now()-6000;tick();assert.equal(r.phase,'reveal');assert.equal(r.players.length,2);
+  const {h,a,b,r}=await setup();await begin(h,r);await call('chat',{...a,text:r.word});const absent=r.players[2];absent.connectedOnce=true;absent.lastSeen=Date.now()-16000;tick();assert.equal(r.phase,'reveal');assert.equal(r.players.length,2);
   await call('leave',a);r.deadline=Date.now()-1;tick();assert.equal(r.phase,'finished');assert.match(r.finishReason,/Not enough/);
  });
  await t.test('schedule completes, standings include departures, settings change in lobby only',async()=>{
@@ -60,9 +92,20 @@ test('multiplayer lifecycle, private routing, results, departures and rematches'
   const {h,r}=await setup();await call('start',h);const original=r.drawer;await call('leave',h);assert.equal(r.phase,'choose');assert.notEqual(r.drawer,original);
   assert.equal(wordHint('a',[],60000,60000),'_');
  });
+ await t.test('detached player resumes without losing score; intentional leave stays left',async()=>{
+  const {h,a,r}=await setup();const p=r.players[1];p.score=321;p.lastSeen=Date.now()-16000;tick();assert.ok(!r.players.includes(p));
+  assert.equal((await call('resume',a)).status,200);assert.ok(r.players.includes(p));assert.equal(p.score,321);
+  await call('leave',a);assert.equal((await call('resume',a)).status,410);
+ });
+ await t.test('batched drawing validates turn and strokes before adding anything',async()=>{
+  const {h,r}=await setup();await begin(h,r);const stroke={color:'#283449',size:9,points:[{x:0,y:0},{x:10,y:10}]};
+  assert.equal((await call('stroke',{...h,turn:r.turn,strokes:[stroke,stroke]})).status,200);assert.equal(r.strokes.length,2);
+  assert.equal((await call('stroke',{...h,turn:r.turn-1,strokes:[stroke]})).status,400);assert.equal(r.strokes.length,2);
+  assert.equal((await call('stroke',{...h,turn:r.turn,strokes:[stroke,{...stroke,color:'bad'}]})).status,400);assert.equal(r.strokes.length,2);
+ });
  await t.test('SSE reconnect snapshot and static assets work',async()=>{
-  const h=await call('create',{name:'Reconnect'});const controller=new AbortController();const res=await fetch(`${base}/events?room=${h.room}&token=${h.token}`,{signal:controller.signal});assert.equal(res.status,200);const reader=res.body.getReader();const first=await reader.read();assert.ok(new TextDecoder().decode(first.value).includes('event: state'));controller.abort();assert.equal((await call('resume',h)).status,200);
-  for(const route of ['/','/app.js','/style.css','/rules.mjs'])assert.equal((await fetch(base+route)).status,200);
+  const h=await call('create',{name:'Reconnect'});const controller=new AbortController();const res=await fetch(`${base}/events?room=${h.room}&token=${h.token}`,{signal:controller.signal});assert.equal(res.status,200);const reader=res.body.getReader();const first=await reader.read();let output=new TextDecoder().decode(first.value);while(!output.includes('event: state'))output+=new TextDecoder().decode((await reader.read()).value);assert.ok(output.includes('event: state'));controller.abort();assert.equal((await call('resume',h)).status,200);
+  for(const route of ['/','/app.js','/style.css','/rules.mjs','/live-connection.mjs'])assert.equal((await fetch(base+route)).status,200);
  });
  }finally{rooms.clear();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });

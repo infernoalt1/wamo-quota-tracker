@@ -1,8 +1,8 @@
 // All awards are computed once, at turn end, using the original duration.
-export function guessPoints(elapsedMs, firstGuessMs, durationMs) {
+// Custom rank + time formula; skribbl.io's exact current server formula is unverified.
+export function guessPoints(elapsedMs, position, durationMs) {
   const elapsed=Math.max(0,Math.min(durationMs,elapsedMs));
-  const lag=Math.max(0,elapsed-firstGuessMs);
-  return Math.round(400+200*(1-elapsed/durationMs)+200*Math.exp(-lag/(.2*durationMs)));
+  return Math.round(100+400*(1-elapsed/durationMs)+400/Math.max(1,position));
 }
 export function artistPoints(guessTimes, eligible, durationMs) {
   if(!eligible)return 0;
