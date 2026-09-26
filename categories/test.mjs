@@ -6,6 +6,7 @@ import express from 'express';
 import {createRoom,addPlayer,configure,start,tickRoom,submit,snapshot,callOut,confirmCallout,cancelCallout,leave,timing} from './engine.mjs';
 import {catalog,normalize,answerKey} from './catalog.mjs';
 import {handleRequest,rooms,tick as tickServer} from './server.mjs';
+import {recapCsv} from './recap.mjs';
 
 function game(count=3,settings={}){
   const r=createRoom('TEST');for(let i=0;i<count;i++)addPlayer(r,['Alex','Sam','Jo','Lee','Max','Kim','Bo','Val'][i]||'Player '+i);
@@ -135,9 +136,40 @@ test('disconnected host transfers, grace expires, and unused rooms are collected
   host.lastSeen=now-61000;tickServer(now);assert.equal(host.left,true);assert.equal(guest.left,false);
   guest.streams.clear();guest.left=true;r.updated=now-16*60000;tickServer(now);assert.equal(rooms.has(r.code),false);
 });
+test('planned categories play in order and the finished recap includes all rounds and outcomes',()=>{
+  const r=game(2,{rounds:2,categoryMode:'plan',roundPlan:['Animals','Our totally made-up category'],showAnswers:false});
+  assert.equal(r.category.id,'animals');answer(r,'fox');finishPhase(r);answer(r,'FOX');
+  assert.equal(r.phase,'result');assert.equal(snapshot(r,r.players[0]).recap,null);
+  finishPhase(r);assert.equal(r.category.name,'Our totally made-up category');finishPhase(r);
+  answer(r,'a local joke');callOut(r,r.players[0],r.turn,reviewNow(r));finishPhase(r);finishPhase(r);
+  assert.equal(r.phase,'finished');const recap=snapshot(r,r.players[0]).recap;
+  assert.equal(recap.rounds.length,2);assert.deepEqual(recap.rounds[0].answers.map(a=>a.status),['accepted','duplicate']);
+  assert.equal(recap.rounds[0].answers[1].answer,'FOX');assert.equal(recap.rounds[1].answers[0].status,'invalid');
+  assert.equal(recap.rounds[1].answers[0].callout.caller,'Alex');assert.equal(recap.rounds[1].answers[0].callout.outcome,'upheld');
+  assert.ok(!JSON.stringify(recap).includes(r.players[0].token));assert.equal(recap.rounds[0].answers[0].key,undefined);
+  const previous=JSON.stringify(recap);r.phase='lobby';assert.equal(snapshot(r,r.players[1]).recap.id,recap.id);
+  start(r);assert.equal(snapshot(r,r.players[0]).recap,null);assert.equal(JSON.stringify(r.lastRecap),previous);assert.equal(r.gameLog.length,1);
+});
+test('recaps include timeouts, undone call-outs and departed players',()=>{
+  const r=game(3,{rounds:1});answer(r,'cat');callOut(r,r.players[1],r.turn,reviewNow(r));confirmCallout(r,r.players[2],r.turn,reviewNow(r));cancelCallout(r,r.players[1],r.turn,r.deadline-1);
+  leave(r,r.players[2]);finishPhase(r);finishPhase(r);
+  assert.equal(r.phase,'finished');assert.equal(r.lastRecap.players[2].left,true);
+  assert.equal(r.lastRecap.rounds[0].answers[0].callout.outcome,'undone');assert.equal(r.lastRecap.rounds[0].answers[0].status,'accepted');
+  assert.equal(r.lastRecap.rounds[0].answers[1].status,'timeout');
+});
+test('round plan validation prevents empty rounds and rejects malformed input',()=>{
+  const r=createRoom('PLAN');addPlayer(r,'A');addPlayer(r,'B');configure(r,{categoryMode:'plan',rounds:2,roundPlan:['Custom']});
+  assert.throws(()=>start(r),/every round/);assert.equal(r.phase,'lobby');
+  for(const roundPlan of ['Animals',[null],Array(21).fill('Animals'),['x'.repeat(81)]])assert.throws(()=>configure(r,{roundPlan}));
+  configure(r,{roundPlan:['Any category','Another category']});start(r);assert.equal(r.category.name,'Any category');
+});
+test('CSV exports escape quotes, multiline answers, Unicode, and formula-like cells',()=>{
+  const csv=recapCsv({room:'TEST',id:'game',players:[{id:'p',score:2}],rounds:[{round:1,category:'=SUM(1,2)',winner:{name:'Sam'},answers:[{player:'p',turn:1,name:'@name',answer:'hello, "world"\n\u732b',status:'accepted'}]}]});
+  assert.ok(csv.startsWith('\uFEFF'));assert.ok(csv.includes('"\'=SUM(1,2)"'));assert.ok(csv.includes('"\'@name"'));assert.ok(csv.includes('"hello, ""world""\n\u732b"'));assert.ok(csv.includes('"Sam","2"'));
+});
 test('client assets and instructions have no legacy judges, answer sets, or majority controls',async()=>{
   const app=await readFile(new URL('./app.js',import.meta.url),'utf8'),html=await readFile(new URL('./index.html',import.meta.url),'utf8'),docs=await readFile(new URL('./README.md',import.meta.url),'utf8');
-  for(const text of [app,html,docs])assert.doesNotMatch(text,/Gemini|GEMINI_API_KEY|aiAvailable|castVote|data-vote|majority|dataset|answer sets/i);
+  for(const text of [app,html,docs])assert.doesNotMatch(text,/Gemini|GEMINI_API_KEY|aiAvailable|castVote|data-vote|majority|dataset(?!\.)|answer sets/i);
   assert.match(app,/confirmCallout/);assert.match(app,/cancelCallout/);assert.match(html,/Call Out/);
   await assert.rejects(()=>access(new URL('./datasets.mjs',import.meta.url)));await assert.rejects(()=>access(new URL('./validation.mjs',import.meta.url)));
 });
@@ -153,6 +185,7 @@ test('mounted /categories supports HTTP call-outs, permissions, SSE recovery, un
   assert.equal(host.status,200);assert.equal(host.room.length,5);assert.equal(guest.status,200);assert.equal(third.status,200);
   assert.equal((await post({...guest,action:'start'})).status,400);assert.equal((await post({...host,action:'settings',settings:{category:'animals',rounds:1,showAnswers:false}})).status,200);assert.equal((await post({...host,action:'start'})).status,200);
   const r=rooms.get(host.room);finishPhase(r);
+  assert.equal((await post({...guest,action:'export',format:'csv'})).status,400);
   assert.equal((await post({...host,action:'answer',turn:r.turn,answer:'spaceship'})).status,200);assert.equal(r.phase,'review');
   assert.equal((await post({...host,action:'callout',turn:r.turn})).status,400);
   assert.equal((await post({...guest,action:'callout',turn:r.turn})).status,200);assert.equal(r.phase,'callout');
@@ -165,7 +198,10 @@ test('mounted /categories supports HTTP call-outs, permissions, SSE recovery, un
   assert.equal((await post({...guest,action:'answer',answer:'SPACESHIP',turn:r.turn})).status,200);assert.equal(r.players[1].alive,false);
   assert.equal((await post({...third,action:'answer',answer:'not an animal',turn:r.turn})).status,200);
   assert.equal((await post({...host,action:'callout',turn:r.turn})).status,200);assert.equal(r.phase,'calledout');finishPhase(r);assert.equal(r.players[0].score,1);finishPhase(r);assert.equal(r.phase,'finished');
+  const exported=await post({...guest,action:'export',format:'csv'});assert.equal(exported.status,200);assert.match(exported.filename,/\.csv$/);assert.match(exported.content,/SPACESHIP/);assert.match(exported.content,/duplicate/);
+  assert.equal((await post({room:host.room,token:'wrong',action:'export',format:'json'})).status,410);
   assert.equal((await post({...host,action:'lobby'})).status,200);assert.equal(r.phase,'lobby');
+  const exportedJson=await post({...third,action:'export',format:'json'});assert.equal(exportedJson.status,200);assert.equal(JSON.parse(exportedJson.content).rounds.length,1);
   assert.equal((await post({...guest,action:'leave'},{origin:'https://evil.example'})).status,400);
   assert.equal((await post({...host,action:'vote',value:false})).status,400);
   await post({...guest,action:'leave'});assert.equal((await post({...guest,action:'resume'})).status,410);

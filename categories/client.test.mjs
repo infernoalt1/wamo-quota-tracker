@@ -14,6 +14,7 @@ const wait=async(fn,label)=>{for(let i=0;i<150;i++){if(fn())return;await new Pro
 function client(saved){
  const console=new VirtualConsole();console.on('jsdomError',e=>errors.push(e.message));
  const dom=new JSDOM(html,{url,runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:console});doms.push(dom);const w=dom.window;
+ w.__downloads=[];w.Blob=Blob;w.URL.createObjectURL=blob=>{w.__downloads.push({blob});return 'blob:test';};w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.__downloads.at(-1).filename=this.download;};
  w.fetch=(input,options)=>fetch(new URL(input,url),options);w.AbortSignal=AbortSignal;w.matchMedia=()=>({matches:true});
  w.EventSource=class{
   listeners={};controller=new AbortController();
@@ -46,10 +47,25 @@ try{
  await send(guest,'SPACESHIP');await wait(()=>q(third,'#answer-form'),'duplicate skips eliminated player');assert.equal(room.players[1].alive,false);
  await send(third,'Another weird answer');await wait(()=>q(host,'#callout'),'two survivors callout');assert.equal(q(guest,'#callout'),null);q(host,'#callout').click();await wait(()=>room.phase==='calledout'&&q(host,'#cancel-callout'),'two-player immediate result');assert.equal(room.players[2].alive,false);assert.equal(room.players[0].score,0);
  advance();await wait(()=>q(host,'.result-board'),'round result');assert.match(q(host,'.result-board h2').textContent,/Host takes it/);assert.equal(room.players[0].score,1);
- advance();await wait(()=>q(host,'#lobby'),'final results');q(host,'#lobby').click();await wait(()=>q(host,'#settings-form'),'rematch lobby');
+ advance();await wait(()=>q(host,'#lobby'),'final results');
+ await wait(()=>q(guest,'.recap'),'all players get recap');assert.match(q(host,'.recap').textContent,/Spaceship/);assert.match(q(host,'.recap').textContent,/SPACESHIP/);assert.match(q(host,'.recap').textContent,/Repeat/);assert.match(q(host,'.recap').textContent,/Called out/);
+ q(guest,'[data-export="csv"]').click();await wait(()=>guest.window.__downloads[0]?.filename,'CSV download');assert.match(guest.window.__downloads[0].filename,/\.csv$/);assert.match(await guest.window.__downloads[0].blob.text(),/SPACESHIP/);
+ q(host,'[data-export="json"]').click();await wait(()=>host.window.__downloads[0]?.filename,'JSON download');assert.equal(JSON.parse(await host.window.__downloads[0].blob.text()).rounds[0].answers.length,3);
+ q(host,'#lobby').click();await wait(()=>q(host,'#settings-form'),'rematch lobby');
  change(host,'[name=pack]','Custom');assert.equal(q(host,'[name=category]').disabled,true);change(host,'[name=custom]','Inside jokes at lunch');q(host,'#settings-form').requestSubmit(q(host,'button[value=start]'));await wait(()=>q(host,'.reveal-card'),'custom reveal');assert.equal(room.category.name,'Inside jokes at lunch');advance();
  await send(host,'The cafeteria incident');await wait(()=>q(guest,'#callout'),'custom callout');q(guest,'#callout').click();await wait(()=>q(third,'#confirm-callout'),'unconfirmed callout');advance();await wait(()=>q(guest,'#answer-form'),'failed callout continues');assert.equal(room.players[0].alive,true);
  await send(guest,'A surprise answer');await wait(()=>room.phase==='review','regular review');advance();await wait(()=>q(third,'#answer-form'),'uncontested answer continues');advance();await wait(()=>q(host,'#answer-form'),'timeout continues');advance();await wait(()=>q(host,'.result-board'),'timeout round result');advance();await wait(()=>q(host,'#lobby'),'second final');
+
+ q(host,'#lobby').click();await wait(()=>q(host,'#settings-form'),'planner lobby');assert.ok(q(host,'.recap'));
+ change(host,'[name=categoryMode]','plan');change(host,'[name=rounds]','2');
+ assert.equal(host.window.document.querySelectorAll('[name=roundCategory]').length,2);
+ change(host,'#round-category-0','Animals');change(host,'#round-category-1','Anything <friends> say');
+ q(host,'#settings-form').requestSubmit(q(host,'button[value=save]'));await wait(()=>room.settings.roundPlan[1]==='Anything <friends> say','saved round plan');
+ streams.filter(s=>s.owner===host.window).forEach(s=>s.close());host.window.close();host=client(hostSaved);await wait(()=>q(host,'#round-category-1'),'round plan after refresh');assert.equal(q(host,'#round-category-1').value,'Anything <friends> say');assert.ok(q(host,'.recap'));
+ q(host,'#settings-form').requestSubmit(q(host,'button[value=start]'));await wait(()=>q(host,'.reveal-card'),'planned game');assert.equal(room.category.name,'Animals');assert.equal(q(host,'.recap'),null);
+ advance();advance();advance();assert.equal(room.phase,'result');advance();assert.equal(room.category.name,'Anything <friends> say');advance();advance();advance();advance();
+ await wait(()=>q(host,'#lobby'),'planned final');assert.equal(host.window.document.querySelectorAll('.recap-round').length,2);assert.match(q(host,'.recap').textContent,/Anything <friends> say/);assert.equal(q(host,'.recap friends'),null);
+
  assert.deepEqual(errors,[]);for(const dom of doms)assert.equal(dom.window.__error,undefined);
 
 }finally{streams.forEach(s=>s.close());doms.forEach(d=>d.window.close());server.closeAllConnections();server.close();rooms.clear();}

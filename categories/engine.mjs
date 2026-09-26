@@ -1,16 +1,20 @@
 import {randomInt,randomUUID} from 'node:crypto';
 import {catalog,answerKey,normalize} from './catalog.mjs';
 
-export const defaults={rounds:5,seconds:10,showAnswers:true,pack:'All',category:'random',custom:'',mode:'normal'};
+export const defaults={rounds:5,seconds:10,showAnswers:true,pack:'All',category:'random',custom:'',mode:'normal',categoryMode:'shuffle',roundPlan:[]};
 export const timing={review:2500,confirmation:4000,undo:1500};
 const integer=(n,min,max)=>Math.min(max,Math.max(min,Math.round(Number(n)||min)));
 export function configure(r,input) {
   const s={...r.settings};
   for(const key of ['rounds','seconds'])if(input[key]!==undefined)s[key]=integer(input[key],key==='rounds'?1:4,key==='rounds'?20:30);
   for(const key of ['showAnswers'])if(input[key]!==undefined){if(typeof input[key]!=='boolean')throw Error('Invalid setting.');s[key]=input[key];}
-  for(const [key,options] of Object.entries({pack:['All','Everyday','World','Culture','Local','Custom'],mode:['normal','rhythm']}))if(input[key]!==undefined){if(!options.includes(input[key]))throw Error('Invalid setting.');s[key]=input[key];}
+  for(const [key,options] of Object.entries({pack:['All','Everyday','World','Culture','Local','Custom'],mode:['normal','rhythm'],categoryMode:['shuffle','plan']}))if(input[key]!==undefined){if(!options.includes(input[key]))throw Error('Invalid setting.');s[key]=input[key];}
   if(input.category!==undefined){if(input.category!=='random'&&!catalog.some(c=>c.id===input.category))throw Error('Unknown category.');s.category=input.category;}
   if(input.custom!==undefined)s.custom=String(input.custom).trim().slice(0,1000);
+  if(input.roundPlan!==undefined){
+    if(!Array.isArray(input.roundPlan)||input.roundPlan.length>20||input.roundPlan.some(v=>typeof v!=='string'||v.length>80))throw Error('Use up to 20 category names, 80 characters each.');
+    s.roundPlan=input.roundPlan.map(v=>v.trim());
+  }
   r.settings=s;
 }
 export function createRoom(code){return {code,players:[],host:null,settings:{...defaults},phase:'lobby',round:0,turn:0,deadline:0,used:new Set(),answers:[],category:null,pending:null,event:null,usedCategories:[],updated:Date.now()};}
@@ -23,11 +27,17 @@ export function addPlayer(r,name) {
 const available=r=>r.players.filter(p=>!p.left);
 const living=r=>r.players.filter(p=>!p.left&&p.alive);
 function event(r,kind,text){r.event={id:randomUUID(),kind,text};}
-function finish(r,text='Every round played. Every point earned.') {r.phase='finished';r.deadline=0;r.pending=null;r.active=null;event(r,'finish',text);}
+function finish(r,text='Every round played. Every point earned.') {
+  r.phase='finished';r.deadline=0;r.pending=null;r.active=null;event(r,'finish',text);
+  r.lastRecap={id:r.gameId,room:r.code,startedAt:r.gameStartedAt,finishedAt:Date.now(),
+    players:r.players.map(({id,name,score,left})=>({id,name,score,left})),
+    rounds:(r.gameLog||[]).map(round=>({...round,answers:round.answers.map(({key,...answer})=>({...answer}))}))};
+}
 function settleRound(r,now) {
   if(living(r).length>1)return false;
   const winner=living(r)[0];if(winner)winner.score++;
   r.winner=winner?.id||null;r.phase='result';r.deadline=now+6500;r.pending=null;r.active=null;
+  const log=r.gameLog?.at(-1);if(log){log.winner=winner?{id:winner.id,name:winner.name}:null;log.endedAt=now;}
   event(r,'win',winner?`${winner.name} takes the round!`:'No survivors this round.');return true;
 }
 function beginTurn(r,now,after=r.active) {
@@ -43,12 +53,18 @@ function nextRound(r,now) {
   if(r.round>=r.settings.rounds){finish(r);return;}
   if(available(r).length<2){finish(r,'Not enough players to continue. Invite a friend for another game.');return;}
   let pool;
-  if(r.settings.pack==='Custom')pool=[...new Set(r.settings.custom.split('\n').map(s=>s.trim()).filter(Boolean))].map((name,i)=>({id:`custom-${i}`,name:name.slice(0,80),pack:'Custom',difficulty:'Wildcard',icon:'✨'}));
+  if(r.settings.categoryMode==='plan'){
+    const name=r.settings.roundPlan[r.round];
+    const preset=catalog.find(c=>c.name.toLowerCase()===name.toLowerCase());
+    pool=[preset||{id:`planned-${r.round}`,name,pack:'Custom',difficulty:'Wildcard',icon:'✨'}];
+  }
+  else if(r.settings.pack==='Custom')pool=[...new Set(r.settings.custom.split('\n').map(s=>s.trim()).filter(Boolean))].map((name,i)=>({id:`custom-${i}`,name:name.slice(0,80),pack:'Custom',difficulty:'Wildcard',icon:'✨'}));
   else pool=r.settings.category!=='random'?catalog.filter(c=>c.id===r.settings.category):catalog.filter(c=>r.settings.pack==='All'?c.pack!=='Local':c.pack===r.settings.pack);
   if(!pool.length)throw Error('Add at least one custom category.');
   let fresh=pool.filter(c=>!r.usedCategories.includes(c.id));if(!fresh.length){r.usedCategories=[];fresh=pool;}
   r.category=fresh[randomInt(fresh.length)];r.usedCategories.push(r.category.id);
   r.round++;r.used=new Set();r.answers=[];r.pending=null;r.event=null;r.winner=null;
+  r.gameLog.push({round:r.round,category:r.category.name,startedAt:now,winner:null,answers:r.answers});
   r.players.forEach(p=>{p.alive=!p.left;p.reason='';});
   const participants=available(r);r.active=participants[(r.round-1)%participants.length].id;
   r.phase='reveal';r.deadline=now+3000;
@@ -56,14 +72,18 @@ function nextRound(r,now) {
 export function start(r,now=Date.now()) {
   if(r.phase!=='lobby')throw Error('Return to the lobby first.');
   if(available(r).length<2)throw Error('Invite at least one friend to play.');
-  if(r.settings.pack==='Custom'&&!r.settings.custom.trim())throw Error('Add at least one custom category.');
-  r.players=r.players.filter(p=>!p.left);r.players.forEach(p=>p.score=0);r.round=0;r.usedCategories=[];nextRound(r,now);
+  if(r.settings.categoryMode==='plan'){
+    if(Array.from({length:r.settings.rounds},(_,i)=>r.settings.roundPlan[i]).some(v=>!v))throw Error('Choose or write a category for every round.');
+  }else if(r.settings.pack==='Custom'&&!r.settings.custom.trim())throw Error('Add at least one custom category.');
+  r.players=r.players.filter(p=>!p.left);r.players.forEach(p=>p.score=0);r.round=0;r.usedCategories=[];r.gameLog=[];r.gameId=randomUUID();r.gameStartedAt=now;nextRound(r,now);
 }
 function eliminate(r,p,reason,now) {
+  if(p&&reason==='Time ran out.')r.answers.push({id:randomUUID(),player:p.id,name:p.name,answer:'',status:'timeout',turn:r.turn,submittedAt:now});
   if(p){p.alive=false;p.reason=reason;event(r,'out',`${p.name} is out — ${reason}`);}
   beginTurn(r,now,p?.id||r.active);
 }
 function continueAccepted(r,now,text='That counts!') {
+  if(r.phase==='callout'){const record=r.answers.find(a=>a.id===r.pending.id);if(record.callout?.outcome==='pending')record.callout.outcome='unconfirmed';}
   const player=r.pending.player;
   event(r,'accepted',text);beginTurn(r,now,player);
 }
@@ -73,8 +93,8 @@ export function submit(r,p,body,{now=Date.now()}={}) {
   const answer=String(body.answer??'').trim().slice(0,80);
   if(!normalize(answer))throw Error('Type an answer first.');
   const key=answerKey(r.category,answer);
-  if(r.used.has(key)){eliminate(r,p,'Already said this round.',now);return;}
-  const record={id:randomUUID(),player:p.id,name:p.name,answer,key,status:'accepted'};
+  if(r.used.has(key)){r.answers.push({id:randomUUID(),player:p.id,name:p.name,answer,key,status:'duplicate',turn:r.turn,submittedAt:now});eliminate(r,p,'Already said this round.',now);return;}
+  const record={id:randomUUID(),player:p.id,name:p.name,answer,key,status:'accepted',turn:r.turn,submittedAt:now};
   // Acceptance and duplicate tracking happen immediately, before the call-out window.
   r.used.add(key);r.answers.push(record);
   r.pending={id:record.id,player:p.id,answer,key,reason:"Your crew decides what fits. Call Out if you disagree.",opponents:living(r).filter(q=>q.id!==p.id).map(q=>q.id),caller:null,confirmedBy:null,undoUntil:0};
@@ -84,7 +104,7 @@ function succeedCallout(r,now,confirmer=null){
   const pending=r.pending,player=r.players.find(p=>p.id===pending.player);
   pending.confirmedBy=confirmer;pending.undoUntil=now+timing.undo;
   player.alive=false;player.reason='Called out.';
-  r.answers.find(a=>a.id===pending.id).status='invalid';r.used.delete(pending.key);
+  const record=r.answers.find(a=>a.id===pending.id);record.status='invalid';record.callout.outcome='upheld';record.callout.confirmedBy=confirmer?r.players.find(p=>p.id===confirmer).name:null;r.used.delete(pending.key);
   r.phase='calledout';r.deadline=pending.undoUntil;
   event(r,'out',`${player.name} is out — call-out succeeded.`);
   // Elimination is immediate; defer turn/point settlement for the brief undo grace.
@@ -92,6 +112,7 @@ function succeedCallout(r,now,confirmer=null){
 export function callOut(r,p,turn,now=Date.now()){
   if(r.phase!=='review'||turn!==r.turn||now>=r.deadline||p.left||!p.alive||!r.pending.opponents.includes(p.id))throw Error('You cannot call out this answer.');
   r.pending.caller=p.id;r.pending.undoUntil=now+timing.undo;
+  r.answers.find(a=>a.id===r.pending.id).callout={caller:p.name,outcome:'pending',confirmedBy:null};
   r.pending.eligible=living(r).filter(q=>q.id!==p.id&&q.id!==r.pending.player).map(q=>q.id);
   if(living(r).length===2){succeedCallout(r,now);return;}
   r.phase='callout';r.deadline=now+timing.confirmation;
@@ -105,6 +126,7 @@ export function cancelCallout(r,p,turn,now=Date.now()){
   if(!['callout','calledout'].includes(r.phase)||turn!==r.turn||p.left||r.pending.caller!==p.id||now>=r.pending.undoUntil)throw Error('The undo window has closed.');
   const player=r.players.find(q=>q.id===r.pending.player);
   if(player.left)throw Error('That player has left.');
+  r.answers.find(a=>a.id===r.pending.id).callout.outcome='undone';
   if(r.phase==='calledout'){
     player.alive=true;player.reason='';
     r.answers.find(a=>a.id===r.pending.id).status='accepted';r.used.add(r.pending.key);
@@ -138,7 +160,8 @@ export function snapshot(r,p,now=Date.now()) {
   return {code:r.code,you:p.id,host:r.host,phase:r.phase,round:r.round,turn:r.turn,deadline:r.deadline,startedAt:r.startedAt,serverNow:now,active:r.active,winner:r.winner,
     settings:r.settings,category:r.category?(({plurals,...c})=>c)(r.category):null,event:r.event,
     players:r.players.map(q=>({id:q.id,name:q.name,score:q.score,alive:q.alive,left:q.left,color:q.color,reason:q.reason,online:q.streams.size>0||now-q.lastSeen<15000})),
-    answers:r.settings.showAnswers?r.answers.map(({name,answer,status})=>({name,answer,status})):[],answerCount:r.answers.filter(a=>a.status==='accepted').length,
+    recap:['finished','lobby'].includes(r.phase)?r.lastRecap||null:null,
+    answers:r.settings.showAnswers?r.answers.filter(a=>['accepted','invalid'].includes(a.status)).map(({name,answer,status})=>({name,answer,status})):[],answerCount:r.answers.filter(a=>a.status==='accepted').length,
     pending:current?{answer:current.answer,player:current.player,reason:current.reason,caller:current.caller,confirmedBy:current.confirmedBy,undoUntil:current.undoUntil,
       canCallOut:r.phase==='review'&&now<r.deadline&&!p.left&&p.alive&&current.opponents.includes(p.id),
       canConfirm:r.phase==='callout'&&now<r.deadline&&!p.left&&p.alive&&current.eligible.includes(p.id),

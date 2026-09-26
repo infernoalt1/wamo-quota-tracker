@@ -4,6 +4,7 @@ import {randomInt} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {createRoom,addPlayer,configure,start,submit,callOut,confirmCallout,cancelCallout,leave,tickRoom,snapshot} from './engine.mjs';
 import {publicCatalog} from './catalog.mjs';
+import {recapCsv} from './recap.mjs';
 export const rooms=new Map();
 const assets=new Map(await Promise.all(['index.html','app.js','style.css'].map(async name=>[name,await readFile(new URL(name,import.meta.url))])));
 const limits=new Map();
@@ -28,7 +29,7 @@ export async function handleRequest(req,res){
       // Same-origin JSON requests only; do not inherit the parent app's permissive CORS for mutations.
       if(req.headers.origin){let origin;try{origin=new URL(req.headers.origin);}catch{throw Error('Invalid origin.');}if(origin.host!==req.headers.host)throw Error('Use the game’s own page.');}
       if(!req.headers['content-type']?.includes('application/json'))throw Error('Send JSON.');
-      let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8192)throw Error('Request too large.');}
+      let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>16384)throw Error('Request too large.');}
       const b=JSON.parse(raw);if(!b||typeof b!=='object')throw Error('Invalid request.');
       let r=rooms.get(String(b.room||'').trim().toUpperCase()),p=r?.players.find(p=>p.token===b.token&&!p.explicitLeave),result={ok:true};
       if(b.action==='create'||b.action==='join'){
@@ -48,6 +49,11 @@ export async function handleRequest(req,res){
           if(p.left){if(r.players.filter(q=>!q.left).length>=12)throw Error('Room is full.');p.left=false;p.alive=false;r.host??=p.id;}
           result={room:r.code,token:p.token};
         }else if(b.action==='leave'){p.explicitLeave=true;leave(r,p);}
+        else if(b.action==='export'){
+          if(!['finished','lobby'].includes(r.phase)||!r.lastRecap)throw Error('The recap is available after the game finishes.');
+          if(!['csv','json'].includes(b.format))throw Error('Choose CSV or JSON.');
+          result={filename:`categories-${r.code}-${r.lastRecap.id}.${b.format}`,content:b.format==='csv'?recapCsv(r.lastRecap):JSON.stringify(r.lastRecap,null,2)};
+        }
         else if(b.action==='answer')submit(r,p,b);
         else if(b.action==='callout')callOut(r,p,b.turn);
         else if(b.action==='confirmCallout')confirmCallout(r,p,b.turn);
