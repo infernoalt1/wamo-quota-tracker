@@ -1,6 +1,5 @@
 import {randomInt,randomUUID} from 'node:crypto';
 import {catalog,answerKey,normalize} from './catalog.mjs';
-import {validateAnswer} from './validation.mjs';
 
 export const defaults={rounds:5,seconds:10,showAnswers:true,pack:'All',category:'random',custom:'',mode:'normal'};
 export const timing={review:2500,confirmation:4000,undo:1500};
@@ -75,12 +74,10 @@ export function submit(r,p,body,{now=Date.now()}={}) {
   if(!normalize(answer))throw Error('Type an answer first.');
   const key=answerKey(r.category,answer);
   if(r.used.has(key)){eliminate(r,p,'Already said this round.',now);return;}
-  const result=validateAnswer(r.category,answer);
-  if(result.verdict==='invalid'){eliminate(r,p,result.reason,now);return;}
   const record={id:randomUUID(),player:p.id,name:p.name,answer,key,status:'accepted'};
   // Acceptance and duplicate tracking happen immediately, before the call-out window.
   r.used.add(key);r.answers.push(record);
-  r.pending={id:record.id,player:p.id,answer,key,reason:result.reason,opponents:living(r).filter(q=>q.id!==p.id).map(q=>q.id),caller:null,confirmedBy:null,undoUntil:0};
+  r.pending={id:record.id,player:p.id,answer,key,reason:"Your crew decides what fits. Call Out if you disagree.",opponents:living(r).filter(q=>q.id!==p.id).map(q=>q.id),caller:null,confirmedBy:null,undoUntil:0};
   r.phase='review';r.deadline=now+timing.review;event(r,'accepted','That counts!');
 }
 function succeedCallout(r,now,confirmer=null){
@@ -139,7 +136,7 @@ export function tickRoom(r,now=Date.now()) {
 export function snapshot(r,p,now=Date.now()) {
   const current=['review','callout','calledout'].includes(r.phase)?r.pending:null;
   return {code:r.code,you:p.id,host:r.host,phase:r.phase,round:r.round,turn:r.turn,deadline:r.deadline,startedAt:r.startedAt,serverNow:now,active:r.active,winner:r.winner,
-    settings:r.settings,category:r.category?(({answers,plurals,...c})=>c)(r.category):null,event:r.event,
+    settings:r.settings,category:r.category?(({plurals,...c})=>c)(r.category):null,event:r.event,
     players:r.players.map(q=>({id:q.id,name:q.name,score:q.score,alive:q.alive,left:q.left,color:q.color,reason:q.reason,online:q.streams.size>0||now-q.lastSeen<15000})),
     answers:r.settings.showAnswers?r.answers.map(({name,answer,status})=>({name,answer,status})):[],answerCount:r.answers.filter(a=>a.status==='accepted').length,
     pending:current?{answer:current.answer,player:current.player,reason:current.reason,caller:current.caller,confirmedBy:current.confirmedBy,undoUntil:current.undoUntil,
