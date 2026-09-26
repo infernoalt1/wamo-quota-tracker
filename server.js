@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import http from 'http';
 import { setupContactGame } from './contact-game.js';
 import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
+import { handleRequest as handleCategories } from './categories/server.mjs';
 
 dotenv.config();
 
@@ -32,6 +33,13 @@ app.use('/sketch-party', (req, res) => {
     return res.redirect(308, '/sketch-party/' + query);
   }
   return handleSketchParty(req, res);
+});
+app.use('/categories', (req, res) => {
+  if (req.originalUrl.split('?')[0] === '/categories') {
+    const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+    return res.redirect(308, '/categories/' + query);
+  }
+  return handleCategories(req, res);
 });
 app.use(express.json({ limit: '50mb' })); // Increased limit for bulk uploads
 
