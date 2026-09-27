@@ -16,6 +16,7 @@ function client(saved){
  const dom=new JSDOM(html,{url,runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:console});doms.push(dom);const w=dom.window;
  w.__downloads=[];w.Blob=Blob;w.URL.createObjectURL=blob=>{w.__downloads.push({blob});return 'blob:test';};w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.__downloads.at(-1).filename=this.download;};
  w.fetch=(input,options)=>fetch(new URL(input,url),options);w.AbortSignal=AbortSignal;w.matchMedia=()=>({matches:true});
+ w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.EventSource=class{
   listeners={};controller=new AbortController();
   constructor(path){this.owner=w;streams.push(this);(async()=>{try{const response=await fetch(new URL(path,url),{signal:this.controller.signal});const reader=response.body.getReader();let buffer='';for(;;){const{value,done}=await reader.read();if(done)break;buffer+=new TextDecoder().decode(value);let end;while((end=buffer.indexOf('\n\n'))>=0){const part=buffer.slice(0,end);buffer=buffer.slice(end+2);if(part.startsWith('event: state\n'))this.listeners.state?.({data:part.slice('event: state\ndata: '.length)});}}}catch(e){if(e.name!=='AbortError')errors.push(e.message);}})();}
@@ -29,13 +30,22 @@ function client(saved){
 const q=(dom,s)=>dom.window.document.querySelector(s);
 const change=(dom,selector,value)=>{const el=q(dom,selector);if(el.type==='checkbox')el.checked=value;else el.value=value;el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
 try{
- let host=client();await wait(()=>q(host,'#entry-form'),'landing');change(host,'#name','Host');q(host,'#entry-form').requestSubmit(q(host,'button[value=create]'));
+ let host=client();await wait(()=>q(host,'#entry-form'),'landing');
+ q(host,'[data-edit-face]').click();change(host,'#custom-emoji','hello');q(host,'#emoji-form').requestSubmit(q(host,'#use-emoji'));assert.match(q(host,'#emoji-error').textContent,/one emoji/);
+ change(host,'#custom-emoji','🧑🏽‍🚀');q(host,'#emoji-form').requestSubmit(q(host,'#use-emoji'));assert.equal(q(host,'#emoji-picker').open,false);assert.equal(q(host,'[data-edit-face] .avatar').textContent,'🧑🏽‍🚀');
+ change(host,'#name','Host');q(host,'#entry-form').requestSubmit(q(host,'button[value=create]'));
  await wait(()=>q(host,'#settings-form'),'host lobby');const hostSaved=host.window.sessionStorage.getItem('categories.session'),credentials=JSON.parse(hostSaved);
  assert.equal(q(host,'button[value=start]').disabled,true);assert.equal(q(host,'[name=validation]'),null);assert.equal(q(host,'[name=challenges]'),null);
  async function join(name){const dom=client();await wait(()=>q(dom,'#entry-form'),name+' landing');change(dom,'#name',name);change(dom,'#room-code',credentials.room);q(dom,'#entry-form').requestSubmit(q(dom,'button[value=join]'));await wait(()=>q(dom,'#settings-form'),name+' lobby');return dom;}
  const guest=await join('Friend');let third=await join('Third');await wait(()=>!q(host,'button[value=start]').disabled,'start enabled');assert.equal(q(guest,'fieldset').disabled,true);
+ assert.equal(rooms.get(credentials.room).players[0].emoji,'🧑🏽‍🚀');
+ q(guest,'[data-edit-face]').click();q(guest,'[data-emoji="🦋"]').click();q(guest,'.emoji-close').click();assert.equal(rooms.get(credentials.room).players[1].emoji,'🐸');
+ q(guest,'[data-edit-face]').click();change(guest,'#custom-emoji','🇺🇸');q(guest,'#emoji-form').requestSubmit(q(guest,'#use-emoji'));
+ await wait(()=>q(host,'.player-list').textContent.includes('🇺🇸'),'emoji broadcast');assert.equal(guest.window.sessionStorage.getItem('categories.emoji'),'🇺🇸');
  change(host,'[name=rounds]','1');change(host,'[name=seconds]','30');change(host,'[name=category]','animals');change(host,'[name=showAnswers]',false);q(host,'#settings-form').requestSubmit(q(host,'button[value=start]'));
  await wait(()=>q(host,'.reveal-card'),'category reveal');const room=rooms.get(credentials.room);
+ assert.equal(q(host,'[data-edit-face]'),null);
+ const avatarResponse=await fetch(new URL('./api',url),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...credentials,action:'avatar',emoji:'🐸'})});assert.equal(avatarResponse.status,400);
  const advance=()=>{tickRoom(room,room.deadline);broadcast(room);};
  const send=async(dom,text)=>{await wait(()=>q(dom,'#answer-form'),'answer input');change(dom,'#answer',text);q(dom,'#answer-form').requestSubmit(q(dom,'#answer-form button'));};
  advance();await send(host,'Spaceship');await wait(()=>q(guest,'#callout'),'opponent callout button');assert.equal(q(host,'#callout'),null);assert.match(q(host,'.answer-reveal').textContent,/Spaceship/);
@@ -62,6 +72,7 @@ try{
  change(host,'#round-category-0','Animals');change(host,'#round-category-1','Anything <friends> say');
  q(host,'#settings-form').requestSubmit(q(host,'button[value=save]'));await wait(()=>room.settings.roundPlan[1]==='Anything <friends> say','saved round plan');
  streams.filter(s=>s.owner===host.window).forEach(s=>s.close());host.window.close();host=client(hostSaved);await wait(()=>q(host,'#round-category-1'),'round plan after refresh');assert.equal(q(host,'#round-category-1').value,'Anything <friends> say');assert.ok(q(host,'.recap'));
+ assert.equal(q(host,'[data-edit-face] .avatar').textContent,'🧑🏽‍🚀');
  q(host,'#settings-form').requestSubmit(q(host,'button[value=start]'));await wait(()=>q(host,'.reveal-card'),'planned game');assert.equal(room.category.name,'Animals');assert.equal(q(host,'.recap'),null);
  advance();advance();advance();assert.equal(room.phase,'result');advance();assert.equal(room.category.name,'Anything <friends> say');advance();advance();advance();advance();
  await wait(()=>q(host,'#lobby'),'planned final');assert.equal(host.window.document.querySelectorAll('.recap-round').length,2);assert.match(q(host,'.recap').textContent,/Anything <friends> say/);assert.equal(q(host,'.recap friends'),null);

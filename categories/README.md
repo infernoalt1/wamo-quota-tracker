@@ -46,3 +46,9 @@ An unconfirmed call-out expires without penalty. If its caller leaves or all eli
 - Disconnections retain the player's place for 60 seconds; their turn timer still runs. After that, they leave the round and may resume as spectators until the next round. A disconnected host is replaced after 20 seconds. Explicit Leave invalidates the session. Rooms with fewer than two participants finish after the result screen.
 
 The game has server-side authorization, bounded request sizes, room/player limits, basic throttling, escaped player text, and stale-turn checks. It is intended for private groups of friends playing honestly.
+
+## Interface and avatars
+
+The lobby uses compact light settings cards with a dark player list. Gameplay keeps the category, timer, answer entry, and Call Out controls on a dark central board. Instructions stay behind the ? button.
+
+Click your avatar before joining or in the lobby to choose a suggested emoji or paste any single emoji. Joined families, skin tones, flags, and keycaps are supported. Changes sync to everyone in the room and survive reconnecting. Emoji appearance depends on the device's emoji font. Avatars are included in the JSON recap.

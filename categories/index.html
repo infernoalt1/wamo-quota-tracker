@@ -2,17 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f3ea">
+  <meta name="theme-color" content="#202346">
   <meta name="description" content="One category. No repeats. Think fast, outlast your friends, and keep the party going. Play Categories together online.">
   <title>Categories — Think fast. Stay in.</title>
   <link rel="stylesheet" href="./style.css">
   <script type="module" src="./app.js"></script>
 </head>
 <body>
-  <header class="topbar"><a class="wordmark" href="./" aria-label="Categories home"><span class="logo">C<span>•</span></span> categories<span class="wordmark-dot">.</span></a><div class="top-actions"><span id="connection" class="connection">Made for your people</span><button id="sound" class="icon-button" aria-label="Enable sound" aria-pressed="false">♫ <span>Sound off</span></button><button id="help" class="icon-button" aria-label="How to play">?</button></div></header>
-  <main id="app"><div class="loading">Getting the party ready<span>•••</span></div></main>
-  <footer><span>A little pressure. A lot of “wait, does that count?”</span><span>Categories · Play together</span></footer>
+  <header class="topbar"><a class="wordmark" href="./" aria-label="Categories home"><span class="logo">C<span>•</span></span> categories<span class="wordmark-dot">.</span></a><div class="top-actions"><span id="connection" class="connection"></span><button id="sound" class="icon-button" aria-label="Enable sound" aria-pressed="false">♫ <span>Sound off</span></button><button id="help" class="icon-button" aria-label="How to play">?</button></div></header>
+  <main id="app"><div class="loading">Loading<span>•••</span></div></main>
+
   <div id="toast" role="status" aria-live="polite"></div>
   <dialog id="rules"><button class="dialog-close icon-button" aria-label="Close instructions">×</button><span class="eyebrow">THE 30-SECOND RULEBOOK</span><h2>Think fast.<br>Stay in.</h2><ol><li><b>One category, everyone in.</b> Take turns naming something that fits. Your friends judge the answers.</li><li><b>Beat the clock.</b> Repeats and timeouts knock you out automatically.</li><li><b>Last player standing wins a point.</b> Everyone returns next round. Most points wins; ties share the crown.</li></ol><p><b>Something doesn't fit? Call Out.</b> After each answer, other players still alive have 2.5 seconds to call it out. With 3+ active players, one additional player must confirm within 4 seconds. The answerer and caller cannot confirm. Without confirmation, the answer counts.</p><p>With exactly 2 players still alive, the opponent's call-out succeeds immediately. The caller has 1.5 seconds to undo an accidental call-out, including after it succeeds. Eliminated players and spectators watch until the next round.</p><p>Memory mode hides each answer after its Call Out interaction during play. After the game, everyone can view all rounds and export the answers. The host can choose or invent a different category for every round in the lobby. Rhythm mode gives you a four-beat loop at 120 BPM: answer before your turn's beats run out. Sound is optional.</p><button class="button primary dialog-close">Got it. Let’s play ↗</button></dialog>
+<dialog id="emoji-picker" aria-labelledby="emoji-title"><button type="button" class="icon-button emoji-close" aria-label="Close emoji picker">&times;</button><h2 id="emoji-title">Pick your face</h2><form id="emoji-form"><div id="emoji-preview" aria-live="polite"></div><div id="emoji-grid"></div><label class="custom-emoji-label" for="custom-emoji">Or paste any emoji<input id="custom-emoji" maxlength="64" autocomplete="off" spellcheck="false" aria-describedby="emoji-error"></label><p id="emoji-error" role="alert"></p><div class="emoji-buttons"><button type="button" class="button secondary emoji-close">Cancel</button><button id="use-emoji" class="button primary" type="submit">Use this emoji</button></div></form></dialog>
 </body>
 </html>

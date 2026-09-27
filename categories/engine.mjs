@@ -1,3 +1,4 @@
+import {validateEmoji} from './emoji.mjs';
 import {randomInt,randomUUID} from 'node:crypto';
 import {catalog,answerKey,normalize} from './catalog.mjs';
 
@@ -18,9 +19,9 @@ export function configure(r,input) {
   r.settings=s;
 }
 export function createRoom(code){return {code,players:[],host:null,settings:{...defaults},phase:'lobby',round:0,turn:0,deadline:0,used:new Set(),answers:[],category:null,pending:null,event:null,usedCategories:[],updated:Date.now()};}
-export function addPlayer(r,name) {
+export function addPlayer(r,name,emoji) {
   if(r.players.filter(p=>!p.left).length>=12)throw Error('This room is full (12 players).');
-  const p={id:randomUUID(),token:randomUUID(),name:String(name||'').trim().slice(0,20),score:0,alive:false,left:false,streams:new Set(),lastSeen:Date.now(),color:r.players.length%8};
+  const p={id:randomUUID(),token:randomUUID(),name:String(name||'').trim().slice(0,20),score:0,alive:false,left:false,streams:new Set(),lastSeen:Date.now(),emoji:validateEmoji(emoji),color:r.players.length%8};
   if(!p.name)throw Error('Choose a name first.');
   r.players.push(p);r.host??=p.id;return p;
 }
@@ -30,7 +31,7 @@ function event(r,kind,text){r.event={id:randomUUID(),kind,text};}
 function finish(r,text='Every round played. Every point earned.') {
   r.phase='finished';r.deadline=0;r.pending=null;r.active=null;event(r,'finish',text);
   r.lastRecap={id:r.gameId,room:r.code,startedAt:r.gameStartedAt,finishedAt:Date.now(),
-    players:r.players.map(({id,name,score,left})=>({id,name,score,left})),
+    players:r.players.map(({id,name,emoji,score,left})=>({id,name,emoji,score,left})),
     rounds:(r.gameLog||[]).map(round=>({...round,answers:round.answers.map(({key,...answer})=>({...answer}))}))};
 }
 function settleRound(r,now) {
@@ -159,7 +160,7 @@ export function snapshot(r,p,now=Date.now()) {
   const current=['review','callout','calledout'].includes(r.phase)?r.pending:null;
   return {code:r.code,you:p.id,host:r.host,phase:r.phase,round:r.round,turn:r.turn,deadline:r.deadline,startedAt:r.startedAt,serverNow:now,active:r.active,winner:r.winner,
     settings:r.settings,category:r.category?(({plurals,...c})=>c)(r.category):null,event:r.event,
-    players:r.players.map(q=>({id:q.id,name:q.name,score:q.score,alive:q.alive,left:q.left,color:q.color,reason:q.reason,online:q.streams.size>0||now-q.lastSeen<15000})),
+    players:r.players.map(q=>({id:q.id,name:q.name,emoji:q.emoji,score:q.score,alive:q.alive,left:q.left,color:q.color,reason:q.reason,online:q.streams.size>0||now-q.lastSeen<15000})),
     recap:['finished','lobby'].includes(r.phase)?r.lastRecap||null:null,
     answers:r.settings.showAnswers?r.answers.filter(a=>['accepted','invalid'].includes(a.status)).map(({name,answer,status})=>({name,answer,status})):[],answerCount:r.answers.filter(a=>a.status==='accepted').length,
     pending:current?{answer:current.answer,player:current.player,reason:current.reason,caller:current.caller,confirmedBy:current.confirmedBy,undoUntil:current.undoUntil,

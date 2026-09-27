@@ -7,6 +7,16 @@ import {createRoom,addPlayer,configure,start,tickRoom,submit,snapshot,callOut,co
 import {catalog,normalize,answerKey} from './catalog.mjs';
 import {handleRequest,rooms,tick as tickServer} from './server.mjs';
 import {recapCsv} from './recap.mjs';
+import {validateEmoji} from './emoji.mjs';
+
+test('emoji avatars preserve joined emoji, modifiers, flags and keycaps; reject text and multiple faces',()=>{
+  for(const emoji of ['⚠️','🧑🏽‍🚀','👨‍👩‍👧‍👦','🇺🇸','1️⃣','🏳️‍🌈','🫩','🦋'])assert.equal(validateEmoji(emoji),emoji);
+  for(const value of ['',null,42,'hello','🐸🐱','<script>','a🐸','1'])assert.throws(()=>validateEmoji(value),/one emoji/);
+  const r=createRoom('FACE'),p=addPlayer(r,'Alex','🧑🏽‍🚀');
+  assert.equal(snapshot(r,p).players[0].emoji,'🧑🏽‍🚀');
+  assert.throws(()=>addPlayer(r,'Invalid','hello'));
+  assert.equal(r.players.length,1);
+});
 
 function game(count=3,settings={}){
   const r=createRoom('TEST');for(let i=0;i<count;i++)addPlayer(r,['Alex','Sam','Jo','Lee','Max','Kim','Bo','Val'][i]||'Player '+i);

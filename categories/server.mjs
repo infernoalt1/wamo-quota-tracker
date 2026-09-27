@@ -1,3 +1,4 @@
+import {validateEmoji} from './emoji.mjs';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {randomInt} from 'node:crypto';
@@ -37,8 +38,8 @@ export async function handleRequest(req,res){
         if(b.action==='create'){
           if(rooms.size>=500)throw Error('The party is full. Try again later.');
           let code;do{code=Array.from({length:5},()=> 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[randomInt(31)]).join('');}while(rooms.has(code));
-          r=createRoom(code);p=addPlayer(r,b.name);rooms.set(code,r);
-        }else{if(!r)throw Error('Room not found. Check your code.');p=addPlayer(r,b.name);}
+          r=createRoom(code);p=addPlayer(r,b.name,b.emoji);rooms.set(code,r);
+        }else{if(!r)throw Error('Room not found. Check your code.');p=addPlayer(r,b.name,b.emoji);}
         result={room:r.code,token:p.token};
       }else{
         if(!r||!p)return json(res,410,{error:'Room expired. Create or join a new room.'});
@@ -49,6 +50,10 @@ export async function handleRequest(req,res){
           if(p.left){if(r.players.filter(q=>!q.left).length>=12)throw Error('Room is full.');p.left=false;p.alive=false;r.host??=p.id;}
           result={room:r.code,token:p.token};
         }else if(b.action==='leave'){p.explicitLeave=true;leave(r,p);}
+        else if(b.action==='avatar'){
+          if(r.phase!=='lobby')throw Error('Change your emoji in the lobby.');
+          p.emoji=validateEmoji(b.emoji);
+        }
         else if(b.action==='export'){
           if(!['finished','lobby'].includes(r.phase)||!r.lastRecap)throw Error('The recap is available after the game finishes.');
           if(!['csv','json'].includes(b.format))throw Error('Choose CSV or JSON.');
