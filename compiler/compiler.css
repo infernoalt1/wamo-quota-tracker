@@ -1,0 +1,38 @@
+.compiler-page { min-height: 100vh; background: #f5f6fa; color: #182139; padding: 0 max(24px, calc((100vw - 1280px) / 2)) 40px; font-family: Inter, system-ui, sans-serif; }
+.compiler-page * { box-sizing: border-box; }
+.compiler-header { height: 88px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e0e4ed; }
+.compiler-page a { text-decoration: none; color: inherit; }
+.compiler-brand { display: flex; align-items: center; font-weight: 800; font-size: 23px; letter-spacing: -1px; }
+.compiler-brand > span:first-child { color: #637088; }
+.compiler-divider { margin: 0 22px; color: #b7becc; font-weight: 400; }
+.compiler-product { font-size: 15px; font-weight: 500; letter-spacing: 0; }
+.compiler-back { font-size: 13px; color: #657087 !important; }
+.compiler-intro { display: flex; justify-content: space-between; align-items: end; gap: 24px; padding: 48px 0 32px; }
+.compiler-eyebrow { font-size: 10px !important; letter-spacing: 2px; font-weight: 700; color: #6659d8 !important; margin: 0 0 14px !important; }
+.compiler-intro h1 { margin: 0; font-size: clamp(27px, 3.2vw, 40px); letter-spacing: -1.5px; line-height: 1.2; font-weight: 700; }
+.compiler-intro p { color: #69758b; font-size: 14px; margin: 14px 0 0; line-height: 1.6; }
+.compiler-native { display: flex; align-items: center; gap: 8px; white-space: nowrap; color: #637087; font-size: 11px; padding-bottom: 4px; }
+.compiler-native i { width: 6px; height: 6px; background: #209978; border-radius: 50%; }
+.compiler-workbench { overflow: hidden; border: 1px solid #dce1ed; border-radius: 14px; background: white; box-shadow: 0 12px 36px #1d29400a; }
+.compiler-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 16px 0 8px; min-height: 68px; }
+.compiler-tabs { display: flex; align-self: stretch; }
+.compiler-page button { font: inherit; cursor: pointer; }
+.compiler-tabs button { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: #7b8497; font-size: 13px; padding: 18px; border-bottom: 2px solid transparent; }
+.compiler-tabs button.active { border-bottom-color: #7563ed; color: #4536ac; }
+.compiler-dot { width: 7px; height: 7px; border-radius: 2px; background: #ed9b70; }
+.compiler-dot.css { background: #76a9ed; }.compiler-dot.javascript { background: #e2c56d; }
+.compiler-actions { display: flex; gap: 10px; }
+.compiler-actions button { background: white; border: 1px solid #dfe3ec; border-radius: 7px; padding: 9px 14px; font-size: 12px; color: #59667d; }
+.compiler-actions .compiler-run { background: #6b55df; color: white; border-color: #6b55df; }
+.compiler-run span { margin-left: 16px; opacity: .75; }
+.compiler-actions button:hover { filter: brightness(.95); }
+.compiler-editor-wrap { background: #141b2b; color: #d5def0; }
+.compiler-file { display: flex; justify-content: space-between; gap: 16px; color: #8d99b0; border-bottom: 1px solid #ffffff0c; font: 11px 'JetBrains Mono', monospace; padding: 17px 24px; }
+.compiler-file span:last-child { color: #7e8ba4; }
+.compiler-editor-wrap textarea { display: block; width: 100%; height: min(52vh, 620px); min-height: 320px; resize: vertical; border: 0; background: transparent; color: #e1e7f5; padding: 24px; font: 13px/1.85 'JetBrains Mono', Consolas, monospace; tab-size: 2; white-space: pre; overflow: auto; outline-offset: -3px; }
+.compiler-editor-footer { display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; color: #748098; font-size: 10px; }
+.compiler-status { font-size: 12px; color: #626f86; padding: 18px 2px; min-height: 50px; }
+.compiler-notes { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; padding-top: 22px; border-top: 1px solid #e0e4ed; }
+.compiler-notes strong { font-size: 12px; font-weight: 600; }.compiler-notes p { color: #748098; font-size: 12px; line-height: 1.8; margin: 8px 0; }
+.compiler-page :focus-visible { outline: 2px solid #9c8bf6; outline-offset: 3px; }
+@media (max-width: 720px) { .compiler-page { padding: 0 16px 28px; }.compiler-header { height: 68px; }.compiler-back { font-size: 11px; }.compiler-divider { margin: 0 12px; }.compiler-intro { padding-top: 32px; }.compiler-native { display: none; }.compiler-toolbar { flex-wrap: wrap; padding: 0 12px 12px; gap: 12px; }.compiler-tabs { width: 100%; }.compiler-tabs button { flex: 1; padding: 16px 12px; justify-content: center; }.compiler-actions { margin-left: auto; }.compiler-file { padding: 15px; }.compiler-file span:last-child { display: none; }.compiler-editor-wrap textarea { padding: 18px; }.compiler-notes { grid-template-columns: 1fr; gap: 16px; }.compiler-editor-footer { padding: 12px; font-size: 9px; } }
