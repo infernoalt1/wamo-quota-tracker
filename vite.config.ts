@@ -3,16 +3,17 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react(), {
-    name: 'cookieclicker-route',
+    name: 'standalone-game-routes',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url || '/', 'http://localhost');
-        if (url.pathname === '/cookieclicker') {
-          res.writeHead(308, { Location: '/cookieclicker/' + url.search });
+        const game = ['cookieclicker', 'hollowknight'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
+        if (game && url.pathname === '/' + game) {
+          res.writeHead(308, { Location: '/' + game + '/' + url.search });
           res.end();
           return;
         }
-        if (url.pathname === '/cookieclicker/') req.url = '/cookieclicker/index.html' + url.search;
+        if (game) req.url = '/' + game + '/index.html' + url.search;
         next();
       });
     },
