@@ -18,6 +18,14 @@ View your app in AI Studio: https://ai.studio/apps/drive/1iZftsT3Nd-jxKPSUg3tdNS
 2. Run the app:
    `npm run dev`
 
+## Cookie Clicker
+
+The supplied Cookie Clicker 2.058 archive is served directly at `/cookieclicker/` (with `/cookieclicker` redirecting there), without an iframe. Vite copies `public/cookieclicker/` into the production build; deploy with the existing `npm run build` and Node server workflow. Images, fonts, sounds, translations, and minigames are bundled locally. Original credits and notices are preserved. Copied advertising, tracking, and Cloudflare injection scripts are removed; remote metadata is replaced with local defaults, so live upstream update notifications, community names, and live herald counts are unavailable.
+
+Progress saves in this browser under `CookieClickerGame-WAMO`. Existing saves from another domain do not transfer automatically: use the game's Options → Export save / Import save. Game assets and code remain attributed to their original creators; the supplied source includes a notice requesting no rehosting. No deployment or permission grant is implied by this local integration.
+
+Run `npm run test:cookieclicker` to check local assets, routing, and the game startup/click/save flow.
+
 ## HTML compiler
 
 Open `/compiler` (or `/compiler/`) in development or on the deployed site. Edit HTML, CSS, and JavaScript, then choose **Run code** to open the result in a new browser tab without an iframe. The editor saves drafts locally and can download a combined `index.html`. Full HTML documents, fragments, and inline scripts are supported; use absolute URLs for external assets. JavaScript in the JavaScript tab runs as a classic script after the HTML. Preview code is not sandboxed and shares the site's origin, so only run trusted code. Run `npm run test:compiler` to check document generation and script execution.

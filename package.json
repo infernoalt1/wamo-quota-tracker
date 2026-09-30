@@ -8,6 +8,7 @@
     "build": "vite build",
     "test:voting": "node tests/voting-rules.test.mjs",
     "test:compiler": "node --test tests/compiler.test.mjs",
+    "test:cookieclicker": "node --test tests/cookieclicker.test.mjs",
     "test:categories": "node --test categories/test.mjs categories/client.test.mjs",
     "preview": "vite preview",
     "start": "node server.js",
