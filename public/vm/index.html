@@ -1,10 +1,504 @@
 ﻿<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Home Desktop - WAMO</title><link rel="stylesheet" href="/vm/style.css"><script type="module" src="/vm/app.js"></script></head>
-<body><header><a href="/" class="brand">WAMO <span>/ CONNECT</span></a><a href="/vm/setup.html">Home setup guide</a></header>
-<main id="landing"><section class="intro"><p class="eyebrow">YOUR DESKTOP, RIGHT HERE</p><h1>Home is one<br>connection away.</h1><p>See and control your home computer directly on this page. Your files and apps stay on your PC.</p><a class="secondary setup-link" href="/vm/home-connector.zip" download>Download home connector</a></section>
-<section class="connection-card" aria-label="Remote connection"><div class="card-heading"><span>REMOTE WORKSPACE</span><span id="badge">CHECKING</span></div><div class="monitor" aria-hidden="true"><div class="screen"><div class="screen-top"><i></i><i></i><i></i></div><div class="screen-content"><span>PC</span><div></div><div></div></div></div><div class="stand"></div><div class="foot"></div></div><h2 id="computer-name">Home computer</h2><p id="status" role="status" aria-live="polite">Checking server setup...</p>
-<form id="login-form" hidden><label for="access-password">Website access password</label><input id="access-password" type="password" autocomplete="current-password" required maxlength="512"><button id="sign-in" class="primary" type="submit">Unlock remote desktop</button></form>
-<div id="connection-actions" hidden><button id="connect" class="primary" disabled>Connect to home desktop</button><button id="sign-out" class="secondary">Sign out</button></div><a id="setup" class="primary" href="/vm/setup.html" hidden>Finish server setup</a><button id="retry" class="secondary" hidden>Check again</button><p class="note">Two checks: your website access password, then your home VNC password. Neither is saved by this page.</p><div class="features"><span>In-page control</span><span>Encrypted relay</span><span>No iframe</span></div></section>
-<section class="how"><div><span>01</span><h3>Prepare your home PC</h3><p>Run the home connector and password-protected desktop-sharing server. Leave the PC awake.</p></div><div><span>02</span><h3>Unlock and connect</h3><p>Sign in here. When the home connector is online, your desktop opens on this page.</p></div><div><span>03</span><h3>Finish securely</h3><p>Lock your home desktop, disconnect, and sign out when you are finished.</p></div></section><footer><a href="/vm/setup.html">Setup &amp; troubleshooting</a><span>Use only on computers and networks where remote access is permitted.</span></footer></main>
-<section id="workspace" hidden aria-label="Remote desktop viewer"><div class="desktop-toolbar"><strong id="desktop-name">Home desktop</strong><span id="session-status" role="status">Connecting...</span><div class="desktop-tools"><label><input id="view-only" type="checkbox"> View only</label><button id="ctrl-alt-del">Ctrl+Alt+Del</button><button id="clipboard-toggle">Paste text</button><button id="fullscreen">Fullscreen</button><button id="disconnect">Disconnect</button></div></div><div id="desktop-screen"></div><form id="vnc-form" class="vnc-prompt" hidden><h2>Unlock your home desktop</h2><label for="vnc-password">Home VNC password</label><input id="vnc-password" type="password" autocomplete="off" required><button class="primary" type="submit">Connect</button><button id="cancel-vnc" class="secondary" type="button">Cancel</button></form><form id="clipboard-form" class="vnc-prompt" hidden><h2>Paste into home computer</h2><textarea id="clipboard-text" maxlength="16384" aria-label="Text to paste"></textarea><button class="primary" type="submit">Send text to clipboard</button><button id="cancel-clipboard" class="secondary" type="button">Cancel</button></form></section>
-</body></html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <meta
+    name="referrer"
+    content="no-referrer"
+  >
+
+  <title>Home Desktop - WAMO</title>
+
+  <link
+    rel="stylesheet"
+    href="/vm/style.css"
+  >
+
+  <script
+    type="module"
+    src="/vm/app.js"
+  ></script>
+</head>
+
+<body>
+
+  <header>
+    <a
+      href="/"
+      class="brand"
+    >
+      WAMO <span>/ CONNECT</span>
+    </a>
+
+    <a href="/vm/setup.html">
+      Home setup guide
+    </a>
+  </header>
+
+  <main id="landing">
+
+    <section class="intro">
+
+      <p class="eyebrow">
+        YOUR DESKTOP, RIGHT HERE
+      </p>
+
+      <h1>
+        Home is one<br>
+        connection away.
+      </h1>
+
+      <p>
+        See and control your home computer directly on this page.
+        Your files and apps stay on your PC.
+      </p>
+
+      <a
+        class="secondary setup-link"
+        href="/vm/home-connector.zip"
+        download
+      >
+        Download home connector
+      </a>
+
+    </section>
+
+
+    <section
+      class="connection-card"
+      aria-label="Remote connection"
+    >
+
+      <div class="card-heading">
+        <span>REMOTE WORKSPACE</span>
+        <span id="badge">CHECKING</span>
+      </div>
+
+      <div
+        class="monitor"
+        aria-hidden="true"
+      >
+
+        <div class="screen">
+
+          <div class="screen-top">
+            <i></i>
+            <i></i>
+            <i></i>
+          </div>
+
+          <div class="screen-content">
+            <span>PC</span>
+            <div></div>
+            <div></div>
+          </div>
+
+        </div>
+
+        <div class="stand"></div>
+        <div class="foot"></div>
+
+      </div>
+
+      <h2 id="computer-name">
+        Home computer
+      </h2>
+
+      <p
+        id="status"
+        role="status"
+        aria-live="polite"
+      >
+        Checking server setup...
+      </p>
+
+
+      <form
+        id="login-form"
+        hidden
+      >
+
+        <label for="access-password">
+          Website access password
+        </label>
+
+        <input
+          id="access-password"
+          type="password"
+          autocomplete="current-password"
+          required
+          maxlength="512"
+        >
+
+        <button
+          id="sign-in"
+          class="primary"
+          type="submit"
+        >
+          Unlock remote desktop
+        </button>
+
+      </form>
+
+
+      <div
+        id="connection-actions"
+        hidden
+      >
+
+        <button
+          id="connect"
+          class="primary"
+          disabled
+        >
+          Connect to home desktop
+        </button>
+
+        <button
+          id="sign-out"
+          class="secondary"
+        >
+          Sign out
+        </button>
+
+      </div>
+
+
+      <a
+        id="setup"
+        class="primary"
+        href="/vm/setup.html"
+        hidden
+      >
+        Finish server setup
+      </a>
+
+
+      <button
+        id="retry"
+        class="secondary"
+        hidden
+      >
+        Check again
+      </button>
+
+
+      <p class="note">
+        Two checks: your website access password,
+        then your home VNC password.
+        Neither is saved by this page.
+      </p>
+
+
+      <div class="features">
+        <span>In-page control</span>
+        <span>Encrypted relay</span>
+        <span>No iframe</span>
+      </div>
+
+    </section>
+
+
+    <section class="how">
+
+      <div>
+        <span>01</span>
+
+        <h3>
+          Prepare your home PC
+        </h3>
+
+        <p>
+          Run the home connector and password-protected
+          desktop-sharing server. Leave the PC awake.
+        </p>
+      </div>
+
+
+      <div>
+        <span>02</span>
+
+        <h3>
+          Unlock and connect
+        </h3>
+
+        <p>
+          Sign in here. When the home connector is online,
+          your desktop opens on this page.
+        </p>
+      </div>
+
+
+      <div>
+        <span>03</span>
+
+        <h3>
+          Finish securely
+        </h3>
+
+        <p>
+          Lock your home desktop, disconnect,
+          and sign out when you are finished.
+        </p>
+      </div>
+
+    </section>
+
+
+    <footer>
+
+      <a href="/vm/setup.html">
+        Setup &amp; troubleshooting
+      </a>
+
+      <span>
+        Use only on computers and networks where
+        remote access is permitted.
+      </span>
+
+    </footer>
+
+  </main>
+
+
+  <section
+    id="workspace"
+    hidden
+    aria-label="Remote desktop viewer"
+  >
+
+    <div class="desktop-toolbar">
+
+      <strong id="desktop-name">
+        Home desktop
+      </strong>
+
+      <span
+        id="session-status"
+        role="status"
+      >
+        Connecting...
+      </span>
+
+
+      <div class="desktop-tools">
+
+        <label>
+          <input
+            id="view-only"
+            type="checkbox"
+          >
+          View only
+        </label>
+
+
+        <button id="ctrl-alt-del">
+          Ctrl+Alt+Del
+        </button>
+
+
+        <button id="clipboard-toggle">
+          Paste text
+        </button>
+
+
+        <label>
+          Quality
+
+          <select id="quality">
+
+            <option value="1">
+              1 - Fastest
+            </option>
+
+            <option value="2">
+              2
+            </option>
+
+            <option
+              value="3"
+              selected
+            >
+              3 - Fast
+            </option>
+
+            <option value="4">
+              4
+            </option>
+
+            <option value="5">
+              5 - Balanced
+            </option>
+
+            <option value="6">
+              6
+            </option>
+
+            <option value="7">
+              7
+            </option>
+
+            <option value="8">
+              8
+            </option>
+
+            <option value="9">
+              9 - Best
+            </option>
+
+          </select>
+        </label>
+
+
+        <label>
+          Compression
+
+          <select id="compression">
+
+            <option value="0">
+              0 - Lowest
+            </option>
+
+            <option value="1">
+              1
+            </option>
+
+            <option value="2">
+              2
+            </option>
+
+            <option value="3">
+              3
+            </option>
+
+            <option value="4">
+              4
+            </option>
+
+            <option value="5">
+              5
+            </option>
+
+            <option value="6">
+              6
+            </option>
+
+            <option value="7">
+              7
+            </option>
+
+            <option
+              value="8"
+              selected
+            >
+              8 - High
+            </option>
+
+            <option value="9">
+              9 - Maximum
+            </option>
+
+          </select>
+        </label>
+
+
+        <button id="fullscreen">
+          Fullscreen
+        </button>
+
+
+        <button id="disconnect">
+          Disconnect
+        </button>
+
+      </div>
+    </div>
+
+
+    <div id="desktop-screen"></div>
+
+
+    <form
+      id="vnc-form"
+      class="vnc-prompt"
+      hidden
+    >
+
+      <h2>
+        Unlock your home desktop
+      </h2>
+
+      <label for="vnc-password">
+        Home VNC password
+      </label>
+
+      <input
+        id="vnc-password"
+        type="password"
+        autocomplete="off"
+        required
+      >
+
+      <button
+        class="primary"
+        type="submit"
+      >
+        Connect
+      </button>
+
+      <button
+        id="cancel-vnc"
+        class="secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+    </form>
+
+
+    <form
+      id="clipboard-form"
+      class="vnc-prompt"
+      hidden
+    >
+
+      <h2>
+        Paste into home computer
+      </h2>
+
+      <textarea
+        id="clipboard-text"
+        maxlength="16384"
+        aria-label="Text to paste"
+      ></textarea>
+
+      <button
+        class="primary"
+        type="submit"
+      >
+        Send text to clipboard
+      </button>
+
+      <button
+        id="cancel-clipboard"
+        class="secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+    </form>
+
+  </section>
+
+</body>
+
+</html>
