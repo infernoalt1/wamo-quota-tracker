@@ -18,6 +18,10 @@ View your app in AI Studio: https://ai.studio/apps/drive/1iZftsT3Nd-jxKPSUg3tdNS
 2. Run the app:
    `npm run dev`
 
+## Remote desktop
+
+Open `/vm` for the home-computer launcher and `/vm/setup.html` for the setup instructions. It defaults to Chrome Remote Desktop, so no Cloudflare access or domain changes are required. Install and enroll the host on the home PC through Google. If a previous `VM_GATEWAY_URL` is set on Render, remove it or change it to `https://remotedesktop.google.com/access/`. See [remote-desktop/README.md](remote-desktop/README.md). Run `npm run test:vm` for configuration and UI tests.
+
 ## Hollow Knight launcher
 
 Open `/hollowknight` (redirects to `/hollowknight/`). The supplied Unity port and a standalone launcher live in `public/hollowknight/` and are copied to `dist` by the normal Vite build. Deploy the entire directory: it contains **about 1.01 GB** of game assets. The hosting service needs enough disk space and bandwidth for this; the app does not fetch game assets from a third-party host.

@@ -1,0 +1,27 @@
+﻿<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Home desktop setup - WAMO</title><link rel="stylesheet" href="/vm/style.css"></head><body>
+<header><a href="/vm/" class="brand">WAMO <span>/ CONNECT</span></a><a href="/vm/">Back to launcher</a></header>
+<main class="guide">
+<p class="eyebrow">CHROME REMOTE DESKTOP</p><h1>Your home PC, in your browser</h1>
+<p class="notice">For your Windows 11 home computer and quota.wamomath.org on Render. No Cloudflare access, DNS changes, VNC server, or Supabase changes are needed. This controls your existing home desktop; it does not create a virtual machine.</p>
+<h2>1. At home</h2>
+<ol><li>Open Chrome and visit <a href="https://remotedesktop.google.com/access/" target="_blank" rel="noopener noreferrer">Chrome Remote Desktop</a>. Sign in with your personal Google account.</li><li>Choose <strong>Set up remote access</strong> and install the host software as prompted. If Windows asks for administrator approval, ask the computer's administrator to help.</li><li>Finish enrollment, name the computer, and set its access PIN. Use Remote Access for your own computer, rather than a temporary support code.</li><li>Keep the PC powered on, online, and awake. Test the connection from a second device before leaving home.</li></ol>
+<p><a href="https://support.google.com/chrome/answer/1649523?hl=en" target="_blank" rel="noopener noreferrer">Google's official installation and connection instructions</a>. Enter account credentials and the PIN only in Google's interface, never on WAMO.</p>
+<h2>2. Deploy the website changes</h2>
+<p>Deploy the updated repository to the existing Render web service using its normal build/start commands. The launcher now defaults to Chrome Remote Desktop without extra configuration.</p>
+<p>If you already added the earlier Cloudflare gateway address to Render, replace it with the value below in the service's <strong>Environment</strong> settings. Otherwise these variables are optional:</p>
+<pre><code>VM_GATEWAY_URL=https://remotedesktop.google.com/access/
+VM_COMPUTER_NAME=My home computer
+VM_ENABLED=true</code></pre>
+<p>Save and deploy the environment changes. Keep the existing database and JWT settings. The backend's <code>/api/vm/config</code> supplies the launch address at runtime. In local development, Vite reads the same settings from <code>.env</code>.</p>
+<h2>3. From school</h2>
+<p>Open <code>https://quota.wamomath.org/vm</code>, select <strong>Open Chrome Remote Desktop</strong>, sign in to the same Google account, choose your PC, and enter its PIN. The session opens in Google's tab. Disconnect and sign out when finished on a shared computer.</p>
+<p>Use remote access only where permitted. Managed devices or accounts can restrict this service; ask school IT if it is blocked.</p>
+<h2>What the launcher does</h2>
+<p>WAMO provides the entry point and instructions. Google handles host enrollment, authentication, device availability, and the remote session. The launch button being available does not mean your PC is enrolled or online. Visitors can only see computers authorized for their own Google account.</p>
+<p>WAMO does not store your Google password or remote-access PIN. It does not embed or proxy the desktop, and it does not install host software when someone opens this page.</p>
+<h2>Troubleshooting</h2>
+<table><thead><tr><th>Problem</th><th>Next step</th></tr></thead><tbody><tr><td>Old Cloudflare address opens</td><td>Replace <code>VM_GATEWAY_URL</code> in Render with the Google address above and redeploy.</td></tr><tr><td>Setup unavailable</td><td>Confirm that the Node backend serves JSON at <code>/api/vm/config</code>, rather than an HTML fallback.</td></tr><tr><td>PC missing or offline</td><td>Check the selected Google account and finish host setup on the home PC. Check its power, sleep, internet, and host-service state.</td></tr><tr><td>Administrator prompt</td><td>Ask the home computer's administrator to approve installation. Website code cannot approve Windows elevation.</td></tr><tr><td>Service blocked at school</td><td>Ask school IT whether it is allowed. The launcher does not override restrictions.</td></tr></tbody></table>
+<h2>Disable access</h2>
+<p>Remove or disable your computer in Chrome Remote Desktop. To remove only WAMO's launch button, set <code>VM_ENABLED=false</code> in Render and redeploy; that alone does not revoke access at Google.</p>
+</main></body></html>
