@@ -1,27 +1,29 @@
-﻿<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Home desktop setup - WAMO</title><link rel="stylesheet" href="/vm/style.css"></head><body>
-<header><a href="/vm/" class="brand">WAMO <span>/ CONNECT</span></a><a href="/vm/">Back to launcher</a></header>
-<main class="guide">
-<p class="eyebrow">CHROME REMOTE DESKTOP</p><h1>Your home PC, in your browser</h1>
-<p class="notice">For your Windows 11 home computer and quota.wamomath.org on Render. No Cloudflare access, DNS changes, VNC server, or Supabase changes are needed. This controls your existing home desktop; it does not create a virtual machine.</p>
-<h2>1. At home</h2>
-<ol><li>Open Chrome and visit <a href="https://remotedesktop.google.com/access/" target="_blank" rel="noopener noreferrer">Chrome Remote Desktop</a>. Sign in with your personal Google account.</li><li>Choose <strong>Set up remote access</strong> and install the host software as prompted. If Windows asks for administrator approval, ask the computer's administrator to help.</li><li>Finish enrollment, name the computer, and set its access PIN. Use Remote Access for your own computer, rather than a temporary support code.</li><li>Keep the PC powered on, online, and awake. Test the connection from a second device before leaving home.</li></ol>
-<p><a href="https://support.google.com/chrome/answer/1649523?hl=en" target="_blank" rel="noopener noreferrer">Google's official installation and connection instructions</a>. Enter account credentials and the PIN only in Google's interface, never on WAMO.</p>
-<h2>2. Deploy the website changes</h2>
-<p>Deploy the updated repository to the existing Render web service using its normal build/start commands. The launcher now defaults to Chrome Remote Desktop without extra configuration.</p>
-<p>If you already added the earlier Cloudflare gateway address to Render, replace it with the value below in the service's <strong>Environment</strong> settings. Otherwise these variables are optional:</p>
-<pre><code>VM_GATEWAY_URL=https://remotedesktop.google.com/access/
-VM_COMPUTER_NAME=My home computer
-VM_ENABLED=true</code></pre>
-<p>Save and deploy the environment changes. Keep the existing database and JWT settings. The backend's <code>/api/vm/config</code> supplies the launch address at runtime. In local development, Vite reads the same settings from <code>.env</code>.</p>
-<h2>3. From school</h2>
-<p>Open <code>https://quota.wamomath.org/vm</code>, select <strong>Open Chrome Remote Desktop</strong>, sign in to the same Google account, choose your PC, and enter its PIN. The session opens in Google's tab. Disconnect and sign out when finished on a shared computer.</p>
-<p>Use remote access only where permitted. Managed devices or accounts can restrict this service; ask school IT if it is blocked.</p>
-<h2>What the launcher does</h2>
-<p>WAMO provides the entry point and instructions. Google handles host enrollment, authentication, device availability, and the remote session. The launch button being available does not mean your PC is enrolled or online. Visitors can only see computers authorized for their own Google account.</p>
-<p>WAMO does not store your Google password or remote-access PIN. It does not embed or proxy the desktop, and it does not install host software when someone opens this page.</p>
-<h2>Troubleshooting</h2>
-<table><thead><tr><th>Problem</th><th>Next step</th></tr></thead><tbody><tr><td>Old Cloudflare address opens</td><td>Replace <code>VM_GATEWAY_URL</code> in Render with the Google address above and redeploy.</td></tr><tr><td>Setup unavailable</td><td>Confirm that the Node backend serves JSON at <code>/api/vm/config</code>, rather than an HTML fallback.</td></tr><tr><td>PC missing or offline</td><td>Check the selected Google account and finish host setup on the home PC. Check its power, sleep, internet, and host-service state.</td></tr><tr><td>Administrator prompt</td><td>Ask the home computer's administrator to approve installation. Website code cannot approve Windows elevation.</td></tr><tr><td>Service blocked at school</td><td>Ask school IT whether it is allowed. The launcher does not override restrictions.</td></tr></tbody></table>
-<h2>Disable access</h2>
-<p>Remove or disable your computer in Chrome Remote Desktop. To remove only WAMO's launch button, set <code>VM_ENABLED=false</code> in Render and redeploy; that alone does not revoke access at Google.</p>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>In-page desktop setup - WAMO</title><link rel="stylesheet" href="/vm/style.css"></head><body><header><a href="/vm/" class="brand">WAMO <span>/ CONNECT</span></a><a href="/vm/">Back to desktop</a></header><main class="guide">
+<p class="eyebrow">WINDOWS HOME SETUP</p><h1>Your desktop inside /vm</h1>
+<p>This displays and controls your home PC directly on quota.wamomath.org/vm. It uses a locally served noVNC viewer and your Render server as the relay. There is no external viewer, Google account, iframe, or Cloudflare configuration.</p>
+<p class="notice">Software on the home computer must share its desktop. Arrange administrator help if the installers request it. These website changes do not install anything on Windows.</p>
+<h2>1. Configure desktop sharing at home</h2>
+<ol><li>Install the Server component from <a href="https://www.tightvnc.com/download.php" target="_blank" rel="noopener noreferrer">TightVNC's official site</a>. Use service mode for access after reboot.</li><li>Set a VNC password and an administration password. Under Access Control, allow loopback connections and select <strong>only loopback connections</strong>. Use port <code>5900</code>.</li><li>Disable the legacy HTTP/Java viewer. Do not add router port forwarding or public firewall exceptions. Configure <strong>lock desktop when the last client disconnects</strong>.</li><li>Test locally at <code>127.0.0.1:5900</code>. Keep the PC awake and online.</li></ol>
+<p>The <a href="https://www.tightvnc.com/doc/win/TightVNC_2.7_for_Windows_Installing_from_MSI_Packages.pdf" target="_blank" rel="noopener noreferrer">vendor reference</a> documents these options. Chrome Remote Desktop software is not used.</p>
+<h2>2. Prepare the home connector</h2>
+<ol><li>Install <a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer">Node.js LTS</a> on the home PC.</li><li><a href="/vm/home-connector.zip" download>Download the connector ZIP</a>, extract it to a private folder, and open a terminal in the folder containing <code>package.json</code>.</li><li>Run:</li></ol>
+<pre><code>npm ci
+node configure.mjs</code></pre>
+<p>This creates private <code>config.local.json</code> and <code>render-settings.local.txt</code> files with separate random credentials. It transmits nothing and will not overwrite existing settings.</p>
+<h2>3. Configure and deploy Render</h2>
+<p>Copy the values from <code>render-settings.local.txt</code> into your existing Render web service's <strong>Environment</strong> settings:</p>
+<table><thead><tr><th>Variable</th><th>Purpose</th></tr></thead><tbody><tr><td><code>VM_PUBLIC_ORIGIN</code></td><td><code>https://quota.wamomath.org</code></td></tr><tr><td><code>VM_ACCESS_PASSWORD</code></td><td>The generated website sign-in password.</td></tr><tr><td><code>VM_AGENT_TOKEN</code></td><td>The connector secret matching config.local.json.</td></tr><tr><td><code>VM_ENABLED</code></td><td><code>true</code></td></tr><tr><td><code>VM_COMPUTER_NAME</code></td><td>Your friendly computer name.</td></tr></tbody></table>
+<p>Deploy these repository changes using <code>npm run build</code> and <code>npm start</code>. Use <strong>one Render instance</strong> so both connections reach the same relay. Keep existing database/JWT settings. Remove obsolete <code>VM_GATEWAY_URL</code>; Supabase needs no changes.</p>
+<p>Keep both generated files private. Do not upload, commit, or send them in chat. Keep the website password in your password manager. The VNC password is separate.</p>
+<h2>4. Start the home connector</h2><pre><code>npm start</code></pre>
+<p>Wait for <strong>Home connector online</strong> and leave the terminal running. Ctrl+C stops it. It reconnects after temporary interruptions; run it again after restarting the PC.</p>
+<h2>5. Connect from school</h2>
+<ol><li>Visit <code>https://quota.wamomath.org/vm</code> and enter the generated website password.</li><li>When the connector is online, select <strong>Connect to home desktop</strong>.</li><li>Enter the home VNC password. The desktop appears <strong>on this page</strong>. Click it for keyboard and mouse control.</li><li>Use fullscreen, Ctrl+Alt+Del, view-only, or text paste in the toolbar. Lock Windows, disconnect, and sign out when finished.</li></ol>
+<h2>Limits and troubleshooting</h2>
+<p>One PC and one viewer at a time. Website sessions expire after 30 minutes. Ten login attempts within ten minutes trigger a temporary lockout. Server restarts close sessions; reconnect after the home connector returns. Audio and file transfer are not implemented. Video uses Render bandwidth.</p>
+<table><thead><tr><th>State</th><th>Check</th></tr></thead><tbody><tr><td>Setup required</td><td>Set all Render variables and redeploy. Password: at least 16 characters; token: at least 32; they must differ.</td></tr><tr><td>Sign-in fails</td><td>Use the website password, not VNC's. VM_PUBLIC_ORIGIN must exactly match your website origin.</td></tr><tr><td>Home offline</td><td>Keep the PC awake and connector running. Check its token matches Render.</td></tr><tr><td>Desktop connection fails</td><td>Check local VNC, its password, and the connector terminal.</td></tr><tr><td>409 or already connected</td><td>Close duplicate connectors or viewers.</td></tr><tr><td>Intermittent on Render</td><td>Use one instance; pairing is held in memory.</td></tr><tr><td>Blocked at school</td><td>Ask school IT whether remote access is permitted.</td></tr></tbody></table>
+<p>Internet traffic uses TLS to Render. Render is a trusted relay, so this is not end-to-end encryption against the server operator. Do not run untrusted code in the site's compiler during privileged sessions. Network and device restrictions still apply.</p>
+<h2>Disable access</h2><p>Stop the home connector with Ctrl+C. Set <code>VM_ENABLED=false</code> and redeploy to disable the server feature. Rotate exposed secrets and update home configuration. Stop or uninstall TightVNC when no longer needed.</p>
+<p>References: <a href="https://novnc.com/noVNC/docs/API.html">noVNC</a>, <a href="https://render.com/docs/websocket">Render WebSockets</a>, and the locally served <a href="/vm/novnc/LICENSE.txt">noVNC license</a>.</p>
 </main></body></html>

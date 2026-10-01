@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "prebuild": "node scripts/hollowknight-manifest.mjs",
+    "prebuild": "node scripts/prepare-vm.mjs && node scripts/hollowknight-manifest.mjs",
+    "predev": "node scripts/prepare-vm.mjs",
+    "prepare:vm": "node scripts/prepare-vm.mjs",
+    "dev:vm": "node remote-desktop/dev-server.mjs",
     "test:voting": "node tests/voting-rules.test.mjs",
     "test:compiler": "node --test tests/compiler.test.mjs",
     "test:cookieclicker": "node --test tests/cookieclicker.test.mjs",
@@ -20,6 +23,7 @@
     "dev:full": "concurrently \"npm run start:server\" \"npm run dev\""
   },
   "dependencies": {
+    "@novnc/novnc": "1.7.0",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",

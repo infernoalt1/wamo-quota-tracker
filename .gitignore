@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .env
+remote-desktop/home/config.local.json
+remote-desktop/home/render-settings.local.txt
+public/vm/novnc/
+public/vm/home-connector.zip

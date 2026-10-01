@@ -11,7 +11,7 @@ import http from 'http';
 import { setupContactGame } from './contact-game.js';
 import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
 import { handleRequest as handleCategories } from './categories/server.mjs';
-import { getVmConfig } from './remote-desktop/config.mjs';
+import { setupVmRelay } from './remote-desktop/relay.mjs';
 
 dotenv.config();
 
@@ -27,10 +27,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.get('/api/vm/config', (_req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json(getVmConfig());
-});
+setupVmRelay(app, server);
 // Keep the standalone game's request body and event stream intact.
 app.use('/sketch-party', (req, res) => {
   if (req.originalUrl.split('?')[0] === '/sketch-party') {

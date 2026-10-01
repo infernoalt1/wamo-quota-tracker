@@ -4,7 +4,12 @@ import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 export function setupContactGame(app, server, rootDir) {
-const wss = new WebSocketServer({ server, path: '/game/ws', maxPayload: 8192 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+const upgrade = (req, socket, head) => {
+  if (req.url?.split('?')[0] !== '/game/ws') return;
+  wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+};
+server.on('upgrade', upgrade);
 
 const MAX_PLAYERS = 10;
 const ROOM_TTL_MS = 30 * 60 * 1000;
@@ -590,6 +595,7 @@ cleanup.unref();
 
 
 function dispose() {
+  server.off('upgrade', upgrade);
   clearInterval(heartbeat);
   clearInterval(cleanup);
   for (const room of rooms.values()) {

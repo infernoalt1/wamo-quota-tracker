@@ -20,7 +20,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/1iZftsT3Nd-jxKPSUg3tdNS
 
 ## Remote desktop
 
-Open `/vm` for the home-computer launcher and `/vm/setup.html` for the setup instructions. It defaults to Chrome Remote Desktop, so no Cloudflare access or domain changes are required. Install and enroll the host on the home PC through Google. If a previous `VM_GATEWAY_URL` is set on Render, remove it or change it to `https://remotedesktop.google.com/access/`. See [remote-desktop/README.md](remote-desktop/README.md). Run `npm run test:vm` for configuration and UI tests.
+Open `/vm` for an embedded noVNC desktop viewer and `/vm/setup.html` for the Windows setup guide. The home connector makes an outbound WebSocket connection to the existing Render server; no Cloudflare access, external viewer, or router port forwarding is needed. Configure a password-protected loopback-only VNC server on the home PC, then set `VM_PUBLIC_ORIGIN`, `VM_ACCESS_PASSWORD`, and `VM_AGENT_TOKEN` on Render. Use one Render instance. See [remote-desktop/README.md](remote-desktop/README.md). Run `npm run test:vm` for authenticated relay and connector tests.
 
 ## Hollow Knight launcher
 

@@ -1,9 +1,13 @@
-﻿# Read-only diagnostics. Run on the Windows HOME computer, not the school device.
+﻿# Read-only diagnostic for the HOME Windows PC.
 $ErrorActionPreference = 'Continue'
-Write-Output 'Chrome Remote Desktop readiness (read-only; no configuration changes)'
 Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version
-$remoteServices = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Chrome Remote Desktop*' -or $_.Name -eq 'chromoting' }
-if ($remoteServices) { $remoteServices | Select-Object Name, DisplayName, Status, StartType }
-else { Write-Output 'Chrome Remote Desktop service was not found. Complete host installation at https://remotedesktop.google.com/access/ on this PC.' }
-Write-Output 'Check enrollment in your Google account and keep the PC online and awake.'
-Write-Output 'A running service alone does not confirm enrollment or connectivity. This script does not read credentials or test a remote session.'
+Get-Service -Name tvnserver -ErrorAction SilentlyContinue | Select-Object Name, Status, StartType
+$remoteClient = [Net.Sockets.TcpClient]::new()
+try {
+    $remoteConnect = $remoteClient.ConnectAsync('127.0.0.1', 5900)
+    if ($remoteConnect.Wait(3000) -and $remoteClient.Connected) { Write-Output 'Local VNC TCP port is reachable. Authentication has not been tested.' }
+    else { Write-Output 'Local VNC TCP port 5900 is not reachable.' }
+} catch { Write-Output 'Local VNC TCP port 5900 is not reachable.' }
+finally { $remoteClient.Dispose() }
+Write-Output 'Check loopback-only VNC with a password, the visible home connector terminal, and awake/online power settings.'
+Write-Output 'This script does not install anything, change settings, or read credentials.'

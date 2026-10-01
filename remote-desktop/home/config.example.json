@@ -1,0 +1,5 @@
+{
+  "website": "https://quota.wamomath.org",
+  "agentToken": "REPLACE_WITH_VM_AGENT_TOKEN_FROM_RENDER",
+  "vncPort": 5900
+}
