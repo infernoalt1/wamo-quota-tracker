@@ -5,6 +5,8 @@
   "description": "Full stack implementation of ProbFair",
   "scripts": {
     "dev": "vite",
+    "dev:decrypto": "node decrypto/server.mjs",
+    "test:decrypto": "node --test decrypto/*.test.mjs",
     "build": "vite build",
     "prebuild": "node scripts/prepare-vm.mjs && node scripts/hollowknight-manifest.mjs",
     "predev": "node scripts/prepare-vm.mjs",
@@ -20,7 +22,7 @@
     "preview": "vite preview",
     "start": "node server.js",
     "start:server": "node server.js",
-    "dev:full": "concurrently \"npm run start:server\" \"npm run dev\""
+    "dev:full": "concurrently \"npm run start:server\" \"npm run dev:decrypto\" \"npm run dev\""
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",

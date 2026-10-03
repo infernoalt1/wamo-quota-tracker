@@ -44,6 +44,10 @@ Run `npm run test:cookieclicker` to check local assets, routing, and the game st
 
 Open `/compiler` (or `/compiler/`) in development or on the deployed site. Edit HTML, CSS, and JavaScript, then choose **Run code** to open the result in a new browser tab without an iframe. The editor saves drafts locally and can download a combined `index.html`. Full HTML documents, fragments, and inline scripts are supported; use absolute URLs for external assets. JavaScript in the JavaScript tab runs as a classic script after the HTML. Preview code is not sandboxed and shares the site's origin, so only run trusted code. Run `npm run test:compiler` to check document generation and script execution.
 
+## Decrypto
+
+Open `/decrypto/` for the multiplayer codebreaking game: private rooms, two switchable lobby teams, spectators, rotating encryptors, team chat, automatic scoring, tiebreakers, reconnects, and rematches. Production uses the existing Node server. For local Vite development, also run `npm run dev:decrypto`. Run `npm run test:decrypto`; see [the game README](decrypto/README.md).
+
 ## Categories party game
 
 The Node server also serves the standalone multiplayer game in [`categories/`](categories/README.md) at `/categories/`, alongside `/sketch-party/`. Deploy the folder and root `server.js` together using the existing hosting setup. Run `npm run test:categories` for game tests. Friends judge every category through Call Outs; no external service or API key is needed.

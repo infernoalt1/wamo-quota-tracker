@@ -18,7 +18,7 @@ export default defineConfig({
       });
     },
   }],
-  server: { proxy: { '/api/vm': { target: 'http://127.0.0.1:3001', ws: true } } },
+  server: { proxy: { '/api/vm': { target: 'http://127.0.0.1:3001', ws: true }, '/decrypto': { target: 'http://127.0.0.1:3002', ws: true } } },
   build: {
     outDir: 'dist',
     emptyOutDir: true
