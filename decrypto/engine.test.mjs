@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRoom, addPlayer, act, snapshot, setPresence } from './engine.mjs';
+import { createRoom, addPlayer, act, snapshot, setPresence, expireClues } from './engine.mjs';
 
 function fixture() {
   const r = createRoom('ABCDEF');
@@ -155,4 +155,56 @@ test('two interceptions win without ending early; malformed and spectator guesse
     answer(r, player, 'amber'); answer(r, player, 'amber', false, false);
   }
   assert.equal(r.phase, 'finished'); assert.equal(r.winner, 'amber');
+});
+
+
+test('first complete submission starts a single 30-second deadline; timeout locks private drafts without scoring', () => {
+  const { r, p, player } = fixture();
+  const blue = player(r.teams.blue.encoder), amber = player(r.teams.amber.encoder);
+  assert.equal(r.clueDeadline, null);
+  act(r, amber, { action: 'clue-draft', round: 1, clues: ['half written', '', '   '] });
+  assert.equal(r.clueDeadline, null);
+  assert.deepEqual(snapshot(r, amber).teams.amber.draft, ['half written', '', '   ']);
+  for (const viewer of p.filter(x => x !== amber)) {
+    assert.equal(snapshot(r, viewer).teams.amber.draft, undefined);
+    assert.equal(snapshot(r, viewer).teams.amber.clues, null);
+  }
+  assert.throws(() => act(r, blue, { action: 'clues', clues: ['one', '', 'three'] }));
+  assert.equal(r.clueDeadline, null);
+  const before = Date.now();
+  act(r, blue, { action: 'clues', clues: ['alpha signal', 'beta signal', 'gamma signal'] });
+  const deadline = r.clueDeadline;
+  assert(deadline >= before + 30000 && deadline <= Date.now() + 30000);
+  act(r, amber, { action: 'clue-draft', round: 1, clues: ['latest unfinished', '', ''] });
+  assert.equal(r.clueDeadline, deadline);
+  assert.throws(() => act(r, blue, { action: 'clue-draft', round: 1, clues: ['edit', '', ''] }));
+  assert.throws(() => act(r, amber, { action: 'clue-draft', round: 2, clues: ['edit', '', ''] }));
+  setPresence(r, amber, false);
+  assert.equal(expireClues(r, deadline - 1), false);
+  assert.equal(expireClues(r, deadline), true);
+  assert.equal(expireClues(r, deadline + 1), false);
+  assert.deepEqual(r.teams.amber.clues, ['latest unfinished', '', '']);
+  assert.equal(r.teams.amber.timedOut, true);
+  assert.equal(r.phase, 'guess'); assert.equal(r.target, 'blue');
+  assert.equal(r.teams.amber.misses, 0); assert.equal(r.teams.blue.interceptions, 0);
+  assert.equal(snapshot(r, blue).teams.amber.clues, null);
+  assert.throws(() => act(r, amber, { action: 'clues', clues: ['late a', 'late b', 'late c'] }));
+});
+
+test('early submissions cancel deadline; late packets cannot beat expiry and reset clears drafts', () => {
+  const { r, p, player } = fixture();
+  act(r, player(r.teams.blue.encoder), { action: 'clues', clues: ['alpha', 'beta', 'gamma'] });
+  act(r, player(r.teams.amber.encoder), { action: 'clues', clues: ['delta', 'epsilon', 'zeta'] });
+  assert.equal(r.clueDeadline, null); assert.equal(r.teams.amber.timedOut, false);
+  act(r, p[0], { action: 'lobby' }); act(r, p[0], { action: 'start' });
+  act(r, player(r.teams.amber.encoder), { action: 'clues', clues: ['delta', 'epsilon', 'zeta'] });
+  r.clueDeadline = Date.now() - 1;
+  assert.throws(() => act(r, player(r.teams.blue.encoder), { action: 'clue-draft', round: 1, clues: ['too late', '', ''] }));
+  assert.deepEqual(r.teams.blue.clues, ['', '', '']);
+  answer(r, player, 'blue'); answer(r, player, 'amber');
+  assert.equal(r.teams.blue.misses, 0); // Blank clues do not automatically fail a correct decode.
+  assert.deepEqual(r.history[0].clues, ['', '', '']);
+  act(r, p[0], { action: 'next' });
+  assert.equal(r.clueDeadline, null); assert.deepEqual(r.teams.blue.draft, ['', '', '']);
+  assert.equal(r.teams.blue.timedOut, false);
 });

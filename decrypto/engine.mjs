@@ -10,9 +10,9 @@ function shuffled(values) {
   for (let i = result.length - 1; i > 0; i--) { const j = randomInt(i + 1); [result[i], result[j]] = [result[j], result[i]]; }
   return result;
 }
-const freshTeams = () => Object.fromEntries(TEAM_IDS.map(id => [id, { words: [], interceptions: 0, misses: 0, encoder: null, code: [], clues: null, decode: null, intercept: null }]));
+const freshTeams = () => Object.fromEntries(TEAM_IDS.map(id => [id, { words: [], interceptions: 0, misses: 0, encoder: null, code: [], clues: null, draft: ['', '', ''], timedOut: false, decode: null, intercept: null }]));
 export function createRoom(code) {
-  return { code, phase: 'lobby', round: 0, host: null, players: [], teams: freshTeams(), history: [], chat: [], target: null, winner: null, reason: '', tieGuesses: {}, wordList: { mode: 'classic', custom: [], version: 0 }, updated: Date.now(), revision: 0 };
+  return { code, phase: 'lobby', round: 0, host: null, players: [], teams: freshTeams(), history: [], chat: [], clueDeadline: null, target: null, winner: null, reason: '', tieGuesses: {}, wordList: { mode: 'classic', custom: [], version: 0 }, updated: Date.now(), revision: 0 };
 }
 export function addPlayer(room, name) {
   name = String(name ?? '').trim().replace(/\s+/g, ' ');
@@ -30,12 +30,12 @@ export function setPresence(room, player, connected) {
   if (connected && !room.players.some(p => p.id === room.host && p.connected)) room.host = player.id;
 }
 function beginRound(room) {
-  room.round++; room.phase = 'clues'; room.target = null;
+  room.round++; room.phase = 'clues'; room.target = null; room.clueDeadline = null;
   for (const id of TEAM_IDS) {
     const t = room.teams[id], members = room.players.filter(p => p.team === id);
     t.encoder = members[(room.round - 1) % members.length].id;
     t.code = shuffled([1, 2, 3, 4]).slice(0, 3);
-    t.clues = t.decode = t.intercept = null;
+    t.clues = t.decode = t.intercept = null; t.draft = ['', '', '']; t.timedOut = false;
   }
 }
 function finish(room, winner, reason) { room.phase = 'finished'; room.winner = winner; room.reason = reason; room.target = null; }
@@ -58,10 +58,22 @@ function resolveTransmission(room) {
   const intercepted = room.round > 1 && t.intercept.join('') === t.code.join('');
   if (!decoded) t.misses++;
   if (intercepted) room.teams[other(id)].interceptions++;
-  room.history.push({ round: room.round, team: id, clues: [...t.clues], code: [...t.code], decode: [...t.decode], intercept: t.intercept ? [...t.intercept] : null, decoded, intercepted });
+  room.history.push({ round: room.round, team: id, clues: [...t.clues], timedOut: t.timedOut, code: [...t.code], decode: [...t.decode], intercept: t.intercept ? [...t.intercept] : null, decoded, intercepted });
   if (id === 'blue') room.target = 'amber'; else endRound(room);
 }
+// The deadline belongs to the room, so it survives disconnects and tab suspension.
+export function expireClues(room, now = Date.now()) {
+  if (room.phase !== 'clues' || room.clueDeadline === null || now < room.clueDeadline) return false;
+  for (const id of TEAM_IDS) {
+    const t = room.teams[id];
+    if (!t.clues) { t.clues = t.draft.map(c => c.trim().replace(/\s+/g, ' ')); t.timedOut = true; }
+  }
+  room.phase = 'guess'; room.target = 'blue'; room.clueDeadline = null;
+  room.updated = now; room.revision++;
+  return true;
+}
 export function act(room, p, message) {
+  expireClues(room);
   const { action } = message;
   requireThat(room.players.includes(p), 'Rejoin this room.');
   if (action === 'team') {
@@ -91,15 +103,20 @@ export function act(room, p, message) {
   } else if (action === 'lobby') {
     requireThat(room.host === p.id, 'Only the host can return everyone to the lobby.');
     // Wipe secrets before allowing team changes. Starting again always deals new words.
-    room.phase = 'lobby'; room.teams = freshTeams(); room.history = []; room.chat = []; room.round = 0; room.target = null; room.tieGuesses = {}; room.winner = null;
+    room.clueDeadline = null; room.phase = 'lobby'; room.teams = freshTeams(); room.history = []; room.chat = []; room.round = 0; room.target = null; room.tieGuesses = {}; room.winner = null;
   } else if (action === 'remove') {
     requireThat(room.host === p.id && room.phase === 'lobby', 'Only the host can remove players in the lobby.');
     const target = room.players.find(q => q.id === message.player);
     requireThat(target && target !== p, 'Choose another player.');
     room.players = room.players.filter(q => q !== target);
+  } else if (action === 'clue-draft') {
+    const t = room.teams[p.team];
+    requireThat(room.phase === 'clues' && message.round === room.round && t?.encoder === p.id && !t.clues, 'This clue window has closed.');
+    requireThat(Array.isArray(message.clues) && message.clues.length === 3 && message.clues.every(c => typeof c === 'string' && c.length <= 80), 'Use three clue fields of up to 80 characters.');
+    t.draft = [...message.clues];
   } else if (action === 'clues') {
     const t = room.teams[p.team];
-    requireThat(room.phase === 'clues' && t?.encoder === p.id && !t.clues, 'Only the current encryptor can submit clues once.');
+    requireThat((message.round === undefined || message.round === room.round) && room.phase === 'clues' && t?.encoder === p.id && !t.clues, 'Only the current encryptor can submit clues once.');
     requireThat(Array.isArray(message.clues) && message.clues.length === 3 && message.clues.every(c => typeof c === 'string' && c.trim().length > 0 && c.trim().length <= 80), 'Write three clues, up to 80 characters each.');
     const clues = message.clues.map(c => c.trim().replace(/\s+/g, ' '));
     const used = room.history.flatMap(h => h.clues).map(normalize);
@@ -107,8 +124,9 @@ export function act(room, p, message) {
     requireThat(new Set(clues.map(normalize)).size === 3 && clues.every(c => !used.includes(normalize(c))), 'Each clue must be new. Do not repeat a clue.');
     const keywordText = value => ' ' + normalize(value).replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim() + ' ';
     requireThat(clues.every(c => !t.words.some(w => keywordText(c).includes(keywordText(w)))), 'Do not include any of your secret words in a clue.');
-    t.clues = clues;
-    if (TEAM_IDS.every(id => room.teams[id].clues)) { room.phase = 'guess'; room.target = 'blue'; }
+    t.clues = clues; t.draft = [...clues];
+    if (TEAM_IDS.every(id => room.teams[id].clues)) { room.phase = 'guess'; room.target = 'blue'; room.clueDeadline = null; }
+    else room.clueDeadline ??= Date.now() + 30000;
   } else if (action === 'guess') {
     requireThat(room.phase === 'guess' && p.team && message.target === room.target && message.round === room.round, 'This transmission has already moved on.');
     const t = room.teams[room.target], own = p.team === room.target;
@@ -145,7 +163,7 @@ export function act(room, p, message) {
 export function snapshot(room, p) {
   const revealed = id => room.phase === 'finished' || room.history.some(h => h.round === room.round && h.team === id);
   return {
-    code: room.code, phase: room.phase, round: room.round, host: room.host, me: p.id, target: room.target, winner: room.winner, reason: room.reason,
+    serverNow: Date.now(), clueDeadline: room.clueDeadline, code: room.code, phase: room.phase, round: room.round, host: room.host, me: p.id, target: room.target, winner: room.winner, reason: room.reason,
     wordList: { mode: room.wordList.mode, count: room.wordList.mode === 'custom' ? room.wordList.custom.length : words.length, version: room.wordList.version, custom: room.phase === 'lobby' && room.host === p.id ? room.wordList.custom : undefined },
     players: room.players.map(({ id, name, team, connected }) => ({ id, name, team, connected })),
     teams: Object.fromEntries(TEAM_IDS.map(id => {
@@ -153,7 +171,7 @@ export function snapshot(room, p) {
       return [id, { words: p.team === id || room.phase === 'finished' ? t.words : [], interceptions: t.interceptions, misses: t.misses, encoder: t.encoder,
         code: p.id === t.encoder || revealed(id) ? t.code : null,
         clues: room.phase === 'clues' ? (p.id === t.encoder ? t.clues : null) : (id === 'blue' || room.target === 'amber' || revealed(id) ? t.clues : null),
-        cluesReady: !!t.clues, decodeReady: !!t.decode, interceptReady: !!t.intercept,
+        draft: p.id === t.encoder && room.phase === 'clues' ? t.draft : undefined, timedOut: t.timedOut, cluesReady: !!t.clues, decodeReady: !!t.decode, interceptReady: !!t.intercept,
         decode: p.team === id || revealed(id) ? t.decode : null, intercept: p.team === other(id) || revealed(id) ? t.intercept : null }];
     })),
     history: room.history, chat: room.chat.filter(c => c.channel === 'room' || c.channel === p.team),

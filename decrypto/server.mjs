@@ -3,7 +3,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { randomInt } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createRoom, addPlayer, act, snapshot, setPresence } from './engine.mjs';
+import { createRoom, addPlayer, act, snapshot, setPresence, expireClues } from './engine.mjs';
 
 export function setupDecrypto(app, server) {
   const rooms = new Map();
@@ -40,16 +40,16 @@ export function setupDecrypto(app, server) {
   };
   server.on('upgrade', upgrade);
   wss.on('connection', ws => {
-    ws.alive = true; ws.windowStart = Date.now(); ws.count = 0;
+    ws.alive = true; ws.windowStart = Date.now(); ws.count = 0; ws.draftCount = 0;
     ws.on('pong', () => { ws.alive = true; });
     ws.on('error', () => {});
     ws.on('close', () => disconnect(ws));
     ws.on('message', data => {
       try {
-        if (Date.now() - ws.windowStart > 10000) { ws.windowStart = Date.now(); ws.count = 0; }
-        if (++ws.count > 50) throw Error('Slow down a little.');
+        if (Date.now() - ws.windowStart > 10000) { ws.windowStart = Date.now(); ws.count = 0; ws.draftCount = 0; }
         const m = JSON.parse(data.toString());
         if (!m || typeof m !== 'object') throw Error('Invalid message.');
+        if (m.action === 'clue-draft' ? ++ws.draftCount > 300 : ++ws.count > 50) throw Error('Slow down a little.');
         let r = rooms.get(ws.room), p = r?.players.find(p => p.id === ws.player);
         if (['create', 'join', 'resume'].includes(m.action)) {
           if (p) throw Error('Leave your current room first.');
@@ -68,6 +68,7 @@ export function setupDecrypto(app, server) {
           attach(ws, r, p); return;
         }
         if (!r || !p || p.ws !== ws) throw Error('Create or join a room first.');
+        if (expireClues(r)) broadcast(r);
         if (m.action === 'leave') {
           disconnect(ws);
           if (r.phase === 'lobby') r.players = r.players.filter(q => q !== p);
@@ -78,16 +79,18 @@ export function setupDecrypto(app, server) {
           act(r, p, m);
           if (target?.ws) { target.ws.room = target.ws.player = null; send(target.ws, { type: 'removed' }); }
         } else act(r, p, m);
-        broadcast(r);
+        if (m.action !== 'clue-draft') broadcast(r);
       } catch (error) { send(ws, { type: 'error', message: error instanceof SyntaxError ? 'Invalid message.' : error.message }); }
     });
   });
+  const clueTimer = setInterval(() => { for (const r of rooms.values()) if (expireClues(r)) broadcast(r); }, 100);
+  clueTimer.unref();
   const timer = setInterval(() => {
     for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); }
     for (const [code, r] of rooms) if (!r.players.some(p => p.connected) && Date.now() - r.updated > 30 * 60 * 1000) rooms.delete(code);
   }, 15000);
   timer.unref();
-  return { rooms, broadcast, close() { clearInterval(timer); server.off('upgrade', upgrade); for (const ws of wss.clients) ws.terminate(); wss.close(); } };
+  return { rooms, broadcast, close() { clearInterval(clueTimer); clearInterval(timer); server.off('upgrade', upgrade); for (const ws of wss.clients) ws.terminate(); wss.close(); } };
 }
 
 // Standalone development server, without the main application's database.
