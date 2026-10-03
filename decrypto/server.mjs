@@ -7,7 +7,7 @@ import { createRoom, addPlayer, act, snapshot, setPresence } from './engine.mjs'
 
 export function setupDecrypto(app, server) {
   const rooms = new Map();
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32768 });
   app.get('/decrypto', (req, res, next) => req.path.endsWith('/') ? next() : res.redirect(308, '/decrypto/' + (req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '')));
   app.get(['/decrypto/', '/decrypto/index.html', '/decrypto/app.js', '/decrypto/style.css'], (req, res) => {
     const name = req.path.endsWith('app.js') ? 'app.js' : req.path.endsWith('style.css') ? 'style.css' : 'index.html';

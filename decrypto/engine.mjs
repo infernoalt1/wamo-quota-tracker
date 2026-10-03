@@ -12,7 +12,7 @@ function shuffled(values) {
 }
 const freshTeams = () => Object.fromEntries(TEAM_IDS.map(id => [id, { words: [], interceptions: 0, misses: 0, encoder: null, code: [], clues: null, decode: null, intercept: null }]));
 export function createRoom(code) {
-  return { code, phase: 'lobby', round: 0, host: null, players: [], teams: freshTeams(), history: [], chat: [], target: null, winner: null, reason: '', tieGuesses: {}, updated: Date.now(), revision: 0 };
+  return { code, phase: 'lobby', round: 0, host: null, players: [], teams: freshTeams(), history: [], chat: [], target: null, winner: null, reason: '', tieGuesses: {}, wordList: { mode: 'classic', custom: [], version: 0 }, updated: Date.now(), revision: 0 };
 }
 export function addPlayer(room, name) {
   name = String(name ?? '').trim().replace(/\s+/g, ' ');
@@ -69,12 +69,23 @@ export function act(room, p, message) {
     requireThat(message.team === null || TEAM_IDS.includes(message.team), 'Choose a valid team.');
     requireThat(message.team === null || room.players.filter(q => q.team === message.team && q !== p).length < 4, 'That team already has four players.');
     p.team = message.team;
+  } else if (action === 'word-list') {
+    requireThat(room.host === p.id && room.phase === 'lobby', 'Only the host can change the word list in the lobby.');
+    requireThat(['classic', 'custom'].includes(message.mode), 'Choose the classic or custom word list.');
+    let custom = room.wordList.custom;
+    if (message.mode === 'custom') {
+      requireThat(typeof message.text === 'string' && message.text.length <= 6000, 'Paste a word list of up to 6,000 characters.');
+      custom = [...new Set(message.text.split(/[,;\r\n]+/).map(normalize).filter(Boolean))];
+      requireThat(custom.length >= 8 && custom.length <= 100, 'Use 8–100 unique words or phrases. Duplicates count only once.');
+      requireThat(custom.every(w => w.length <= 40 && /^[\p{L}\p{M}\p{N} '\u2019-]+$/u.test(w) && /[\p{L}\p{N}]/u.test(w)), 'Each entry must be 1–40 characters: letters, numbers, spaces, apostrophes, or hyphens.');
+    }
+    room.wordList = { mode: message.mode, custom, version: room.wordList.version + 1 };
   } else if (action === 'start') {
     requireThat(room.host === p.id && room.phase === 'lobby', 'Only the host can start from the lobby.');
     requireThat(TEAM_IDS.every(id => room.players.filter(q => q.team === id && q.connected).length >= 2), 'You need at least two connected players on each team.');
     requireThat(room.players.filter(q => q.team).every(q => q.connected), 'Wait for disconnected players, or remove them before starting.');
     room.teams = freshTeams(); room.history = []; room.chat = []; room.tieGuesses = {}; room.round = 0; room.winner = null; room.reason = '';
-    const pool = shuffled(words);
+    const pool = shuffled(room.wordList.mode === 'custom' ? room.wordList.custom : words);
     for (const id of TEAM_IDS) room.teams[id].words = pool.splice(0, 4);
     beginRound(room);
   } else if (action === 'lobby') {
@@ -94,7 +105,8 @@ export function act(room, p, message) {
     const used = room.history.flatMap(h => h.clues).map(normalize);
     for (const team of Object.values(room.teams)) if (team.clues) used.push(...team.clues.map(normalize));
     requireThat(new Set(clues.map(normalize)).size === 3 && clues.every(c => !used.includes(normalize(c))), 'Each clue must be new. Do not repeat a clue.');
-    requireThat(clues.every(c => !t.words.some(w => normalize(c).split(/[^\p{L}]+/u).includes(w))), 'Do not include any of your secret words in a clue.');
+    const keywordText = value => ' ' + normalize(value).replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim() + ' ';
+    requireThat(clues.every(c => !t.words.some(w => keywordText(c).includes(keywordText(w)))), 'Do not include any of your secret words in a clue.');
     t.clues = clues;
     if (TEAM_IDS.every(id => room.teams[id].clues)) { room.phase = 'guess'; room.target = 'blue'; }
   } else if (action === 'guess') {
@@ -134,6 +146,7 @@ export function snapshot(room, p) {
   const revealed = id => room.phase === 'finished' || room.history.some(h => h.round === room.round && h.team === id);
   return {
     code: room.code, phase: room.phase, round: room.round, host: room.host, me: p.id, target: room.target, winner: room.winner, reason: room.reason,
+    wordList: { mode: room.wordList.mode, count: room.wordList.mode === 'custom' ? room.wordList.custom.length : words.length, version: room.wordList.version, custom: room.phase === 'lobby' && room.host === p.id ? room.wordList.custom : undefined },
     players: room.players.map(({ id, name, team, connected }) => ({ id, name, team, connected })),
     teams: Object.fromEntries(TEAM_IDS.map(id => {
       const t = room.teams[id];

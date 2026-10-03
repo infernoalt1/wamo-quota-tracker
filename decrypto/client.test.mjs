@@ -39,8 +39,21 @@ test('four real WebSocket browser clients switch teams, play a full game, reconn
     await wait(() => a.view.players.length === 4, 'four joined');
     q(a, '[data-team=amber]').click(); await wait(() => a.view.players.find(p => p.id === a.view.me).team === 'amber', 'switch amber');
     q(b, '[data-team=blue]').click(); await wait(() => a.view.players.filter(p => p.team === 'blue').length === 2, 'balanced');
+    assert.equal(q(b, '#word-list-form'), null);
+    input(a, '#word-list-mode', 'custom'); q(a, '#word-list-mode').dispatchEvent(new a.dom.window.Event('change', { bubbles: true }));
+    assert.equal(q(a, '#custom-word-fields').hidden, false);
+    const custom = 'copper, silver, bronze, platinum, nickel, cobalt, zinc, iron';
+    input(a, '#custom-words', custom);
+    input(b, '#message', 'Ready to play'); submit(b, '#chat-form');
+    await wait(() => q(a, '#messages').textContent.includes('Ready to play'), 'lobby chat');
+    assert.equal(q(a, '#custom-words').value, custom);
+    submit(a, '#word-list-form');
+    await wait(() => a.view.wordList.mode === 'custom' && b.view.wordList.mode === 'custom', 'saved word list');
+    assert.equal(q(a, '#custom-words').value.split('\n').length, 8);
+    assert.equal(b.view.wordList.custom, undefined);
     q(a, '[data-action=start]').click(); await wait(() => clients.every(x => x.view?.phase === 'clues'), 'start');
     const r = game.rooms.get(room);
+    assert([...r.teams.blue.words, ...r.teams.amber.words].every(w => custom.includes(w)));
     const current = id => [a, b, c, d].find(x => x.view.me === id);
     assert.equal(q(a, '[data-team=blue]'), null);
     const encoderClient = current(r.teams.blue.encoder), decoderClient = current(r.players.find(p => p.team === 'blue' && p.id !== r.teams.blue.encoder).id);
@@ -77,6 +90,9 @@ test('four real WebSocket browser clients switch teams, play a full game, reconn
     }
     await wait(() => a.view.phase === 'finished', 'finished'); assert.equal(r.winner, 'amber'); assert.match(q(a, '.activity').textContent, /Amber cracked it/);
     q(a, '[data-action=lobby]').click(); await wait(() => a.view.phase === 'lobby', 'rematch lobby');
+    assert.equal(q(a, '#word-list-mode').value, 'custom');
+    input(a, '#word-list-mode', 'classic'); submit(a, '#word-list-form');
+    await wait(() => a.view.wordList.mode === 'classic', 'restore classic');
     q(a, '[data-action=start]').click(); await wait(() => a.view.phase === 'clues', 'rematch'); assert.equal(r.history.length, 0); assert.equal(r.round, 1);
     // Unexpected host disconnection transfers control; remaining host can recover to lobby.
     for (const ws of a.sockets) { ws.onclose = null; ws.onmessage = null; ws.terminate(); } a.dom.window.close();

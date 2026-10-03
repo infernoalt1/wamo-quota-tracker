@@ -3,7 +3,7 @@
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const titles = { blue: 'Blue', amber: 'Amber' }, teams = ['blue', 'amber'];
   const app = $('#app');
-  let ws, state, session, retry, intentional = false, lastScope = '', drafts = {};
+  let ws, state, session, retry, intentional = false, lastScope = '', lastListVersion = '', drafts = {};
   try { session = JSON.parse(sessionStorage.getItem('decrypto.session')); } catch {}
   function notice(text) { $('#notice').textContent = text; $('#notice').hidden = !text; clearTimeout(notice.timer); if (text) notice.timer = setTimeout(() => { $('#notice').hidden = true; }, 6500); }
   function saveSession(value) { session = value; try { if (value) sessionStorage.setItem('decrypto.session', JSON.stringify(value)); else sessionStorage.removeItem('decrypto.session'); } catch {} }
@@ -35,9 +35,13 @@
   function playerList(team) {
     return state.players.filter(p => p.team === team).map(p => `<div class="player"><span class="avatar ${team || ''}">${escape(p.name.slice(0, 1).toUpperCase())}</span><span class="player-name">${escape(p.name)} ${p.id === state.me ? '<small>(you)</small>' : ''}<small>${p.id === state.host ? 'Host' : state.teams[team]?.encoder === p.id ? 'Encryptor' : ''}${!p.connected ? ' · disconnected' : ''}</small></span>${state.phase === 'lobby' && state.host === state.me && p.id !== state.me ? `<button class="quiet remove" data-remove="${p.id}" aria-label="Remove ${escape(p.name)}">×</button>` : `<span class="presence ${p.connected ? 'online' : ''}"></span>`}</div>`).join('');
   }
+  function wordListSettings(me) {
+    const list = state.wordList;
+    return `<section class="panel word-settings"><span class="eyebrow">GAME SETTINGS</span><h2>Word list</h2><p class="list-status">Saved: ${list.mode === 'custom' ? 'Custom' : 'Classic'} · ${list.count} words</p>${state.host === me.id ? `<form id="word-list-form"><label for="word-list-mode">Choose your word pool</label><select id="word-list-mode" name="wordListMode"><option value="classic" ${list.mode === 'classic' ? 'selected' : ''}>Classic — built-in words</option><option value="custom" ${list.mode === 'custom' ? 'selected' : ''}>Custom — paste your own</option></select><div id="custom-word-fields" ${list.mode === 'custom' ? '' : 'hidden'}><label for="custom-words">Custom words or phrases</label><textarea id="custom-words" name="customWords" rows="6" maxlength="6000" placeholder="Moon\nIce cream\nTreasure chest" aria-describedby="word-list-help">${escape((list.custom || []).join('\n'))}</textarea><p id="word-list-help" class="hint">Use 8–100 unique entries, separated by commas, semicolons, or new lines. Up to 40 characters each. Eight are randomly dealt per game; a larger pool makes guessing harder.</p></div><button class="secondary" type="submit">Save word list</button><small>Save before starting. This choice stays for rematches.</small></form>` : '<p>The host can change this list before the game starts.</p>'}</section>`;
+  }
   function lobby(me) {
     const ready = teams.every(t => state.players.filter(p => p.team === t && p.connected).length >= 2) && state.players.filter(p => p.team).every(p => p.connected);
-    return `<div class="section-heading"><div><span class="eyebrow">THE BRIEFING ROOM</span><h1>Pick a side. Bring a friend.</h1><p>Two to four players on each team. Secret words arrive when the game starts.</p></div></div><div class="team-grid">${teams.map(t => `<section class="panel team-card ${t}"><div class="team-heading"><span class="team-mark">${t === 'blue' ? '◈' : '✳'}</span><div><span class="eyebrow">FREQUENCY ${t === 'blue' ? '01' : '02'}</span><h2>${titles[t]} team</h2></div><span class="count">${state.players.filter(p => p.team === t).length}/4</span></div><div class="roster">${playerList(t) || '<p class="empty">A clean slate. Be the first to join.</p>'}</div><button class="${me.team === t ? 'selected' : 'secondary'} wide" data-team="${t}" ${me.team === t || state.players.filter(p => p.team === t).length >= 4 ? 'disabled' : ''}>${me.team === t ? '✓ Your team' : `Join ${titles[t]} team →`}</button></section>`).join('')}</div><div class="lobby-bottom"><div><strong>${ready ? 'All systems ready.' : 'Waiting for the crew.'}</strong><p>${ready ? 'The host can start whenever everyone is ready.' : 'At least two connected players on each team to start.'}</p></div>${state.host === me.id ? `<button class="primary" data-action="start" ${ready ? '' : 'disabled'}>Start game <span>→</span></button>` : '<span class="pill">Waiting for host</span>'}</div><details class="spectators"><summary>Spectators (${state.players.filter(p => !p.team).length})</summary>${playerList(null)}${me.team ? '<button class="quiet" data-team="spectator">Switch to spectator</button>' : '<p>You’re watching. Join a team to play.</p>'}</details>`;
+    return `<div class="section-heading"><div><span class="eyebrow">THE BRIEFING ROOM</span><h1>Pick a side. Bring a friend.</h1><p>Two to four players on each team. Secret words arrive when the game starts.</p></div></div><div class="team-grid">${teams.map(t => `<section class="panel team-card ${t}"><div class="team-heading"><span class="team-mark">${t === 'blue' ? '◈' : '✳'}</span><div><span class="eyebrow">FREQUENCY ${t === 'blue' ? '01' : '02'}</span><h2>${titles[t]} team</h2></div><span class="count">${state.players.filter(p => p.team === t).length}/4</span></div><div class="roster">${playerList(t) || '<p class="empty">A clean slate. Be the first to join.</p>'}</div><button class="${me.team === t ? 'selected' : 'secondary'} wide" data-team="${t}" ${me.team === t || state.players.filter(p => p.team === t).length >= 4 ? 'disabled' : ''}>${me.team === t ? '✓ Your team' : `Join ${titles[t]} team →`}</button></section>`).join('')}</div>${wordListSettings(me)}<div class="lobby-bottom"><div><strong>${ready ? 'All systems ready.' : 'Waiting for the crew.'}</strong><p>${ready ? 'The host can start whenever everyone is ready.' : 'At least two connected players on each team to start.'}</p></div>${state.host === me.id ? `<button class="primary" data-action="start" ${ready ? '' : 'disabled'}>Start game <span>→</span></button>` : '<span class="pill">Waiting for host</span>'}</div><details class="spectators"><summary>Spectators (${state.players.filter(p => !p.team).length})</summary>${playerList(null)}${me.team ? '<button class="quiet" data-team="spectator">Switch to spectator</button>' : '<p>You’re watching. Join a team to play.</p>'}</details>`;
   }
   const codeText = code => code?.join(' · ') || '—';
   function codeForm(target, own) {
@@ -70,8 +74,10 @@
   }
   function render() {
     const active = document.activeElement, activeName = active?.name;
-    const selection = active?.tagName === 'INPUT' ? [active.selectionStart, active.selectionEnd] : null;
-    app.querySelectorAll('input,select').forEach(el => { if (el.name) drafts[el.name] = el.value; });
+    const selection = ['INPUT', 'TEXTAREA'].includes(active?.tagName) ? [active.selectionStart, active.selectionEnd] : null;
+    app.querySelectorAll('input,select,textarea').forEach(el => { if (el.name) drafts[el.name] = el.value; });
+    const listVersion = state ? `${state.code}:${state.host}:${state.wordList.version}` : '';
+    if (listVersion !== lastListVersion) { delete drafts.wordListMode; delete drafts.customWords; lastListVersion = listVersion; }
     const scope = state ? `${state.code}:${state.phase}:${state.round}:${state.target}:${state.players.find(p => p.id === state.me)?.team}` : 'entry';
     if (scope !== lastScope) { drafts = Object.fromEntries(Object.entries(drafts).filter(([key]) => ['name', 'room', 'message', 'channel'].includes(key))); lastScope = scope; }
     if (!state) app.innerHTML = landing();
@@ -79,18 +85,23 @@
       const me = state.players.find(p => p.id === state.me);
       app.innerHTML = `<div class="room-toolbar"><div><span class="eyebrow">ROOM</span><button id="invite" class="room-code" title="Copy invitation link">${state.code} <span>⧉</span></button></div><div><button class="quiet" id="copy-link">Invite friends ↗</button>${state.host === me.id && state.phase !== 'lobby' && state.phase !== 'finished' ? '<button class="quiet" id="reset">Return to lobby</button>' : ''}<button class="quiet" id="leave">Leave room</button></div></div>${state.phase === 'lobby' ? lobby(me) : playing(me)}${chat(me)}`;
     }
-    app.querySelectorAll('input,select').forEach(el => { if (Object.hasOwn(drafts, el.name)) el.value = drafts[el.name]; });
-    if (activeName) { const el = app.querySelector(`[name="${activeName}"]`); if (el) { el.focus({ preventScroll: true }); if (selection && el.tagName === 'INPUT') try { el.setSelectionRange(...selection); } catch {} } }
+    app.querySelectorAll('input,select,textarea').forEach(el => { if (Object.hasOwn(drafts, el.name)) el.value = drafts[el.name]; });
+    if ($('#custom-word-fields')) $('#custom-word-fields').hidden = $('#word-list-mode').value !== 'custom';
+    if (activeName) { const el = app.querySelector(`[name="${activeName}"]`); if (el) { el.focus({ preventScroll: true }); if (selection && ['INPUT', 'TEXTAREA'].includes(el.tagName)) try { el.setSelectionRange(...selection); } catch {} } }
     if ($('#messages')) $('#messages').scrollTop = $('#messages').scrollHeight;
-    if (ws?.readyState !== 1) app.querySelectorAll('button,input,select').forEach(el => { el.disabled = true; });
+    if (ws?.readyState !== 1) app.querySelectorAll('button,input,select,textarea').forEach(el => { el.disabled = true; });
   }
   app.addEventListener('submit', event => {
     event.preventDefault(); const f = event.target, data = new FormData(f);
+    if (f.id === 'word-list-form') send('word-list', { mode: data.get('wordListMode'), text: data.get('customWords') });
     if (f.id === 'entry-form') { const action = event.submitter?.value || 'create'; if (action === 'join' && !String(data.get('room')).trim()) return notice('Enter your six-character room code.'); send(action, { name: data.get('name'), room: data.get('room') }); }
     if (f.id === 'clue-form') send('clues', { clues: [0, 1, 2].map(i => data.get('clue' + i)) });
     if (f.id === 'guess-form') { const code = [0, 1, 2].map(i => Number(data.get('digit' + i))); if (new Set(code).size !== 3) return notice('Use three different digits.'); send('guess', { code, round: state.round, target: state.target }); }
     if (f.id === 'tie-form') send('tiebreak', { words: [0, 1, 2, 3].map(i => data.get('word' + i)) });
     if (f.id === 'chat-form') { send('chat', { channel: data.get('channel'), text: data.get('message') }); f.elements.message.value = ''; drafts.message = ''; }
+  });
+  app.addEventListener('change', event => {
+    if (event.target.id === 'word-list-mode') $('#custom-word-fields').hidden = event.target.value !== 'custom';
   });
   app.addEventListener('click', async event => {
     const b = event.target.closest('button'); if (!b) return;

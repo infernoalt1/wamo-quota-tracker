@@ -2,6 +2,8 @@
 
 Open `/decrypto/`. Create a room, share its invitation link, and split 4–8 players into two teams. Up to 16 people may join including spectators. No account, database, or external API is required.
 
+In the lobby, the host can choose **Classic** or **Custom** under **Word list**. Paste 8–100 unique words or phrases separated by commas, semicolons, or newlines, then click **Save word list**. Entries may contain letters, numbers, spaces, apostrophes, and hyphens (40 characters maximum). Case-insensitive duplicates are removed. Eight different entries are randomly dealt across the two teams. The saved choice persists for rematches; only the lobby host receives the custom pool for editing. A larger pool makes it harder to infer opposing words. Lists cannot change during a game.
+
 Production uses the existing `node server.js` entry point; deploy the `decrypto/` directory with the server. For isolated development, `npm run dev:decrypto` starts port 3002. `npm run dev` proxies `/decrypto` and its WebSocket to that server. `DECRYPTO_PORT` overrides the standalone port (update the Vite proxy if using it).
 
 The server owns words, codes, scoring, roles, and phase transitions. Each socket receives a personalized snapshot. Session credentials are random server-generated tokens stored in the browser's session storage; refresh and temporary network loss resume the same seat. Opening the same session elsewhere replaces the old socket. Host responsibility moves to a connected player on disconnection. Rooms live in memory and expire after 30 minutes without connected players; a server restart clears rooms. Use one server instance, as with the other in-memory party games.

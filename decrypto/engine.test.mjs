@@ -8,6 +8,31 @@ function fixture() {
   act(r, p[0], { action: 'start' });
   return { r, p, player: id => p.find(x => x.id === id) };
 }
+test('custom word lists validate, deal unique entries, stay private, and survive rematches', () => {
+  const r = createRoom('CUSTOM'), p = ['A', 'B', 'C', 'D'].map(n => addPlayer(r, n));
+  const text = 'Ice cream, Space station; café\nDragon\nRiver\nFire\nWind\nEarth\nICE CREAM';
+  assert.throws(() => act(r, p[1], { action: 'word-list', mode: 'custom', text }), /host/);
+  for (const invalid of ['a,b,c', 'a,A,b,B,c,C,d,D', 'x'.repeat(6001), 'a,b,c,d,e,f,g,<script>', Array.from({length:101}, (_,i) => `word ${i}`).join(',')]) {
+    assert.throws(() => act(r, p[0], { action: 'word-list', mode: 'custom', text: invalid }));
+    assert.equal(r.wordList.mode, 'classic');
+  }
+  act(r, p[0], { action: 'word-list', mode: 'custom', text });
+  assert.equal(r.wordList.custom.length, 8);
+  assert.equal(snapshot(r, p[0]).wordList.custom.length, 8);
+  assert.equal(snapshot(r, p[1]).wordList.custom, undefined);
+  act(r, p[0], { action: 'start' });
+  const dealt = [...r.teams.blue.words, ...r.teams.amber.words];
+  assert.equal(new Set(dealt).size, 8); assert(dealt.every(w => r.wordList.custom.includes(w)));
+  assert.equal(snapshot(r, p[0]).wordList.custom, undefined);
+  assert.throws(() => act(r, p[0], { action: 'word-list', mode: 'classic' }), /lobby/);
+  const team = r.teams.blue.words.includes('ice cream') ? 'blue' : 'amber';
+  const encoder = p.find(x => x.id === r.teams[team].encoder);
+  assert.throws(() => act(r, encoder, { action: 'clues', clues: ['An ice-cream shop', 'unrelated clue', 'another clue'] }), /secret words/);
+  act(r, p[0], { action: 'lobby' }); assert.equal(r.wordList.mode, 'custom');
+  act(r, p[0], { action: 'start' }); assert([...r.teams.blue.words, ...r.teams.amber.words].every(w => r.wordList.custom.includes(w)));
+  act(r, p[0], { action: 'lobby' }); act(r, p[0], { action: 'word-list', mode: 'classic' });
+  assert.equal(r.wordList.mode, 'classic'); assert.equal(r.wordList.custom.length, 8);
+});
 function clues(r, player) {
   for (const team of ['blue', 'amber']) act(r, player(r.teams[team].encoder), { action: 'clues', clues: [1, 2, 3].map(n => `${team} association ${r.round}-${n}`) });
 }
