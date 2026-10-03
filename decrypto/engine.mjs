@@ -1,8 +1,9 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { words } from './words.mjs';
 
-export const TEAM_IDS = ['blue', 'amber'];
-export const other = team => team === 'blue' ? 'amber' : 'blue';
+export const AVATARS = [{"label": "Fox", "emoji": "\ud83e\udd8a"}, {"label": "Cat", "emoji": "\ud83d\udc31"}, {"label": "Panda", "emoji": "\ud83d\udc3c"}, {"label": "Frog", "emoji": "\ud83d\udc38"}, {"label": "Octopus", "emoji": "\ud83d\udc19"}, {"label": "Owl", "emoji": "\ud83e\udd89"}, {"label": "Butterfly", "emoji": "\ud83e\udd8b"}, {"label": "Dragon", "emoji": "\ud83d\udc09"}, {"label": "Robot", "emoji": "\ud83e\udd16"}, {"label": "Alien", "emoji": "\ud83d\udc7d"}, {"label": "Ghost", "emoji": "\ud83d\udc7b"}, {"label": "Rocket", "emoji": "\ud83d\ude80"}, {"label": "Moon", "emoji": "\ud83c\udf19"}, {"label": "Star", "emoji": "\u2b50"}, {"label": "Cherry", "emoji": "\ud83c\udf52"}, {"label": "Avocado", "emoji": "\ud83e\udd51"}];
+export const TEAM_IDS = ['blue', 'red'];
+export const other = team => team === 'blue' ? 'red' : 'blue';
 const normalize = value => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
 const requireThat = (condition, message) => { if (!condition) throw Error(message); };
 function shuffled(values) {
@@ -19,8 +20,8 @@ export function addPlayer(room, name) {
   requireThat(name.length > 0 && name.length <= 24, 'Use a name with 1–24 characters.');
   requireThat(room.players.length < 16, 'This room is full (16 people maximum).');
   const counts = TEAM_IDS.map(t => room.players.filter(p => p.team === t).length);
-  const team = room.phase === 'lobby' ? (counts[0] <= counts[1] ? 'blue' : 'amber') : null;
-  const p = { id: randomUUID(), token: randomUUID(), name, team: counts.every(n => n >= 4) ? null : team, connected: true };
+  const team = room.phase === 'lobby' ? (counts[0] <= counts[1] ? 'blue' : 'red') : null;
+  const p = { id: randomUUID(), token: randomUUID(), name, emoji: AVATARS[room.players.length % AVATARS.length].emoji, team: counts.every(n => n >= 4) ? null : team, connected: true };
   room.players.push(p); room.host ??= p.id;
   return p;
 }
@@ -40,13 +41,13 @@ function beginRound(room) {
 }
 function finish(room, winner, reason) { room.phase = 'finished'; room.winner = winner; room.reason = reason; room.target = null; }
 function endRound(room) {
-  const a = room.teams.blue, b = room.teams.amber;
+  const a = room.teams.blue, b = room.teams.red;
   const blueWins = a.interceptions >= 2 || b.misses >= 2;
-  const amberWins = b.interceptions >= 2 || a.misses >= 2;
-  if (blueWins !== amberWins) return finish(room, blueWins ? 'blue' : 'amber', 'Two interceptions or two opposing miscommunications.');
-  if (blueWins || amberWins || room.round >= 8) {
+  const redWins = b.interceptions >= 2 || a.misses >= 2;
+  if (blueWins !== redWins) return finish(room, blueWins ? 'blue' : 'red', 'Two interceptions or two opposing miscommunications.');
+  if (blueWins || redWins || room.round >= 8) {
     const delta = (a.interceptions - a.misses) - (b.interceptions - b.misses);
-    if (delta) return finish(room, delta > 0 ? 'blue' : 'amber', 'Tiebreak: interceptions minus miscommunications.');
+    if (delta) return finish(room, delta > 0 ? 'blue' : 'red', 'Tiebreak: interceptions minus miscommunications.');
     room.phase = 'tiebreak'; room.target = null; return;
   }
   room.phase = 'round_end'; room.target = null;
@@ -59,7 +60,7 @@ function resolveTransmission(room) {
   if (!decoded) t.misses++;
   if (intercepted) room.teams[other(id)].interceptions++;
   room.history.push({ round: room.round, team: id, clues: [...t.clues], timedOut: t.timedOut, code: [...t.code], decode: [...t.decode], intercept: t.intercept ? [...t.intercept] : null, decoded, intercepted });
-  if (id === 'blue') room.target = 'amber'; else endRound(room);
+  if (id === 'blue') room.target = 'red'; else endRound(room);
 }
 // The deadline belongs to the room, so it survives disconnects and tab suspension.
 export function expireClues(room, now = Date.now()) {
@@ -76,7 +77,11 @@ export function act(room, p, message) {
   expireClues(room);
   const { action } = message;
   requireThat(room.players.includes(p), 'Rejoin this room.');
-  if (action === 'team') {
+  if (action === 'avatar') {
+    requireThat(room.phase === 'lobby', 'Choose your emoji in the lobby.');
+    requireThat(AVATARS.some(a => a.emoji === message.emoji), 'Choose an emoji from the picker.');
+    p.emoji = message.emoji;
+  } else if (action === 'team') {
     requireThat(room.phase === 'lobby', 'Teams can change in the lobby. Ask the host to return there first.');
     requireThat(message.team === null || TEAM_IDS.includes(message.team), 'Choose a valid team.');
     requireThat(message.team === null || room.players.filter(q => q.team === message.team && q !== p).length < 4, 'That team already has four players.');
@@ -146,8 +151,8 @@ export function act(room, p, message) {
     room.tieGuesses[p.team] = message.words.map(normalize);
     if (TEAM_IDS.every(id => room.tieGuesses[id])) {
       const score = id => room.tieGuesses[id].filter((w, i) => w === room.teams[other(id)].words[i]).length;
-      const a = score('blue'), b = score('amber');
-      finish(room, a === b ? 'draw' : a > b ? 'blue' : 'amber', `Keyword tiebreak: Blue ${a}, Amber ${b}. Exact words in the correct positions count.`);
+      const a = score('blue'), b = score('red');
+      finish(room, a === b ? 'draw' : a > b ? 'blue' : 'red', `Keyword tiebreak: Blue ${a}, Red ${b}. Exact words in the correct positions count.`);
     }
   } else if (action === 'chat') {
     const text = String(message.text ?? '').trim();
@@ -155,7 +160,7 @@ export function act(room, p, message) {
     requireThat(message.channel === 'room' || (message.channel === 'team' && p.team), 'Choose a chat channel.');
     const t = room.teams[p.team];
     requireThat(!(['clues', 'guess'].includes(room.phase) && t?.encoder === p.id && !room.history.some(h => h.round === room.round && h.team === p.team)), 'Stay silent until your code is revealed, encryptor.');
-    room.chat.push({ id: randomUUID(), player: p.id, name: p.name, text, channel: message.channel === 'team' ? p.team : 'room' });
+    room.chat.push({ id: randomUUID(), player: p.id, name: p.name, emoji: p.emoji, text, channel: message.channel === 'team' ? p.team : 'room' });
     room.chat = room.chat.slice(-150);
   } else throw Error('Unknown game action.');
   room.updated = Date.now(); room.revision++;
@@ -165,12 +170,13 @@ export function snapshot(room, p) {
   return {
     serverNow: Date.now(), clueDeadline: room.clueDeadline, code: room.code, phase: room.phase, round: room.round, host: room.host, me: p.id, target: room.target, winner: room.winner, reason: room.reason,
     wordList: { mode: room.wordList.mode, count: room.wordList.mode === 'custom' ? room.wordList.custom.length : words.length, version: room.wordList.version, custom: room.phase === 'lobby' && room.host === p.id ? room.wordList.custom : undefined },
-    players: room.players.map(({ id, name, team, connected }) => ({ id, name, team, connected })),
+    avatarOptions: room.phase === 'lobby' ? AVATARS : undefined,
+    players: room.players.map(({ id, name, emoji, team, connected }) => ({ id, name, emoji, team, connected })),
     teams: Object.fromEntries(TEAM_IDS.map(id => {
       const t = room.teams[id];
       return [id, { words: p.team === id || room.phase === 'finished' ? t.words : [], interceptions: t.interceptions, misses: t.misses, encoder: t.encoder,
         code: p.id === t.encoder || revealed(id) ? t.code : null,
-        clues: room.phase === 'clues' ? (p.id === t.encoder ? t.clues : null) : (id === 'blue' || room.target === 'amber' || revealed(id) ? t.clues : null),
+        clues: room.phase === 'clues' ? (p.id === t.encoder ? t.clues : null) : (id === 'blue' || room.target === 'red' || revealed(id) ? t.clues : null),
         draft: p.id === t.encoder && room.phase === 'clues' ? t.draft : undefined, timedOut: t.timedOut, cluesReady: !!t.clues, decodeReady: !!t.decode, interceptReady: !!t.intercept,
         decode: p.team === id || revealed(id) ? t.decode : null, intercept: p.team === other(id) || revealed(id) ? t.intercept : null }];
     })),

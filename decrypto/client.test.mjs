@@ -37,7 +37,21 @@ test('four real WebSocket browser clients switch teams, play a full game, reconn
     async function join(name) { const x = client(); await wait(() => !q(x, 'button[value=join]').disabled, 'join connected'); input(x, '#name', name); input(x, '#room-code', room); submit(x, '#entry-form', 'button[value=join]'); await wait(() => x.view, 'joined'); return x; }
     b = await join('Bob'); c = await join('Carol'); d = await join('Dave');
     await wait(() => a.view.players.length === 4, 'four joined');
-    q(a, '[data-team=amber]').click(); await wait(() => a.view.players.find(p => p.id === a.view.me).team === 'amber', 'switch amber');
+    assert(q(a, '.lobby-grid .lobby-sidebar #chat-form'));
+    assert.equal(q(a, '#app').querySelectorAll('#chat-form').length, 1);
+    assert.match(q(a, '.team-card.red h2').textContent, /Red team/);
+    q(a, '#chat-toggle').click();
+    assert.equal(q(a, '#chat-toggle').getAttribute('aria-expanded'), 'true');
+    assert(q(a, '#room-chat').classList.contains('is-open'));
+    q(a, '#chat-toggle').click();
+    const selectedEmoji = c.view.avatarOptions.find(x => x.label === 'Rocket').emoji;
+    q(c, '[data-emoji][aria-label="Rocket"]').click();
+    await wait(() => a.view.players.find(p => p.id === c.view.me).emoji === selectedEmoji, 'avatar broadcast');
+    assert.equal(q(c, '[data-emoji][aria-label="Rocket"]').getAttribute('aria-pressed'), 'true');
+    assert(q(a, '.roster').textContent.includes(selectedEmoji));
+    input(c, '#message', 'Emoji check'); submit(c, '#chat-form');
+    await wait(() => q(a, '#messages .chat-avatar')?.textContent === selectedEmoji, 'chat avatar');
+    q(a, '[data-team=red]').click(); await wait(() => a.view.players.find(p => p.id === a.view.me).team === 'red', 'switch red');
     q(b, '[data-team=blue]').click(); await wait(() => a.view.players.filter(p => p.team === 'blue').length === 2, 'balanced');
     assert.equal(q(b, '#word-list-form'), null);
     input(a, '#word-list-mode', 'custom'); q(a, '#word-list-mode').dispatchEvent(new a.dom.window.Event('change', { bubbles: true }));
@@ -53,27 +67,31 @@ test('four real WebSocket browser clients switch teams, play a full game, reconn
     assert.equal(b.view.wordList.custom, undefined);
     q(a, '[data-action=start]').click(); await wait(() => clients.every(x => x.view?.phase === 'clues'), 'start');
     const r = game.rooms.get(room);
-    assert([...r.teams.blue.words, ...r.teams.amber.words].every(w => custom.includes(w)));
+    assert([...r.teams.blue.words, ...r.teams.red.words].every(w => custom.includes(w)));
     const current = id => [a, b, c, d].find(x => x.view.me === id);
     assert.equal(q(a, '[data-team=blue]'), null);
+    assert.equal(q(c, '.profile-picker'), null);
+    assert.equal(q(c, '.role-pill .avatar').textContent, selectedEmoji);
     const encoderClient = current(r.teams.blue.encoder), decoderClient = current(r.players.find(p => p.team === 'blue' && p.id !== r.teams.blue.encoder).id);
     input(encoderClient, '#clue0', 'unsent draft');
     input(decoderClient, '#message', '<img src=x onerror=alert(1)>'); input(decoderClient, '#channel', 'team'); submit(decoderClient, '#chat-form');
     await wait(() => q(encoderClient, '#messages').textContent.includes('<img'), 'team chat');
     assert.equal(q(encoderClient, '#clue0').value, 'unsent draft'); assert.equal(q(encoderClient, '#messages img'), null);
-    assert(!q(current(r.teams.amber.encoder), '#messages').textContent.includes('<img'));
+    assert(!q(current(r.teams.red.encoder), '#messages').textContent.includes('<img'));
     // Refresh one player: token restores the same identity, team, and private words.
     const old = c, saved = c.dom.window.sessionStorage.getItem('decrypto.session'), oldId = c.view.me;
     c = client(saved); await wait(() => c.view?.me === oldId, 'resume'); await wait(() => old.sockets[0].readyState === 3, 'old session replaced');
     assert.equal(c.view.players.find(p => p.id === oldId).connected, true);
+    assert.equal(c.view.players.find(p => p.id === oldId).emoji, selectedEmoji);
+    assert.equal(q(c, '.role-pill .avatar').textContent, selectedEmoji);
     for (let round = 1; round <= 2; round++) {
-      for (const team of ['blue', 'amber']) {
+      for (const team of ['blue', 'red']) {
         const x = current(r.teams[team].encoder); await wait(() => q(x, '#clue-form'), 'encryptor form');
         for (let i = 0; i < 3; i++) input(x, '#clue' + i, `${team} signal ${round}-${i}`);
         submit(x, '#clue-form');
       }
       await wait(() => r.phase === 'guess', 'clues done');
-      for (const team of ['blue', 'amber']) {
+      for (const team of ['blue', 'red']) {
         const decoder = current(r.players.find(p => p.team === team && p.id !== r.teams[team].encoder).id);
         await wait(() => q(decoder, '#guess-form') && decoder.view.target === team, 'decoder form');
         const code = [...r.teams[team].code]; if (team === 'blue') [code[0], code[1]] = [code[1], code[0]];
@@ -88,14 +106,16 @@ test('four real WebSocket browser clients switch teams, play a full game, reconn
       }
       if (round === 1) { await wait(() => q(a, '[data-action=next]'), 'round summary'); q(a, '[data-action=next]').click(); await wait(() => r.round === 2, 'next round'); }
     }
-    await wait(() => a.view.phase === 'finished', 'finished'); assert.equal(r.winner, 'amber'); assert.match(q(a, '.activity').textContent, /Amber cracked it/);
+    await wait(() => a.view.phase === 'finished', 'finished'); assert.equal(r.winner, 'red'); assert.match(q(a, '.activity').textContent, /Red cracked it/);
     q(a, '[data-action=lobby]').click(); await wait(() => a.view.phase === 'lobby', 'rematch lobby');
     assert.equal(q(a, '#word-list-mode').value, 'custom');
+    await wait(() => q(c, '.profile-picker'), 'avatar picker returns');
+    assert.equal(q(c, '[data-emoji][aria-label=Rocket]').getAttribute('aria-pressed'), 'true');
     input(a, '#word-list-mode', 'classic'); submit(a, '#word-list-form');
     await wait(() => a.view.wordList.mode === 'classic', 'restore classic');
     q(a, '[data-action=start]').click(); await wait(() => a.view.phase === 'clues', 'rematch'); assert.equal(r.history.length, 0); assert.equal(r.round, 1);
     // Drafts travel over the real socket; the server timer finalizes without another action.
-    const writer = current(r.teams.blue.encoder), first = current(r.teams.amber.encoder);
+    const writer = current(r.teams.blue.encoder), first = current(r.teams.red.encoder);
     await wait(() => q(writer, '#clue-form') && q(first, '#clue-form'), 'rematch forms');
     input(writer, '#clue0', 'unfinished signal');
     q(writer, '#clue0').dispatchEvent(new writer.dom.window.Event('input', { bubbles: true }));
