@@ -76,7 +76,14 @@ export function setupMedium(app, server) {
           if (r.host === p.id) r.host = r.players[0]?.id;
           ws.room = ws.player = null; send(ws, { type: 'left' }); broadcast(r); return;
         }
-        act(r, p, m); broadcast(r);
+        const kicked = m.action === 'kick' ? r.players.find(q => q.id === m.player) : null;
+        act(r, p, m);
+        if (kicked?.ws) {
+          kicked.ws.room = kicked.ws.player = null;
+          send(kicked.ws, { type: 'kicked' });
+          kicked.ws = null;
+        }
+        broadcast(r);
       } catch (error) { send(ws, { type: 'error', message: error instanceof SyntaxError ? 'Invalid message.' : error.message }); }
     });
   });

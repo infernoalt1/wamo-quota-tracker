@@ -15,6 +15,12 @@ test('HTTP routes, real remote sessions, private answers and reconnect',async t=
  async function client(){const ws=new WebSocket(`ws://127.0.0.1:${port}/medium/ws`),messages=[];ws.on('message',d=>messages.push(JSON.parse(d)));await new Promise(r=>ws.once('open',r));const c={ws,messages,send:m=>ws.send(JSON.stringify(m)),async wait(fn){const until=Date.now()+3000;while(Date.now()<until){const found=messages.find(fn);if(found)return found;await new Promise(r=>setTimeout(r,5));}throw Error('Timed out');}};clients.push(c);return c;}
  const a=await client();a.send({action:'create',name:'Alice'});const session=await a.wait(m=>m.type==='session');const b=await client();b.send({action:'join',room:session.room,name:'Bob'});await b.wait(m=>m.type==='session');a.send({action:'ready'});b.send({action:'ready'});await a.wait(m=>m.room?.players?.length===2&&m.room.players.every(p=>p.ready));a.send({action:'start'});await b.wait(m=>m.room?.phase==='playing');a.send({action:'submit',word:'confidential'});const hidden=await b.wait(m=>m.room?.groups?.[0]?.submitted.length===1);assert.ok(!JSON.stringify(hidden).includes('confidential'));b.send({action:'submit',word:'confidential'});const result=await b.wait(m=>m.room?.phase==='results');assert.equal(result.room.players[0].score,3);
  a.ws.close();const c=await client();c.send({action:'resume',room:session.room,token:session.token});const resumed=await c.wait(m=>m.type==='state');assert.equal(resumed.room.me,result.room.host);assert.equal(resumed.room.phase,'results');
+ const bobSession=b.messages.find(m=>m.type==='session');
+ c.send({action:'kick',player:result.room.players.find(p=>p.name==='Bob').id});
+ await b.wait(m=>m.type==='kicked');const lobby=await c.wait(m=>m.room?.phase==='lobby');assert.equal(lobby.room.players.length,1);
+ b.send({action:'submit',word:'intrusion'});await b.wait(m=>m.type==='error'&&m.message==='Create or join a room first.');
+ b.send({action:'resume',room:bobSession.room,token:bobSession.token});await b.wait(m=>m.type==='error'&&m.expired);
+
 });
 test('client renders landing, lobby, play, hidden state and results without errors',async()=>{
  const html=await readFile(new URL('./index.html',import.meta.url),'utf8'),js=await readFile(new URL('./app.js',import.meta.url),'utf8');
@@ -25,3 +31,26 @@ test('client renders landing, lobby, play, hidden state and results without erro
  act(r,q,{action:'submit',word:'hidden'});update();assert.ok(!doc.body.textContent.includes('hidden'));act(r,p,{action:'submit',word:'hidden'});update();assert.ok(doc.body.textContent.includes('Round complete.'));assert.ok(doc.querySelector('#next'));dom.window.close();
 });
 
+
+test('spectator and recap UI shows named attempts, host controls and kicked state',async()=>{
+ const html=await readFile(new URL('./index.html',import.meta.url),'utf8'),js=await readFile(new URL('./app.js',import.meta.url),'utf8');
+ const dom=new JSDOM(html,{url:'http://localhost/medium/',runScripts:'outside-only'});let socket;const sent=[];
+ class FakeSocket{constructor(){socket=this;this.readyState=1;}send(data){sent.push(JSON.parse(data));}}
+ dom.window.WebSocket=FakeSocket;dom.window.eval(js);const doc=dom.window.document;
+ const r=createRoom('ABCDEF'),ps=['Alice','Bob','Carol'].map(n=>addPlayer(r,n));
+ ps.forEach(p=>act(r,p,{action:'ready'}));act(r,ps[0],{action:'start'});
+ const spectator=ps.find(p=>!r.groups.some(g=>g.players.includes(p.id))),g=r.groups[0];
+ const update=p=>socket.onmessage({data:JSON.stringify({type:'state',room:snapshot(r,p)})});
+ update(spectator);assert.equal(doc.querySelectorAll('.spectator-pair').length,1);assert.equal(doc.querySelector('#answer-form'),null);
+ for(const [i,id] of g.players.entries())act(r,ps.find(p=>p.id===id),{action:'submit',word:i?'water':'moon'});
+ update(spectator);assert.equal(doc.querySelectorAll('.attempt-entry').length,1);
+ act(r,ps.find(p=>p.id===g.players[0]),{action:'continue'});
+ g.players.forEach(id=>act(r,ps.find(p=>p.id===id),{action:'submit',word:'tide'}));
+ update(ps[0]);assert.equal(doc.querySelectorAll('.round-recap .attempt-entry').length,2);
+ assert.equal(doc.querySelectorAll('.round-recap .attempt-answers b').length,4);
+ assert.equal(doc.querySelectorAll('[data-kick]').length,2);doc.querySelector('#reset').click();assert.equal(sent.at(-1).action,'reset');
+ doc.querySelector('[data-kick]').click();assert.equal(sent.at(-1).action,'kick');
+ update(ps[1]);assert.equal(doc.querySelector('[data-kick]'),null);assert.equal(doc.querySelector('#reset'),null);
+ socket.onmessage({data:JSON.stringify({type:'kicked'})});assert.ok(doc.querySelector('#entry-form'));assert.equal(dom.window.sessionStorage.getItem('medium-session'),null);
+ dom.window.close();
+});

@@ -22,3 +22,9 @@ The built-in list contains over 2,000 words drawn from the repository's existing
 Use a Node server with WebSocket upgrade support. Serve behind HTTPS for remote play. Room codes are shareable; private reconnect tokens are stored per browser tab. Answers remain server-side until both participants submit. Room and score state live in process memory and disappear on server restart. Disconnected rooms expire after 30 minutes. A disconnected player can reload the same tab to resume; gameplay waits for their return. The host may leave the lobby, transferring ownership to the next player.
 
 No deployment is performed by these changes. Browser visual QA was unavailable in the implementation environment; responsive layouts and reduced-motion support are included.
+
+## Host controls and spectating
+
+The host can kick any other player (including disconnected players) or reset to the lobby at any time. Both actions clear scores and round history while retaining the room code, remaining roster, and word settings. Kicking revokes the removed player's reconnect token and removes their team seat; remaining players ready up again. A kick removes a session, not a permanent identity ban.
+
+Sitting-out players see a live card for every pair, including current words, attempt number, lock-in status, and all revealed attempts. Unrevealed answers stay private. Every round's result screen displays every pair's complete attempt history, with each answer attributed to its player; earlier rounds remain in the connection journal.

@@ -36,6 +36,10 @@ function nextRound(r) {
   });
   r.phase='playing';
 }
+function resetToLobby(r) {
+  r.phase='lobby'; r.players.forEach(p=>{p.ready=false;p.score=0;});
+  r.groups=[]; r.history=[]; r.round=0; r.schedule=[]; r.pool=[]; r.recent=[];
+}
 export function act(r,p,m) {
   const host=()=>{if(p.id!==r.host) throw Error('Only the host can do that.');};
   if(m.action==='ready') {if(r.phase!=='lobby') throw Error('Game already started.'); p.ready=!p.ready;}
@@ -72,8 +76,14 @@ export function act(r,p,m) {
     host(); if(r.phase!=='results') throw Error('Wait for every pair to finish.');
     if(r.round>=r.settings.rounds) r.phase='finished'; else nextRound(r);
   } else if(m.action==='reset') {
-    host(); if(r.phase!=='finished') throw Error('Finish the game first.');
-    r.phase='lobby';r.players.forEach(p=>{p.ready=false;p.score=0;}); r.groups=[];r.history=[];r.round=0;
+    host(); resetToLobby(r);
+  } else if(m.action==='kick') {
+    host();
+    if(m.player===r.host) throw Error('The host cannot kick themselves.');
+    if(!r.players.some(p=>p.id===m.player)) throw Error('Player not found.');
+    r.players=r.players.filter(p=>p.id!==m.player);
+    r.settings.order=r.settings.order.filter(id=>id!==m.player);
+    resetToLobby(r);
   } else throw Error('Unknown action.');
   r.updated=Date.now();
 }
