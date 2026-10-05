@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import http from 'http';
 import { setupContactGame } from './contact-game.js';
+import { setupMedium } from './medium/server.mjs';
 import { setupDecrypto } from './decrypto/server.mjs';
 import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
 import { handleRequest as handleCategories } from './categories/server.mjs';
@@ -30,6 +31,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 setupVmRelay(app, server);
 setupDecrypto(app, server);
+setupMedium(app, server);
 // Keep the standalone game's request body and event stream intact.
 app.use('/sketch-party', (req, res) => {
   if (req.originalUrl.split('?')[0] === '/sketch-party') {

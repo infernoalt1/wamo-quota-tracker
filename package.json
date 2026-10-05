@@ -22,7 +22,9 @@
     "preview": "vite preview",
     "start": "node server.js",
     "start:server": "node server.js",
-    "dev:full": "concurrently \"npm run start:server\" \"npm run dev:decrypto\" \"npm run dev\""
+    "dev:full": "concurrently \"npm run start:server\" \"npm run dev:decrypto\" \"npm run dev:medium\" \"npm run dev\"",
+    "dev:medium": "node medium/server.mjs",
+    "test:medium": "node --test medium/*.test.mjs"
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",
