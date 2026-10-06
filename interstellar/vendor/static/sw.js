@@ -1,0 +1,42 @@
+importScripts("/interstellar/browser/assets/ultraviolet/uv.bundle.js");
+importScripts("/interstellar/browser/assets/ultraviolet/uv.config.js");
+importScripts(__uv$config.sw || "/interstellar/browser/assets/ultraviolet/uv.sw.js");
+importScripts("/interstellar/browser/assets/scramjet/scramjet.all.js");
+const { ScramjetServiceWorker } = $scramjetLoadWorker();
+
+const uv = new UVServiceWorker();
+const sj = new ScramjetServiceWorker();
+
+const userKey = new URL(location).searchParams.get("userkey");
+
+self.addEventListener("install", event => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener("message", event => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
+self.addEventListener("fetch", event => {
+  event.respondWith(
+    (async () => {
+      await sj.loadConfig();
+
+      if (await sj.route(event)) {
+        return await sj.fetch(event);
+      }
+
+      if (event.request.url.startsWith(`${location.origin}/interstellar/browser/uv/`)) {
+        return await uv.fetch(event);
+      }
+
+      return await fetch(event.request);
+    })(),
+  );
+});

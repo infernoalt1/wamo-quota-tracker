@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import http from 'http';
 import { setupContactGame } from './contact-game.js';
 import { setupMedium } from './medium/server.mjs';
+import { setupInterstellar } from './interstellar/server.mjs';
 import { setupDecrypto } from './decrypto/server.mjs';
 import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
 import { handleRequest as handleCategories } from './categories/server.mjs';
@@ -28,6 +29,7 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+setupInterstellar(app, server);
 app.use(cors());
 setupVmRelay(app, server);
 setupDecrypto(app, server);
