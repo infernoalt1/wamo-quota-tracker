@@ -7,7 +7,7 @@ export default defineConfig({
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url || '/', 'http://localhost');
-        const game = ['cookieclicker', 'hollowknight', 'vm'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
+        const game = ['cookieclicker', 'hollowknight', 'vm', 'retrobowl'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
         if (game && url.pathname === '/' + game) {
           res.writeHead(308, { Location: '/' + game + '/' + url.search });
           res.end();
