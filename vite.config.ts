@@ -1,13 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { wavelengthApi } from './wavelength/server.mjs';
 
 export default defineConfig({
   plugins: [react(), {
     name: 'standalone-game-routes',
     configureServer(server) {
+      server.middlewares.use('/wavelength/api', wavelengthApi());
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url || '/', 'http://localhost');
-        const game = ['cookieclicker', 'hollowknight', 'vm'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
+        const game = ['cookieclicker', 'hollowknight', 'vm', 'wavelength'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
         if (game && url.pathname === '/' + game) {
           res.writeHead(308, { Location: '/' + game + '/' + url.search });
           res.end();
