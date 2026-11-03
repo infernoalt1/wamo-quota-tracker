@@ -16,6 +16,7 @@ import { handleRequest as handleSketchParty } from './sketch-party/server.mjs';
 import { handleRequest as handleCategories } from './categories/server.mjs';
 import { setupVmRelay } from './remote-desktop/relay.mjs';
 import { wavelengthApi } from './wavelength/server.mjs';
+import { botcApi } from './ravenswood/server.mjs';
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ setupVmRelay(app, server);
 setupDecrypto(app, server);
 setupMedium(app, server);
 app.use('/wavelength/api', wavelengthApi());
+app.use('/botc/api/game', botcApi());
 // Keep the standalone game's request body and event stream intact.
 app.use('/sketch-party', (req, res) => {
   if (req.originalUrl.split('?')[0] === '/sketch-party') {

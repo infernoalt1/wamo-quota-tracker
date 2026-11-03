@@ -1,15 +1,17 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { wavelengthApi } from './wavelength/server.mjs';
+import { botcApi } from './ravenswood/server.mjs';
 
 export default defineConfig({
   plugins: [react(), {
     name: 'standalone-game-routes',
     configureServer(server) {
       server.middlewares.use('/wavelength/api', wavelengthApi());
+      server.middlewares.use('/botc/api/game', botcApi());
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url || '/', 'http://localhost');
-        const game = ['cookieclicker', 'hollowknight', 'vm', 'wavelength'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
+        const game = ['botc', 'cookieclicker', 'hollowknight', 'vm', 'wavelength'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
         if (game && url.pathname === '/' + game) {
           res.writeHead(308, { Location: '/' + game + '/' + url.search });
           res.end();
@@ -21,8 +23,11 @@ export default defineConfig({
     },
   }],
   server: { proxy: { '/interstellar': { target: 'http://127.0.0.1:3005', ws: true }, '/medium': { target: 'http://127.0.0.1:3003', ws: true }, '/api/vm': { target: 'http://127.0.0.1:3001', ws: true }, '/decrypto': { target: 'http://127.0.0.1:3002', ws: true } } },
+  // ravenswood/ keeps its own node_modules locally; always bundle the root copies that production installs.
+  resolve: { dedupe: ['react', 'react-dom', 'lucide-react'] },
   build: {
     outDir: 'dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: { input: { main: 'index.html', botc: 'botc/index.html' } }
   }
 });

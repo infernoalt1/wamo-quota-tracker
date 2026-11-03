@@ -48,6 +48,10 @@ Open `/compiler` (or `/compiler/`) in development or on the deployed site. Edit 
 
 Open `/decrypto/` for the multiplayer codebreaking game: private rooms, two switchable lobby teams, spectators, rotating encryptors, team chat, automatic scoring, tiebreakers, reconnects, and rematches. Production uses the existing Node server. For local Vite development, also run `npm run dev:decrypto`. Run `npm run test:decrypto`; see [the game README](decrypto/README.md).
 
+## Blood on the Clocktower
+
+Open `/botc/` for Ravenswood, a multiplayer Trouble Brewing table with an automated Storyteller. Production uses the existing Node server, and `npm run dev` serves it locally too. Rooms live in server memory, so a restart ends games in progress. Run `npm run test:botc`; see [the game README](ravenswood/README-GAME.md).
+
 ## Categories party game
 
 The Node server also serves the standalone multiplayer game in [`categories/`](categories/README.md) at `/categories/`, alongside `/sketch-party/`. Deploy the folder and root `server.js` together using the existing hosting setup. Run `npm run test:categories` for game tests. Friends judge every category through Call Outs; no external service or API key is needed.

@@ -8,6 +8,7 @@
     "typecheck:config": "tsc --project tsconfig.node.json --noEmit --composite false --strict",
     "dev:decrypto": "node decrypto/server.mjs",
     "test:decrypto": "node --test decrypto/*.test.mjs",
+    "test:botc": "node --test ravenswood/tests/engine.test.mjs",
     "build": "vite build",
     "prebuild": "node scripts/prepare-vm.mjs && node scripts/hollowknight-manifest.mjs",
     "predev": "node scripts/prepare-vm.mjs",
