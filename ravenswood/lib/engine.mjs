@@ -140,7 +140,7 @@ export function beginNight(g){
  g.players.forEach(p=>{p.ready=false;p.nominated=false;p.nominator=false;p.publicAlive=p.alive;});
  const order=g.day===1?['poisoner','spy','washerwoman','librarian','investigator','chef','empath','fortune_teller','butler']:['poisoner','monk','spy','imp','undertaker','empath','fortune_teller','butler'];
  g.queue=order.flatMap(role=>g.players.filter(p=>p.shown===role).map(p=>({id:p.id,role})));
- log(g,`Night ${g.day} falls. Check your private Storyteller panel.`);advanceNight(g);
+ log(g,`Night ${g.day} falls.`);advanceNight(g);
 }
 export function advanceNight(g){
  while(g.phase==='night'&&!g.pending&&g.queue.length){
@@ -260,7 +260,8 @@ export function view(g,session){
  return {code:g.code,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
  players:g.players.map(p=>({id:p.id,name:p.name,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown}: {})})),
  me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox},
- pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
+ // Night deaths stay hidden until dawn, when the same names are announced publicly.
+ nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
  messages:g.messages.filter(m=>!m.to||m.from===me.id||m.to===me.id),
  ...(ended?{decisions:g.decisions,redHerring:player(g,g.redHerring)?.name,bluffs:g.bluffs.map(label)}:{})};
 }
