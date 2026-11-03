@@ -11,7 +11,7 @@ export default defineConfig({
       server.middlewares.use('/botc/api/game', botcApi());
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url || '/', 'http://localhost');
-        const game = ['botc', 'cookieclicker', 'hollowknight', 'vm', 'wavelength'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
+        const game = ['botc', 'cookieclicker', 'hollowknight', 'rb', 'vm', 'wavelength'].find(name => url.pathname === '/' + name || url.pathname === '/' + name + '/');
         if (game && url.pathname === '/' + game) {
           res.writeHead(308, { Location: '/' + game + '/' + url.search });
           res.end();
