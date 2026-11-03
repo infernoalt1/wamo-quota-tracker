@@ -46,6 +46,8 @@ Open `/compiler` (or `/compiler/`) in development or on the deployed site. Edit 
 
 ## Decrypto
 
+Open `/mafia/` for the multiplayer social deduction game: private rooms, host settings, secret roles, server-run day and night timers, private Mafia and dead chats, reconnects, and rematches. Production uses the existing Node server. For local Vite development, also run `npm run dev:mafia`. Run `npm run test:mafia`; see [the game README](mafia/README.md).
+
 Open `/decrypto/` for the multiplayer codebreaking game: private rooms, two switchable lobby teams, spectators, rotating encryptors, team chat, automatic scoring, tiebreakers, reconnects, and rematches. Production uses the existing Node server. For local Vite development, also run `npm run dev:decrypto`. Run `npm run test:decrypto`; see [the game README](decrypto/README.md).
 
 ## Blood on the Clocktower

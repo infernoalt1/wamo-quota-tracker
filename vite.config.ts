@@ -22,7 +22,7 @@ export default defineConfig({
       });
     },
   }],
-  server: { proxy: { '/interstellar': { target: 'http://127.0.0.1:3005', ws: true }, '/medium': { target: 'http://127.0.0.1:3003', ws: true }, '/api/vm': { target: 'http://127.0.0.1:3001', ws: true }, '/decrypto': { target: 'http://127.0.0.1:3002', ws: true } } },
+  server: { proxy: { '/interstellar': { target: 'http://127.0.0.1:3005', ws: true }, '/medium': { target: 'http://127.0.0.1:3003', ws: true }, '/api/vm': { target: 'http://127.0.0.1:3001', ws: true }, '/decrypto': { target: 'http://127.0.0.1:3002', ws: true }, '/mafia': { target: 'http://127.0.0.1:3006', ws: true } } },
   // ravenswood/ keeps its own node_modules locally; always bundle the root copies that production installs.
   resolve: { dedupe: ['react', 'react-dom', 'lucide-react'] },
   build: {

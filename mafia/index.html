@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#10131f">
+  <title>Mafia · WAMO games</title>
+  <link rel="stylesheet" href="/mafia/style.css">
+  <script defer src="/mafia/app.js"></script>
+</head>
+<body data-phase="menu">
+  <header class="topbar">
+    <a class="brand" href="/mafia/" aria-label="Mafia home">Mafia</a>
+    <div class="status" id="status"></div>
+    <div class="top-actions">
+      <span id="connection" role="status">Connecting…</span>
+      <button class="quiet" id="role-open" hidden>My role</button>
+      <button class="quiet" id="rules-open">How to play</button>
+      <button class="quiet" id="settings-open">Settings</button>
+      <button class="quiet" id="leave" hidden>Leave</button>
+    </div>
+  </header>
+  <main id="app">
+    <section id="menu" class="menu"></section>
+    <div id="table" class="table" hidden>
+      <aside class="panel seats" aria-label="Players"><h2 id="seats-title"></h2><div id="seats" class="seat-list"></div></aside>
+      <section class="panel stage" id="stage" aria-live="polite"></section>
+      <aside class="panel chat" aria-label="Chat">
+        <div class="chat-tabs" id="chat-tabs" role="tablist"></div>
+        <div class="chat-log" id="chat-log" tabindex="0"></div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" maxlength="300" enterkeyhint="send" aria-label="Message" autocomplete="off">
+          <button class="primary" id="chat-send" type="submit">Send</button>
+        </form>
+      </aside>
+    </div>
+  </main>
+  <div id="notice" role="alert" hidden></div>
+  <dialog id="rules">
+    <div class="dialog-head"><h2>How to play</h2><button class="quiet" data-close aria-label="Close">✕</button></div>
+    <div class="rules-grid">
+      <div>
+        <p>Town and Mafia take turns. At night, roles act in secret. By day, everyone argues and votes someone out. Anyone can lie.</p>
+        <h3>Each round</h3>
+        <ol><li><b>Night.</b> Public chat closes. Roles choose their targets.</li><li><b>Morning.</b> Any death is announced.</li><li><b>Discussion.</b> Accuse, defend, claim a role.</li><li><b>Voting.</b> One vote each, changeable until time runs out. Most votes is eliminated. A tie or no votes eliminates nobody.</li></ol>
+        <h3>Winning</h3>
+        <ul><li><b>Town</b> wins when all Mafia are dead.</li><li><b>Mafia</b> wins when living Mafia equal or outnumber everyone else alive.</li><li><b>Jester</b> wins alone by being voted out. The game then goes on, and Town or Mafia can still win.</li></ul>
+      </div>
+      <div>
+        <h3>Roles</h3>
+        <ul class="role-list">
+          <li><b class="tag mafia">Mafia</b> Know each other and chat at night. Together choose one non-Mafia player to kill each night.</li>
+          <li><b class="tag town">Doctor</b> Protect one living player each night, including yourself, but never the same player two nights running. You aren’t told if it worked.</li>
+          <li><b class="tag town">Detective</b> Investigate another player each night and privately learn “Mafia” or “Not Mafia”.</li>
+          <li><b class="tag town">Villager</b> No ability. Your reasoning and your vote are your weapons.</li>
+          <li><b class="tag neutral">Jester</b> Not on any team, and shows “Not Mafia”. Get voted out by day. Dying at night or surviving to the end is a loss.</li>
+        </ul>
+        <p class="muted">Dead players watch and use a separate dead chat that the living can’t see. If you disconnect, reopen the page or the invite link and you’ll return to your seat.</p>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="settings">
+    <div class="dialog-head"><h2>Settings</h2><button class="quiet" data-close aria-label="Close">✕</button></div>
+    <label class="field">Default name<input id="default-name" maxlength="20" autocomplete="nickname"></label>
+    <label class="check"><input type="checkbox" id="sounds"> Play a sound when the phase changes</label>
+  </dialog>
+  <dialog id="role-card"><div class="dialog-head"><h2>Your role</h2><button class="quiet" data-close aria-label="Close">✕</button></div><div id="role-body"></div></dialog>
+</body>
+</html>
