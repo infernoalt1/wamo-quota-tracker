@@ -57,6 +57,16 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .room-card strong{display:block;letter-spacing:2.5px;font-size:17px;font-weight:500;margin-top:3px}
 .lobby-controls{display:grid;gap:12px}
 .lobby-controls h2{font-size:22px;line-height:1.25}
+.seat-list{display:grid;gap:2px}
+.seat-list .eyebrow{margin-bottom:4px}
+.seat-list small{margin-top:4px;font-size:11px}
+.seat-list-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:#d6d2da}
+.seat-list-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.group-leave{margin-left:auto}
+.member-pick{border:0;padding:0;margin:0;display:grid;gap:8px;max-height:220px;overflow-y:auto}
+.member-pick legend{padding:0;margin-bottom:8px;font-size:13px;color:#c4c0cd}
+.member-pick label{flex-direction:row;align-items:center;gap:9px;font-size:14px;color:#d6d2da;cursor:pointer}
+.member-pick input{width:auto;flex-shrink:0}
 .role-card{background:radial-gradient(ellipse at top,#2c3440,#20252c);border:1px solid #3f5260;border-radius:6px;padding:10px 12px 14px;text-align:center}
 .role-card.minion,.role-card.demon{background:radial-gradient(ellipse at top,#462c32,#292026);border-color:#6c414d}
 .card-heading{display:flex;align-items:center;justify-content:space-between}

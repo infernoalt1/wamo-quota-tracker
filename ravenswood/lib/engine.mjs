@@ -38,32 +38,54 @@ function alignment(g,p){
  if(!impaired(g,p)&&p.role==='recluse') return discretion(g,'Recluse alignment registration',false,true);
  return evil(p);
 }
-function seenRole(g,p){
- if(!impaired(g,p)&&p.role==='spy') return discretion(g,'Spy character registration',p.role,ROLES[p.claim]?.type==='townsfolk'||ROLES[p.claim]?.type==='outsider'?p.claim:pick(ofType('townsfolk')));
+// A good identity an evil player could pass as, never the one the viewer already holds.
+function goodCover(p,viewer){return ['townsfolk','outsider'].includes(ROLES[p.claim]?.type)&&p.claim!==viewer.shown?p.claim:pick(ofType('townsfolk').filter(r=>r!==viewer.shown));}
+function seenRole(g,p,viewer){
+ if(!impaired(g,p)&&p.role==='spy') return discretion(g,'Spy character registration',p.role,goodCover(p,viewer));
  if(!impaired(g,p)&&p.role==='recluse') return discretion(g,'Recluse character registration',p.role,pick([...ofType('minion'),'imp']));
  return p.role;
 }
 function numberInfo(g,p,n,max){return impaired(g,p)?discretion(g,`${label(p.shown)}: impaired information`,n,pick(Array.from({length:max+1},(_,i)=>i).filter(x=>x!==n))):n;}
-function roleInfo(g,p,target){const truth=seenRole(g,target);return impaired(g,p)?discretion(g,`${label(p.shown)}: impaired information`,truth,evil(target)?(target.claim||pick(ofType('townsfolk'))):pick(ofType('minion'))):truth;}
+function roleInfo(g,p,target){
+ // Reading yourself must not expose a Drunk or give an impaired player a nonsense identity.
+ if(target.id===p.id)return p.shown;
+ const truth=seenRole(g,target,p);return impaired(g,p)?discretion(g,`${label(p.shown)}: impaired information`,truth,evil(target)?goodCover(target,p):pick(ofType('minion'))):truth;
+}
+const seat=(name,session,id=crypto.randomUUID())=>({id,session,name,alive:true,ghost:true,inbox:[],claim:'',ready:false});
+const lobby=settings=>({phase:'lobby',day:0,events:[],messages:[],groups:[],decisions:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],deadline:null,paused:false,settings});
 export function newGame(code,name,session){
- const p={id:crypto.randomUUID(),session,name,alive:true,ghost:true,inbox:[],claim:'',ready:false};
- return {code,host:p.id,players:[p],phase:'lobby',day:0,events:[],messages:[],decisions:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],deadline:null,paused:false,settings:{daySeconds:240,voteSeconds:40},created:Date.now()};
+ const p=seat(name,session);
+ return {code,host:p.id,players:[p],round:1,...lobby({daySeconds:240,voteSeconds:40}),created:Date.now()};
 }
 export function join(g,name,session){
  const existing=g.players.find(p=>p.session===session);if(existing)return existing;
  assert(g.phase==='lobby','This game has already started.');assert(g.players.length<15,'This table is full.');
  assert(!g.players.some(p=>p.name.toLowerCase()===name.toLowerCase()),'That name is already seated.');
- const p={id:crypto.randomUUID(),session,name,alive:true,ghost:true,inbox:[],claim:'',ready:false};g.players.push(p);return p;
+ const p=seat(name,session);g.players.push(p);return p;
+}
+function unseat(g,p){
+ g.players=g.players.filter(x=>x!==p);
+ g.groups.forEach(c=>{c.members=c.members.filter(id=>id!==p.id);});g.groups=g.groups.filter(c=>c.members.length);
+ if(g.host===p.id)g.host=g.players[0]?.id;
+}
+// Back to the lobby in the same room: the code, link, host, seats and settings all carry over.
+function rematch(g){
+ const {code,host,players,round,settings,created}=g;
+ for(const key of Object.keys(g))delete g[key];
+ Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id)),round:round+1,...lobby(settings),created});
 }
 export function start(g,forcedRoles){
  assert(COUNTS[g.players.length],'Gather 5–15 players to begin.');
  let [t,o,m]=COUNTS[g.players.length];
  const minions=shuffle(ofType('minion')).slice(0,m);if(minions.includes('baron')){t-=2;o+=2;}
- const bag=forcedRoles||shuffle([...shuffle(ofType('townsfolk')).slice(0,t),...shuffle(ofType('outsider')).slice(0,o),...minions,'imp']);
+ // A lone Townsfolk Washerwoman would have no other Townsfolk to learn about.
+ const bag=forcedRoles||shuffle([...shuffle(ofType('townsfolk').filter(r=>t>1||r!=='washerwoman')).slice(0,t),...shuffle(ofType('outsider')).slice(0,o),...minions,'imp']);
  const drunkShown=pick(ofType('townsfolk').filter(r=>!bag.includes(r)));
  g.players.forEach((p,i)=>{p.role=bag[i];p.initialRole=p.role;p.shown=p.role==='drunk'?drunkShown:p.role;p.initialShown=p.shown;p.alive=true;p.ghost=true;p.slayerUsed=false;p.virginUsed=false;p.inbox=[];});
  g.redHerring=pick(g.players.filter(p=>!evil(p))).id;
- g.bluffs=shuffle([...ofType('townsfolk'),...ofType('outsider')].filter(r=>!g.players.some(p=>p.role===r||p.shown===r))).slice(0,3);
+ // Nobody claims Drunk, and an Outsider bluff is a giveaway at a table with no Outsiders.
+ const bluffOutsiders=COUNTS[g.players.length][1]>0?ofType('outsider').filter(r=>r!=='drunk'):[];
+ g.bluffs=shuffle([...ofType('townsfolk'),...bluffOutsiders].filter(r=>!g.players.some(p=>p.role===r||p.shown===r))).slice(0,3);
  if(g.players.length>=7){
   const demon=g.players.find(p=>p.role==='imp'),mins=g.players.filter(p=>ROLES[p.role].type==='minion');
   tell(g,demon,`Your Minions: ${mins.map(p=>p.name).join(', ')}. Safe bluffs: ${g.bluffs.map(label).join(', ')}.`);
@@ -106,15 +128,18 @@ function attack(g,imp,target){
 }
 function firstInfo(g,p){
  const wanted={washerwoman:'townsfolk',librarian:'outsider',investigator:'minion'}[p.shown];
- const truth=g.players.filter(x=>ROLES[x.role].type===wanted);
- let candidates=truth.map(x=>({target:x,role:x.role}));
- if(wanted==='townsfolk'||wanted==='outsider')g.players.filter(x=>x.role==='spy'&&!impaired(g,x)).forEach(x=>candidates.push({target:x,role:pick(ofType(wanted))}));
- if(wanted==='minion')g.players.filter(x=>x.role==='recluse'&&!impaired(g,x)).forEach(x=>candidates.push({target:x,role:pick(ofType('minion'))}));
- if(wanted==='outsider'&&truth.length===0&&!impaired(g,p)){tell(g,p,'You learn: there are 0 Outsiders.');return;}
+ // The reader is never part of their own pairing and never learns their own character:
+ // that teaches a real Washerwoman nothing and tells a Drunk exactly what they are.
+ const others=g.players.filter(x=>x.id!==p.id),roles=ofType(wanted).filter(r=>r!==p.shown);
+ let candidates=others.filter(x=>ROLES[x.role].type===wanted).map(x=>({target:x,role:x.role}));
+ if(wanted==='townsfolk'||wanted==='outsider')others.filter(x=>x.role==='spy'&&!impaired(g,x)).forEach(x=>candidates.push({target:x,role:pick(roles)}));
+ if(wanted==='minion')others.filter(x=>x.role==='recluse'&&!impaired(g,x)).forEach(x=>candidates.push({target:x,role:pick(roles)}));
+ const lie=impaired(g,p)&&favorEvil(g);
+ // Only a table with truly no Outsiders hears this; a Drunk Librarian's own seat still counts as one.
+ if(wanted==='outsider'&&!lie&&!g.players.some(x=>ROLES[x.role].type==='outsider')){tell(g,p,'You learn: there are 0 Outsiders.');return;}
  let chosen=pick(candidates);
- if(impaired(g,p)&&favorEvil(g)){chosen={target:pick(g.players.filter(x=>x.id!==p.id)),role:pick(ofType(wanted))};audit(g,`${label(p.shown)}: impaired information`,`${chosen.target.name} / ${label(chosen.role)}`,'An arbitrary pairing is legal while impaired.');}
- if(!chosen){tell(g,p,'You learn: there are 0 Outsiders.');return;}
- const decoy=pick(g.players.filter(x=>x.id!==p.id&&x.id!==chosen.target.id));
+ if(lie||!chosen){chosen={target:pick(others),role:pick(roles)};audit(g,`${label(p.shown)}: impaired information`,`${chosen.target.name} / ${label(chosen.role)}`,'An arbitrary pairing is legal while impaired, or when no real match exists.');}
+ const decoy=pick(others.filter(x=>x.id!==chosen.target.id));
  const pair=shuffle([chosen.target,decoy]);
  audit(g,`${label(p.shown)} initial pairing`,`${pair.map(x=>x.name).join(' / ')}: ${label(chosen.role)}`,'A legal actual or misregistering match is required unless the recipient is impaired.');
  tell(g,p,`One of ${pair[0].name} and ${pair[1].name} is the ${label(chosen.role)}.`);
@@ -122,11 +147,13 @@ function firstInfo(g,p){
 function automatic(g,p,role){
  if(['washerwoman','librarian','investigator'].includes(role)){firstInfo(g,p);return;}
  if(role==='chef'){
-  let n=0;g.players.forEach((a,i)=>{const b=g.players[(i+1)%g.players.length];if(alignment(g,a)&&alignment(g,b))n++;});
-  tell(g,p,`You learn: ${numberInfo(g,p,n,g.players.length)} neighboring evil pair(s).`);
+  // Each seat registers once per reading, so one Recluse or Spy cannot count both ways.
+  const seen=g.players.map(x=>alignment(g,x)),n=seen.filter((e,i)=>e&&seen[(i+1)%seen.length]).length;
+  // False counts stay believable: k evil players can form at most k-1 neighboring pairs.
+  tell(g,p,`You learn: ${numberInfo(g,p,n,g.players.filter(evil).length-1)} neighboring evil pair(s).`);
  }else if(role==='empath'){
   const living=live(g),i=living.indexOf(p);const neighbors=[living[(i+living.length-1)%living.length],living[(i+1)%living.length]];
-  const n=neighbors.filter(x=>alignment(g,x)).length;tell(g,p,`You learn: ${numberInfo(g,p,n,2)} evil living neighbor(s).`);
+  const n=neighbors.filter(x=>alignment(g,x)).length;tell(g,p,`You learn: ${numberInfo(g,p,n,Math.min(2,living.filter(evil).length))} evil living neighbor(s).`);
  }else if(role==='undertaker'){
   const target=player(g,g.executedDeath);if(target)tell(g,p,`The player who died by execution was the ${label(roleInfo(g,p,target))}.`);
  }else if(role==='spy'){
@@ -211,10 +238,25 @@ export function act(g,session,data){
   assert(g.phase!=='night','The town is asleep. Save your conversations for dawn.');
   const text=String(data.text||'').trim();assert(text.length>0&&text.length<=1000,'Write 1–1000 characters.');
   assert(Date.now()-(p.lastMessage||0)>750,'Please wait a moment before sending again.');
-  if(data.to)assert(player(g,data.to),'Choose a seated player.');
-  g.messages.push({id:crypto.randomUUID(),from:p.id,to:data.to||null,text,at:Date.now()});g.messages=g.messages.slice(-500);p.lastMessage=Date.now();return;
+  if(data.group)assert(g.groups.find(c=>c.id===data.group)?.members.includes(p.id),'You are not in that group.');
+  else if(data.to)assert(player(g,data.to),'Choose a seated player.');
+  g.messages.push({id:crypto.randomUUID(),from:p.id,to:data.group?null:data.to||null,group:data.group||null,text,at:Date.now()});g.messages=g.messages.slice(-500);p.lastMessage=Date.now();return;
  }
- if(data.type==='leave'){assert(g.phase==='lobby','Keep your seat during a game. You can reconnect in this browser.');g.players=g.players.filter(x=>x!==p);if(g.host===p.id)g.host=g.players[0]?.id;return;}
+ if(data.type==='group'){
+  assert(g.phase!=='night','The town is asleep. Save your conversations for dawn.');
+  const title=String(data.title||'').trim();assert(title.length>0&&title.length<=30,'Name the group in 1–30 characters.');
+  assert(Array.isArray(data.members),'Choose who to invite.');
+  const members=[...new Set([p.id,...data.members])];assert(members.length>=3,'A group needs at least two other players. Use a whisper for one.');assert(members.every(id=>player(g,id)),'Choose seated players.');
+  assert(g.groups.length<40,'This table has too many groups.');
+  g.groups.push({id:crypto.randomUUID(),title,members});return;
+ }
+ if(data.type==='group_leave'){
+  const c=g.groups.find(x=>x.id===data.group);assert(c?.members.includes(p.id),'You are not in that group.');
+  c.members=c.members.filter(id=>id!==p.id);g.groups=g.groups.filter(x=>x.members.length);return;
+ }
+ if(data.type==='leave'){assert(g.phase==='lobby','Keep your seat during a game. You can reconnect in this browser.');unseat(g,p);return;}
+ if(data.type==='kick'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can remove players, and only in the lobby.');assert(t&&t.id!==p.id,'Choose another seated player.');unseat(g,t);return;}
+ if(data.type==='rematch'){assert(g.phase==='ended'&&p.id===g.host,'Only the host can set up the next game.');rematch(g);return;}
  if(data.type==='settings'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can set lobby options.');assert([120,240,360,600].includes(data.daySeconds),'Choose a supported day duration.');g.settings.daySeconds=data.daySeconds;return;}
  if(data.type==='start'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can start from the lobby.');start(g);return;}
  if(data.type==='pause'){
@@ -234,7 +276,8 @@ export function act(g,session,data){
   log(g,`${p.name} nominates ${t.name}.`);
   if(t.shown==='virgin'&&t.alive&&!t.virginUsed){
    t.virginUsed=true;let townsfolk=ROLES[p.role].type==='townsfolk';
-   if(p.role==='spy'&&!impaired(g,p))townsfolk=discretion(g,'Spy registration to Virgin',false,true);
+   // Registering as Townsfolk executes the Spy, so the evil-favoring choice is to not register.
+   if(p.role==='spy'&&!impaired(g,p))townsfolk=discretion(g,'Spy registration to Virgin',true,false);
    if(t.role==='virgin'&&active(g,t)&&townsfolk){execute(g,p);return;}
   }
   g.nomination={id:crypto.randomUUID(),target:t.id,by:p.id,hands:{},deadline:Date.now()+g.settings.voteSeconds*1000,remaining:Math.max(0,g.deadline-Date.now())};return;
@@ -257,11 +300,12 @@ export function act(g,session,data){
 export function view(g,session){
  const me=g.players.find(p=>p.session===session);assert(me,'Join this room first.');
  const ended=g.phase==='ended';
- return {code:g.code,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
+ const groups=g.groups.filter(c=>c.members.includes(me.id));
+ return {code:g.code,round:g.round,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
  players:g.players.map(p=>({id:p.id,name:p.name,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown}: {})})),
  me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
  nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
- messages:g.messages.filter(m=>!m.to||m.from===me.id||m.to===me.id),
+ groups,messages:g.messages.filter(m=>m.group?groups.some(c=>c.id===m.group):!m.to||m.from===me.id||m.to===me.id),
  ...(ended?{decisions:g.decisions,redHerring:player(g,g.redHerring)?.name,bluffs:g.bluffs.map(label)}:{})};
 }
