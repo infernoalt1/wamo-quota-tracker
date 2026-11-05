@@ -73,7 +73,7 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .card-heading .eyebrow{font-size:10px;letter-spacing:.8px;color:#91a9bd}
 .role-icon{display:block;width:100%;height:100%;object-fit:contain;border-radius:50%;background:radial-gradient(circle at 50% 40%,#f4ecd9,#cbbb98)}
 .seat.dead .role-icon{filter:grayscale(.7) brightness(.72)}
-.role-symbol{width:88px;height:88px;margin-bottom:6px}
+.role-symbol{width:88px;height:88px;margin:0 auto 6px}
 .role-card h2{font-size:22px}
 .role-type{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:#8ea6bb}
 .role-card p{font-size:13px;color:#b5bfca;margin-top:8px}
