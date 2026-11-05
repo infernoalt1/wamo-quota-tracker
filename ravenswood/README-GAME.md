@@ -4,7 +4,7 @@ A multiplayer, server-authoritative Trouble Brewing table for 5–15 human playe
 
 Create a room, copy the invitation, and have friends join from separate devices/browser profiles. Start with 5–15 players. Read the private journal at night; use public chat, whispers and private group chats by day. The host also plays and cannot inspect other players' roles. The host can remove players in the lobby (they may rejoin with the code), and can send the table back to the lobby at any time, even mid-game, so the link stays the same and new players can join. Characters are dealt again at the next start. Use the same browser to recover your seat. A lost session cookie cannot be recovered by knowing a player's name.
 
-See `docs/RULES-RESEARCH.md` and `docs/CHARACTERS.md` for sources, rules, balancing policy, and digital conventions. This is an unofficial implementation, not affiliated with The Pandemonium Institute. Character descriptions are paraphrased, with links to the official wiki.
+See `docs/RULES-RESEARCH.md` and `docs/CHARACTERS.md` for sources, rules, balancing policy, and digital conventions. This is an unofficial implementation, not affiliated with The Pandemonium Institute. Character descriptions are paraphrased, with links to the official wiki. The icons in `public/botc/icons/` are official art from that wiki, resized to 256 px, and belong to The Pandemonium Institute.
 
 ## Development
 
