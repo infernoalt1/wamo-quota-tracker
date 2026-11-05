@@ -1,5 +1,6 @@
 import express from 'express';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { newGame, join, act, tick, view } from './lib/engine.mjs';
 
 const ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -7,6 +8,13 @@ const ROOM_TTL=6*60*60*1000;
 const identity=req=>req.headers.cookie?.match(/(?:^|;\s*)rw_session=([a-f0-9-]{36})/)?.[1];
 function codeOf(code){const v=String(code||'').toUpperCase().trim();if(!/^[A-Z2-9]{8}$/.test(v))throw Error('Enter an eight-character room code.');return v;}
 function nameOf(name){const v=String(name||'').trim();if(!v||v.length>24)throw Error('Choose a name of 1–24 characters.');return v;}
+// Every poll carries the whole table, including the chat, so compress it for slow networks.
+function reply(req,res,data){
+  const body=JSON.stringify(data);
+  res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Vary','Accept-Encoding');
+  if(body.length>1024&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){res.setHeader('Content-Encoding','gzip');return res.end(gzipSync(body));}
+  res.end(body);
+}
 
 export function botcApi() {
   // Rooms hold serialized state so an engine error partway through an action cannot leave a half-applied game.
@@ -19,7 +27,7 @@ export function botcApi() {
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.
     if(tick(game))save(code,game);
-    res.json(view(game,session));
+    reply(req,res,view(game,session));
   }catch(e){res.status(400).json({error:e.message});}});
   router.post('/',(req,res)=>{try{
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).json({error:'Use the game website to submit actions.'});
@@ -31,18 +39,18 @@ export function botcApi() {
       if([...rooms.values()].filter(r=>Date.now()-r.updated<3600000&&r.state.includes(session)).length>=8)throw Error('You have several recent tables. Rejoin one or try later.');
       let code;do{code=Array.from(randomBytes(8),n=>ALPHABET[n%ALPHABET.length]).join('');}while(rooms.has(code));
       const game=newGame(code,name,session);save(code,game);
-      return res.json(view(game,session));
+      return reply(req,res,view(game,session));
     }
     const code=codeOf(data.code),game=load(code);
     if(data.type==='join')join(game,nameOf(data.name),session);
     else{
       view(game,session);
       // Commit elapsed transitions independently: stale actions may fail but cannot rewind time.
-      if(tick(game)){save(code,game);return res.json(view(game,session));}
+      if(tick(game)){save(code,game);return reply(req,res,view(game,session));}
       act(game,session,data);
     }
     save(code,game);
-    res.json(data.type==='leave'?{left:true}:view(game,session));
+    reply(req,res,data.type==='leave'?{left:true}:view(game,session));
   }catch(e){res.status(400).json({error:e.message});}});
   router.use((err,_req,res,_next)=>res.status(err.status||400).json({error:err.status===413?'Request too large.':'Invalid request.'}));
   return router;

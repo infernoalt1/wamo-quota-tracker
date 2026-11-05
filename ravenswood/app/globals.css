@@ -163,6 +163,7 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .chat-message time{font-size:11px;font-weight:400;color:#7f7888}
 .chat-message p{font-size:14px;color:#d6d2da;line-height:1.4;overflow-wrap:anywhere;white-space:pre-wrap}
 .chat-message.own strong{color:var(--gold)}
+.chat-message.sending{opacity:.6}
 .chat-form{flex-shrink:0;display:flex;align-items:flex-end;gap:8px;margin:0 12px 12px;padding:6px 6px 6px 10px;background:#22232a;border:1px solid #38363f;border-radius:7px}
 .chat-form:focus-within{border-color:#7d6c91}
 .chat-form textarea{flex:1;min-width:0;border:0;background:none;padding:5px 0;max-height:110px;field-sizing:content;font-size:14px;line-height:1.4;outline:none}
@@ -262,4 +263,32 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
  input,select{font-size:16px!important}
 }
 @media(max-width:480px){.topbar nav .text-button span{display:none}.topbar nav{gap:14px}.handbook{padding:34px 20px}.modal{padding:24px 20px}}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+/* End of game reveal */
+.finale{position:fixed;inset:0;z-index:110;overflow-y:auto;padding:40px 16px;background:radial-gradient(ellipse at 50% 0,var(--finale-glow),#0b0a0f 62%);animation:finale-fade .7s ease-out both;--finale-accent:#e0c58d;--finale-glow:#4a3d22}
+.finale.evil{--finale-accent:#e0757a;--finale-glow:#5c1a22}
+.finale-inner{position:relative;max-width:900px;margin:0 auto;display:grid;justify-items:center;gap:10px;text-align:center}
+.finale .clock-art{width:110px;height:110px;color:var(--finale-accent);opacity:.75;animation:finale-rise 1s ease-out both}
+.finale .eyebrow{color:var(--finale-accent);letter-spacing:4px}
+.finale h2{font-family:'Spectral',serif;font-size:clamp(44px,9vw,84px);line-height:1.05;font-weight:500;color:var(--finale-accent);text-shadow:0 0 44px var(--finale-glow);animation:finale-title 1s cubic-bezier(.2,.8,.2,1) both}
+.finale-reason{font-size:17px;color:var(--text);max-width:560px}
+.finale-you{font-size:13px;color:var(--muted);margin-bottom:18px}
+.finale-team{width:100%;display:grid;gap:12px;margin-bottom:20px}
+.finale-team h3{font-size:12px;font-weight:600;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted)}
+.finale-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:10px}
+.finale-card{display:flex;align-items:center;gap:13px;padding:12px 14px;text-align:left;border:1px solid #3a4c5b;border-radius:7px;background:#1b252d;animation:finale-rise .6s ease-out both}
+.finale-card.evil{border-color:#733c45;background:#2c1a20}
+.finale-card.you{box-shadow:0 0 0 1px var(--gold)}
+.finale-glyph{width:52px;height:52px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;font-size:25px;color:#aac6dd;background:#25323e;border:1px solid #405667}
+.finale-card.evil .finale-glyph{color:#e6a6a6;background:#3a252b;border-color:#68424a}
+.finale-card>div{min-width:0;display:grid;gap:1px}
+.finale-card strong{font-size:13px;font-weight:500;color:#c9c4cf;overflow-wrap:anywhere}
+.finale-card em{font-style:normal;font-size:11px;color:var(--gold)}
+.finale-role{font-family:'Spectral',serif;font-size:20px;line-height:1.2;color:var(--text)}
+.finale-card small{font-size:11px;color:#a9a3b0}
+.finale-fate{display:inline-flex;align-items:center;gap:4px}
+.finale-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin-top:6px}
+.finale-actions button{padding-inline:22px}
+@keyframes finale-fade{from{opacity:0}}
+@keyframes finale-title{from{opacity:0;transform:scale(.86);letter-spacing:.08em}}
+@keyframes finale-rise{from{opacity:0;transform:translateY(14px)}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}.finale,.finale *{animation:none!important}}

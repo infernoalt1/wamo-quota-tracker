@@ -20,9 +20,10 @@ function audit(g,basis,result,reason){g.decisions.push({day:g.day,phase:g.phase,
 
 // This is an intentionally bounded heuristic, not a language model or a win predictor.
 // It can only rank outcomes independently authorized by a character's ability.
+const INFO_ROLES=['empath','fortune_teller','undertaker','slayer'];
 function pressure(g){
  const living=live(g), good=living.filter(p=>!evil(p)), bad=living.filter(evil);
- const info=good.filter(p=>['empath','fortune_teller','undertaker','slayer'].includes(p.role)&&active(g,p)).length;
+ const info=good.filter(p=>INFO_ROLES.includes(p.role)&&active(g,p)).length;
  const demon=living.find(p=>p.role==='imp');
  const suspicion=g.ballots.filter(b=>b.target===demon?.id).reduce((n,b)=>Math.max(n,b.count),0);
  return (living.length>5?0.15:-0.3)+info*0.2+(good.length-bad.length*2)*0.08+suspicion*0.12;
@@ -70,12 +71,13 @@ function unseat(g,p){
 }
 // Back to the lobby in the same room: the code, link, host, seats and settings all carry over.
 function rematch(g){
- const {code,host,players,round,settings,created}=g;
+ const {code,host,players,round,settings,created,phase}=g;
  for(const key of Object.keys(g))delete g[key];
- Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id)),round:round+1,...lobby(settings),created});
+ Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
 }
 export function start(g,forcedRoles){
  assert(COUNTS[g.players.length],'Gather 5–15 players to begin.');
+ delete g.interrupted;
  let [t,o,m]=COUNTS[g.players.length];
  const minions=shuffle(ofType('minion')).slice(0,m);if(minions.includes('baron')){t-=2;o+=2;}
  // A lone Townsfolk Washerwoman would have no other Townsfolk to learn about.
@@ -112,16 +114,27 @@ export function kill(g,p,cause,selfKill=false){
  checkWin(g);return true;
 }
 function protectedFromDemon(g,p){const source=player(g,g.protection?.source);return (p.role==='soldier'&&active(g,p))||(g.protection?.target===p.id&&source?.role==='monk'&&active(g,source));}
+// The Storyteller's read of the table decides whether a Mayor attack lands and where it goes if not.
+function mayorRedirect(g,mayor){
+ const decide=(target,why)=>{audit(g,'Mayor night redirection',target?.name||'No redirect',`${why} Balance score ${pressure(g).toFixed(2)}.`);return target;};
+ const living=live(g).length;
+ if(living<=3)return decide(null,'The Imp found the Mayor at the final three; the Storyteller does not overrule the endgame.');
+ // Never select the Demon as a bounce: the policy should not award itself the win.
+ const others=g.players.filter(p=>p.id!==mayor.id&&p.role!=='imp'),alive=others.filter(p=>p.alive);
+ if(favorEvil(g)){
+  if(living===4)return decide(null,'Evil needs help: another death would leave the Mayor one quiet day from winning.');
+  const threats=alive.filter(p=>INFO_ROLES.includes(p.role)&&active(g,p)&&!p.slayerUsed);
+  return threats.length?decide(pick(threats),'Evil needs help: the attack lands on a working information role.'):decide(null,'Evil needs help: nobody left is more dangerous than the Mayor.');
+ }
+ // Good needs help, so the night should cost them as little as possible.
+ const tiers=[pressure(g)<0?alive.filter(evil):[],alive.filter(p=>p.role==='ravenkeeper'&&active(g,p)),others.filter(p=>!p.alive||protectedFromDemon(g,p)),alive.filter(p=>!evil(p)&&!INFO_ROLES.includes(p.role))];
+ const best=tiers.find(t=>t.length);
+ return best?decide(pick(best),'Good needs help: the attack lands where it costs them least.'):decide(null,'Good needs help, but no redirect would cost less than the Mayor.');
+}
 function attack(g,imp,target){
  if(!active(g,imp)||!target.alive||protectedFromDemon(g,target))return;
  if(target.role==='mayor'&&active(g,target)){
-  const helpEvil=favorEvil(g);
-  // Never select the Demon as a bounce: the policy should not award itself the win.
-  let candidates=g.players.filter(p=>p.id!==target.id&&p.role!=='imp');
-  if(helpEvil)candidates=candidates.filter(p=>p.alive&&!evil(p));
-  else {const useful=candidates.filter(p=>!p.alive||evil(p)||p.role==='ravenkeeper'||protectedFromDemon(g,p));if(useful.length)candidates=useful;}
-  const redirect=live(g).length>3&&rand()<.85?pick(candidates):null;
-  audit(g,'Mayor night redirection',redirect?.name||'No redirect',`Legal optional redirect; balance score ${pressure(g).toFixed(2)}. Never deliberately bounce onto the Demon.`);
+  const redirect=mayorRedirect(g,target);
   if(redirect){target=redirect;if(!target.alive||protectedFromDemon(g,target))return;}
  }
  kill(g,target,'night',target.id===imp.id);
@@ -240,7 +253,8 @@ export function act(g,session,data){
   assert(Date.now()-(p.lastMessage||0)>750,'Please wait a moment before sending again.');
   if(data.group)assert(g.groups.find(c=>c.id===data.group)?.members.includes(p.id),'You are not in that group.');
   else if(data.to)assert(player(g,data.to),'Choose a seated player.');
-  g.messages.push({id:crypto.randomUUID(),from:p.id,to:data.group?null:data.to||null,group:data.group||null,text,at:Date.now()});g.messages=g.messages.slice(-500);p.lastMessage=Date.now();return;
+  // cid lets the sender match this message to the copy already showing on their screen.
+  g.messages.push({id:crypto.randomUUID(),cid:typeof data.cid==='string'?data.cid.slice(0,40):null,from:p.id,to:data.group?null:data.to||null,group:data.group||null,text,at:Date.now()});g.messages=g.messages.slice(-500);p.lastMessage=Date.now();return;
  }
  if(data.type==='group'){
   assert(g.phase!=='night','The town is asleep. Save your conversations for dawn.');
@@ -256,7 +270,7 @@ export function act(g,session,data){
  }
  if(data.type==='leave'){assert(g.phase==='lobby','Keep your seat during a game. You can reconnect in this browser.');unseat(g,p);return;}
  if(data.type==='kick'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can remove players, and only in the lobby.');assert(t&&t.id!==p.id,'Choose another seated player.');unseat(g,t);return;}
- if(data.type==='rematch'){assert(g.phase==='ended'&&p.id===g.host,'Only the host can set up the next game.');rematch(g);return;}
+ if(data.type==='rematch'){assert(g.phase!=='lobby'&&p.id===g.host,'Only the host can send the table back to the lobby.');rematch(g);return;}
  if(data.type==='settings'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can set lobby options.');assert([120,240,360,600].includes(data.daySeconds),'Choose a supported day duration.');g.settings.daySeconds=data.daySeconds;return;}
  if(data.type==='start'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can start from the lobby.');start(g);return;}
  if(data.type==='pause'){
@@ -301,7 +315,7 @@ export function view(g,session){
  const me=g.players.find(p=>p.session===session);assert(me,'Join this room first.');
  const ended=g.phase==='ended';
  const groups=g.groups.filter(c=>c.members.includes(me.id));
- return {code:g.code,round:g.round,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
+ return {code:g.code,round:g.round,interrupted:g.interrupted,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
  players:g.players.map(p=>({id:p.id,name:p.name,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown}: {})})),
  me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
