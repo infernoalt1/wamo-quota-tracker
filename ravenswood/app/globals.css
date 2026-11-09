@@ -166,6 +166,11 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .chat-message p{font-size:14px;color:#d6d2da;line-height:1.4;overflow-wrap:anywhere;white-space:pre-wrap}
 .chat-message.own strong{color:var(--gold)}
 .chat-message.sending{opacity:.6}
+.statement-tag{display:inline-flex;align-items:center;gap:4px;margin-right:7px;padding:0 6px;border:1px solid #7a6a45;border-radius:4px;font-size:11px;color:var(--gold);vertical-align:1px}
+.statement-toggle{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;height:30px;border-radius:5px;color:#8f8a98}
+.statement-toggle:hover{color:var(--text)}
+.statement-toggle.on{color:#22202a;background:var(--gold)}
+.night-guess{margin-top:8px;max-width:280px}
 .chat-form{flex-shrink:0;display:flex;align-items:flex-end;gap:8px;margin:0 12px 12px;padding:6px 6px 6px 10px;background:#22232a;border:1px solid #38363f;border-radius:7px}
 .chat-form:focus-within{border-color:#7d6c91}
 .chat-form textarea{flex:1;min-width:0;border:0;background:none;padding:5px 0;max-height:110px;field-sizing:content;font-size:14px;line-height:1.4;outline:none}

@@ -1,6 +1,6 @@
 # Ravenswood · Trouble Brewing
 
-A multiplayer, server-authoritative Trouble Brewing table for 5–15 human players. All 22 characters are supported, with a rules-based automatic Storyteller and postgame decision audit. No API key or external model is required.
+A multiplayer, server-authoritative Blood on the Clocktower table for 5–15 human players. The host picks Trouble Brewing (22 characters) or Bad Moon Rising (25 characters) in the lobby. All characters are supported, with a rules-based automatic Storyteller and postgame decision audit. No API key or external model is required.
 
 Create a room, copy the invitation, and have friends join from separate devices/browser profiles. Start with 5–15 players. Read the private journal at night; use public chat, whispers and private group chats by day. The host also plays and cannot inspect other players' roles. The host can remove players in the lobby (they may rejoin with the code), and can send the table back to the lobby at any time, even mid-game, so the link stays the same and new players can join. Characters are dealt again at the next start. Use the same browser to recover your seat. A lost session cookie cannot be recovered by knowing a player's name.
 

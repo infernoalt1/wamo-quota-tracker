@@ -24,6 +24,32 @@ export const ROLES = Object.freeze(Object.fromEntries([
   ['scarlet_woman', 'Scarlet Woman', 'minion', 'If the Demon dies with at least five players alive just before that death, your functioning ability turns you into the Demon.'],
   ['baron', 'Baron', 'minion', 'Setup includes two extra Outsiders, replacing two Townsfolk. This setup change remains if you die or become poisoned.'],
   ['imp', 'Imp', 'demon', 'After the first night, choose a player to kill each night. If you kill yourself, a living Minion becomes the new Imp.'],
-].map(([id, name, type, help]) => [id, Object.freeze({ id, name, type, help, wiki: wiki(name) })])));
+  ['grandmother', 'Grandmother', 'townsfolk', 'Start knowing one good player and their character. If the Demon kills that player, you die too.', 'bmr'],
+  ['sailor', 'Sailor', 'townsfolk', 'Each night, choose a living player: either you or they become drunk until dusk. While your ability works, you cannot die.', 'bmr'],
+  ['chambermaid', 'Chambermaid', 'townsfolk', 'Each night, choose two other living players and learn how many of them woke tonight because of their ability.', 'bmr'],
+  ['exorcist', 'Exorcist', 'townsfolk', 'After the first night, choose a player, different from last night. If you choose the Demon, they learn who you are and do not wake tonight.', 'bmr'],
+  ['innkeeper', 'Innkeeper', 'townsfolk', 'After the first night, choose two players. Neither can die tonight, but one of them is drunk until dusk.', 'bmr'],
+  ['gambler', 'Gambler', 'townsfolk', 'After the first night, choose a player and guess their character. If you guess wrong, you die.', 'bmr'],
+  ['gossip', 'Gossip', 'townsfolk', 'Each day, you may make one public statement in the Town square. If it was true, a player dies tonight.', 'bmr'],
+  ['courtier', 'Courtier', 'townsfolk', 'Once per game, at night, choose a character. If they are in play, they are drunk for three nights and three days.', 'bmr'],
+  ['professor', 'Professor', 'townsfolk', 'Once per game, after the first night, choose a dead player. If they are a Townsfolk, they come back to life.', 'bmr'],
+  ['minstrel', 'Minstrel', 'townsfolk', 'When a Minion dies by execution, all other players are drunk until dusk tomorrow.', 'bmr'],
+  ['tea_lady', 'Tea Lady', 'townsfolk', 'If both of your living neighbors are good, those neighbors cannot die.', 'bmr'],
+  ['pacifist', 'Pacifist', 'townsfolk', 'Good players who are executed might not die.', 'bmr'],
+  ['fool', 'Fool', 'townsfolk', 'The first time you would die, you do not.', 'bmr'],
+  ['goon', 'Goon', 'outsider', 'Each night, the first player to choose you with their ability is drunk until dusk, and you join their team.', 'bmr'],
+  ['lunatic', 'Lunatic', 'outsider', 'You believe you are a Demon, but you are not. The real Demon knows who you are and who you choose at night.', 'bmr'],
+  ['tinker', 'Tinker', 'outsider', 'You might die at any time.', 'bmr'],
+  ['moonchild', 'Moonchild', 'outsider', 'When you learn that you died, publicly choose a living player. If they are good, they die tonight.', 'bmr'],
+  ['godfather', 'Godfather', 'minion', 'Start knowing which Outsiders are in play. If an Outsider died today, choose a player tonight and they die. Setup has one more or one fewer Outsider.', 'bmr'],
+  ['devils_advocate', "Devil's Advocate", 'minion', 'Each night, choose a living player, different from last night. If they are executed tomorrow, they do not die.', 'bmr'],
+  ['assassin', 'Assassin', 'minion', 'Once per game, after the first night, choose a player. They die, even if something would normally save them.', 'bmr'],
+  ['mastermind', 'Mastermind', 'minion', 'If the Demon dies by execution, play one more day. If a player is executed that day, their team loses. If nobody is, good wins.', 'bmr'],
+  ['zombuul', 'Zombuul', 'demon', 'After the first night, if nobody died today, choose a player and they die. The first time you die, you live on but appear dead.', 'bmr'],
+  ['pukka', 'Pukka', 'demon', 'Each night, choose a player and they are poisoned. The player you poisoned before them dies, then becomes healthy.', 'bmr'],
+  ['shabaloth', 'Shabaloth', 'demon', 'After the first night, choose two players and they die. A dead player you chose last night might come back to life.', 'bmr'],
+  ['po', 'Po', 'demon', 'After the first night, you may choose a player and they die. If you chose nobody last time, choose three players tonight.', 'bmr'],
+].map(([id, name, type, help, script = 'tb']) => [id, Object.freeze({ id, name, type, help, script, wiki: wiki(name) })])));
 
 export const ROLE_LIST = Object.freeze(Object.values(ROLES));
+export const SCRIPTS = Object.freeze({ tb: 'Trouble Brewing', bmr: 'Bad Moon Rising' });
