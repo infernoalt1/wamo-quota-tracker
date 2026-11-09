@@ -87,7 +87,7 @@ export function start(g,forcedRoles){
  // A lone Townsfolk Washerwoman would have no other Townsfolk to learn about.
  const bag=moon(g)?moonBag(g,forcedRoles):forcedRoles||shuffle([...shuffle(ofType('townsfolk').filter(r=>t>1||r!=='washerwoman')).slice(0,t),...shuffle(ofType('outsider')).slice(0,o),...minions,'imp']);
  const drunkShown=pick(ofType('townsfolk').filter(r=>!bag.includes(r)));
- g.players.forEach((p,i)=>{p.role=bag[i];p.initialRole=p.role;p.shown=p.role==='drunk'?drunkShown:p.role==='lunatic'?pick(moonType('demon')):p.role;p.initialShown=p.shown;p.alive=true;p.ghost=true;p.slayerUsed=false;p.virginUsed=false;p.inbox=[];});
+ g.players.forEach((p,i)=>{p.role=bag[i];p.initialRole=p.role;p.shown=p.role==='drunk'?drunkShown:p.role==='lunatic'?bag.find(r=>ROLES[r].type==='demon'):p.role;p.initialShown=p.shown;p.alive=true;p.ghost=true;p.slayerUsed=false;p.virginUsed=false;p.inbox=[];});
  g.redHerring=pick(g.players.filter(p=>!evil(p))).id;
  // Nobody claims Drunk or Lunatic, and an Outsider bluff is a giveaway at a table with no Outsiders.
  const townsfolk=moon(g)?moonType('townsfolk'):ofType('townsfolk'),outsiders=(moon(g)?moonType('outsider'):ofType('outsider')).filter(r=>r!=='drunk'&&r!=='lunatic');
