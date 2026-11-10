@@ -223,7 +223,8 @@ function teaLadyGuards(g,p){
 function spared(g,p,cause,by){
  if(by.force)return null;
  if(p.role==='sailor'&&active(g,p))return 'Sailor';
- if(cause==='night'&&g.innkeep.includes(p.id))return 'Innkeeper';
+ // The protection is the Innkeeper's ability, so it ends for both players if the Innkeeper is drunk, poisoned or dead.
+ if(cause==='night'&&g.innkeep.includes(p.id)&&g.players.some(x=>x.role==='innkeeper'&&active(g,x)))return 'Innkeeper';
  if(teaLadyGuards(g,p))return 'Tea Lady';
  if(cause==='execution'){
   const source=player(g,g.advocate?.source);
@@ -315,7 +316,8 @@ function moonResolve(g,p,q,targets,data){
   case 'innkeeper':if(on){
    g.innkeep=targets.map(x=>x.id);
    const [good,other]=[targets.filter(x=>!evil(x)),targets.filter(evil)];
-   const drunk=favorEvil(g)?pick(good.length?good:targets):pick(other.length?other:targets);
+   // An Innkeeper who protects themself is the likely one to get drunk, which undoes the protection.
+   const drunk=favorEvil(g)?(targets.includes(p)?p:pick(good.length?good:targets)):pick(other.length?other:targets);
    drunkUntil(g,drunk,g.day);audit(g,'Innkeeper',`${drunk.name} is drunk`,`Balance score ${pressure(g).toFixed(2)}.`);}break;
   case 'chambermaid':{
    const n=targets.filter(x=>g.woke.includes(x.id)).length;
@@ -328,7 +330,8 @@ function moonResolve(g,p,q,targets,data){
   case 'assassin':if(on)kill(g,t,'night',false,{force:true});break;
   case 'godfather':if(on)kill(g,t,'night');break;
   case 'zombuul':if(on)demonKill(t);break;
-  case 'pukka':if(on){const earlier=player(g,g.poison?.target);g.poison={source:p.id,target:t.id};if(earlier)demonKill(earlier);}break;
+  // The previous victim dies while still poisoned, so their own ability cannot save them.
+  case 'pukka':if(on){const earlier=player(g,g.poison?.target);if(earlier)demonKill(earlier);g.poison={source:p.id,target:t.id};}break;
   case 'shabaloth':if(on){
    const back=(p.lastChosen||[]).map(id=>player(g,id)).filter(x=>x&&!x.alive);
    attackInOrder();p.lastChosen=targets.map(x=>x.id);
