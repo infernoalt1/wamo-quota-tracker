@@ -56,17 +56,17 @@ function roleInfo(g,p,target){
  if(target.id===p.id)return p.shown;
  const truth=seenRole(g,target,p);return impaired(g,p)?discretion(g,`${label(p.shown)}: impaired information`,truth,evil(target)?goodCover(target,p):pick(ofType('minion'))):truth;
 }
-const seat=(name,session,id=crypto.randomUUID())=>({id,session,name,alive:true,ghost:true,inbox:[],claim:'',ready:false});
+const seat=(name,session,id=crypto.randomUUID(),avatar=null,avatarHidden=false)=>({id,session,name,avatar,avatarHidden,alive:true,ghost:true,inbox:[],claim:'',ready:false});
 const lobby=settings=>({phase:'lobby',day:0,events:[],messages:[],groups:[],decisions:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],drunks:[],woke:[],innkeep:[],deadline:null,paused:false,settings});
-export function newGame(code,name,session){
- const p=seat(name,session);
+export function newGame(code,name,session,avatar=null){
+ const p=seat(name,session,undefined,avatar);
  return {code,host:p.id,players:[p],round:1,...lobby({daySeconds:240,voteSeconds:40,script:'tb'}),created:Date.now()};
 }
-export function join(g,name,session){
+export function join(g,name,session,avatar=null){
  const existing=g.players.find(p=>p.session===session);if(existing)return existing;
  assert(g.phase==='lobby','This game has already started.');assert(g.players.length<15,'This table is full.');
  assert(!g.players.some(p=>p.name.toLowerCase()===name.toLowerCase()),'That name is already seated.');
- const p=seat(name,session);g.players.push(p);return p;
+ const p=seat(name,session,undefined,avatar);g.players.push(p);return p;
 }
 function unseat(g,p){
  g.players=g.players.filter(x=>x!==p);
@@ -77,7 +77,7 @@ function unseat(g,p){
 function rematch(g){
  const {code,host,players,round,settings,created,phase}=g;
  for(const key of Object.keys(g))delete g[key];
- Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
+ Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id,p.avatar,p.avatarHidden)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
 }
 export function start(g,forcedRoles){
  assert(COUNTS[g.players.length],'Gather 5–15 players to begin.');
@@ -482,6 +482,7 @@ export function act(g,session,data){
  }
  if(data.type==='leave'){assert(g.phase==='lobby','Keep your seat during a game. You can reconnect in this browser.');unseat(g,p);return;}
  if(data.type==='kick'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can remove players, and only in the lobby.');assert(t&&t.id!==p.id,'Choose another seated player.');unseat(g,t);return;}
+ if(data.type==='hide_avatar'){assert(p.id===g.host,'Only the host can hide a picture.');assert(t?.avatar,'That player has no picture.');t.avatarHidden=!t.avatarHidden;return;}
  if(data.type==='rematch'){assert(g.phase!=='lobby'&&p.id===g.host,'Only the host can send the table back to the lobby.');rematch(g);return;}
  if(data.type==='settings'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can set lobby options.');assert([120,180,240,360,600].includes(data.daySeconds),'Choose a supported day duration.');assert(data.script===undefined||['tb','bmr'].includes(data.script),'Choose a supported game mode.');g.settings.daySeconds=data.daySeconds;if(data.script)g.settings.script=data.script;return;}
  if(data.type==='start'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can start from the lobby.');start(g);return;}
@@ -532,7 +533,7 @@ export function view(g,session){
  const ended=g.phase==='ended';
  const groups=g.groups.filter(c=>c.members.includes(me.id));
  return {code:g.code,round:g.round,interrupted:g.interrupted,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
- players:g.players.map(p=>({id:p.id,name:p.name,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown,evil:evil(p)}: {})})),
+ players:g.players.map(p=>({id:p.id,name:p.name,avatar:p.avatarHidden?null:p.avatar||null,pictured:!!p.avatar,avatarHidden:!!p.avatarHidden,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown,evil:evil(p)}: {})})),
  me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox,moonPending:!!me.moonPending,statementUsed:me.statementDay===g.day},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
  nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,

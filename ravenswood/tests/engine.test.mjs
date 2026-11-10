@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {newGame,join,start,act,view,kill,poisoned,impaired,beginNight,advanceNight,endDay,tick,COUNTS} from '../lib/engine.mjs';
 import {ROLES} from '../lib/characters.mjs';
+import './accounts.test.mjs';
 function game(roles=['chef','soldier','slayer','poisoner','imp']){const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<roles.length;i++)join(g,`P${i}`,`s${i}`);start(g,roles);return g;}
 function choose(g,targets){const q=g.pending;act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:targets.map(n=>g.players[n].id)});}
 function finishNight(g){let n=0;while(g.phase==='night'&&g.pending&&n++<30){const q=g.pending;let choices=g.players.filter(p=>!q.notSelf||p.id!==q.id).slice(0,q.count);act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:choices.map(p=>p.id)});}return g;}

@@ -12,4 +12,6 @@ The game is served at `/botc/` by the parent site. From the repository root, `np
 
 `server.mjs` is the API. Rooms are held in server memory, expire after six idle hours, and do not survive a restart. A private HttpOnly SameSite cookie identifies each browser's player seat; serializers omit hidden state and filter whispers. No game state is trusted from clients. Timers progress on incoming polling requests. Rooms are not publicly listed. Room codes admit players only before game start.
 
-Limitations: no integrated voice/video, no bots replacing players, no cross-device seat recovery, and no moderation console. Balancing is heuristic, not conversational AI. Public votes use a timed hand-lock adaptation. Browser QA and human group playtesting remain outstanding.
+Accounts are optional and live in `lib/accounts.mjs`, in a `botc_accounts` table separate from the quota tracker's users. A logged-in player's cookie holds their account's session, so seats follow the account between devices. Without `DATABASE_URL` the login option is hidden and everyone plays as a guest. There is no email, so a forgotten password has to be reset in the database.
+
+Limitations: no integrated voice/video, no bots replacing players, and no moderation console beyond the host's kick and hide-picture controls. Balancing is heuristic, not conversational AI. Public votes use a timed hand-lock adaptation. Browser QA and human group playtesting remain outstanding.
