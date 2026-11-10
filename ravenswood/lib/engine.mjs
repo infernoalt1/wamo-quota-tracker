@@ -200,7 +200,7 @@ function automatic(g,p,role){
 }
 // Bad Moon Rising: everything below runs only when the table chose that script.
 const MOON_FIRST=['sailor','courtier','godfather','devils_advocate','lunatic','pukka','grandmother','chambermaid'];
-const MOON_OTHER=['sailor','innkeeper','courtier','gambler','devils_advocate','lunatic','exorcist','zombuul','pukka','shabaloth','po','assassin','godfather','gossip','tinker','moonchild','professor','chambermaid'];
+const MOON_OTHER=['sailor','courtier','innkeeper','gambler','devils_advocate','lunatic','exorcist','zombuul','pukka','shabaloth','po','assassin','godfather','gossip','professor','tinker','moonchild','chambermaid'];
 const MOON_AUTO={1:['godfather','grandmother'],other:['gossip','tinker','moonchild']};
 const MOON_DEMONS=['zombuul','pukka','shabaloth','po'];
 function moonBag(g,forced){
@@ -293,17 +293,21 @@ function moonAuto(g,p,role){
   if(g.moonTarget?.by===p.id)g.moonTarget=null;
  }
 }
-function moonSkip(g,p,q){if(q.role==='po'&&p.role==='po'&&active(g,p))p.poCharged=true;}
+function moonSkip(g,p,q){if(q.role==='po'&&(p.role==='lunatic'||p.role==='po'&&active(g,p)))p.poCharged=true;}
 function moonResolve(g,p,q,targets,data){
  const real=p.role===q.role,t=targets[0];
  // The first player to choose a sober Goon is drunk before their ability resolves.
  const goon=real&&!g.goonChosen&&targets.find(x=>x.role==='goon'&&active(g,x));
- if(goon){g.goonChosen=true;drunkUntil(g,p,g.day);goon.aligned=evil(p)?'evil':'good';audit(g,'Goon chosen',`${p.name} is drunk until dusk`,`${goon.name} joined their team.`);}
+ const chooseGoon=()=>{g.goonChosen=true;drunkUntil(g,p,g.day);goon.aligned=evil(p)?'evil':'good';audit(g,'Goon chosen',`${p.name} is drunk until dusk`,`${goon.name} joined their team.`);};
+ // A Shabaloth or Po attacks in the order chosen, so only attacks from the Goon onward fail.
+ const inOrder=['shabaloth','po'].includes(q.role);
+ if(goon&&!(inOrder&&active(g,p)))chooseGoon();
  const on=real&&active(g,p);
  p.lastChoice=t?.id;
  if(p.role==='lunatic'){const demon=g.players.find(isDemon);if(demon&&(demon.alive||demon.zombuulUp)&&!impaired(g,p))tell(g,demon,`The Lunatic chose: ${targets.map(x=>x.name).join(', ')}.`);}
  if(['courtier','professor','assassin'].includes(q.role))p.abilityUsed=true;
  const demonKill=x=>kill(g,x,'night',false,{demon:true});
+ const attackInOrder=()=>{for(const x of targets){if(x===goon)chooseGoon();if(!active(g,p)||g.phase!=='night')return;demonKill(x);}};
  switch(q.role){
   case 'sailor':if(on){
    const helpEvil=favorEvil(g),drunk=t===p||!evil(t)===helpEvil?(t===p?p:t):p;
@@ -327,9 +331,10 @@ function moonResolve(g,p,q,targets,data){
   case 'pukka':if(on){const earlier=player(g,g.poison?.target);g.poison={source:p.id,target:t.id};if(earlier)demonKill(earlier);}break;
   case 'shabaloth':if(on){
    const back=(p.lastChosen||[]).map(id=>player(g,id)).filter(x=>x&&!x.alive);
-   targets.forEach(demonKill);p.lastChosen=targets.map(x=>x.id);
-   if(g.phase==='night'&&back.length&&!favorEvil(g)&&rand()<.3){const r=pick(back);r.alive=true;r.ghost=true;g.risen=[...(g.risen||[]),r.id];audit(g,'Shabaloth regurgitation',r.name,'A dead player chosen last night might come back.');}}break;
-  case 'po':if(on){p.poCharged=false;targets.forEach(demonKill);}break;
+   attackInOrder();p.lastChosen=targets.map(x=>x.id);
+   if(g.phase==='night'&&active(g,p)&&back.length&&!favorEvil(g)&&rand()<.3){const r=pick(back);r.alive=true;r.ghost=true;g.risen=[...(g.risen||[]),r.id];audit(g,'Shabaloth regurgitation',r.name,'A dead player chosen last night might come back.');}}break;
+  case 'po':if(p.role==='lunatic')p.poCharged=false;if(on){p.poCharged=false;attackInOrder();}break;
+  case 'moonchild':p.moonPending=false;log(g,`${p.name} is the Moonchild and chooses ${t.name}.`);if(t.alive&&!evil(t)&&!impaired(g,p))kill(g,t,'night');break;
  }
  if(q.role!=='chambermaid')tell(g,p,`Your choice: ${[...targets.map(x=>x.name),...(data.character?[label(data.character)]:[])].join(', ')}.`);
 }
@@ -337,7 +342,7 @@ export function beginNight(g){
  g.phase='night';g.day++;g.deadline=null;if(!moon(g))g.poison=null;g.protection=null;g.nightDeaths=[];g.pending=null;g.ready=[];
  g.drunks=g.drunks.filter(d=>g.day<=d.until);g.woke=[];g.innkeep=[];g.exorcised=null;g.goonChosen=false;g.risen=[];g.tinkerAt=null;
  g.players.forEach(p=>{p.ready=false;p.nominated=false;p.nominator=false;p.publicAlive=p.alive;});
- const order=g.day===1?['poisoner','spy','washerwoman','librarian','investigator','chef','empath','fortune_teller','butler']:['poisoner','monk','spy','imp','undertaker','empath','fortune_teller','butler'];
+ const order=g.day===1?['poisoner','washerwoman','librarian','investigator','chef','empath','fortune_teller','butler','spy']:['poisoner','monk','imp','undertaker','empath','fortune_teller','butler','spy'];
  g.queue=moon(g)?moonQueue(g):order.flatMap(role=>g.players.filter(p=>p.shown===role).map(p=>({id:p.id,role})));
  log(g,`Night ${g.day} falls.`);advanceNight(g);
 }
@@ -345,6 +350,8 @@ export function advanceNight(g){
  while(g.phase==='night'&&!g.pending&&g.queue.length&&moon(g)){
   const item=g.queue.shift(),p=player(g,item.id);
   if(!p)continue;
+  // An executed Moonchild has had no daylight to choose in; someone who died tonight only learns at dawn.
+  if(item.role==='moonchild'&&p.moonPending&&!g.nightDeaths.includes(p.id)){g.pending={id:p.id,role:'moonchild',key:crypto.randomUUID(),count:1,aliveOnly:true};continue;}
   if(item.auto){moonAuto(g,p,item.role);continue;}
   if(!(p.alive||p.zombuulUp)||g.exorcised===p.id||g.mastermindDay&&isDemon(p))continue;
   const prompt=moonPrompt(g,p,item.role);
