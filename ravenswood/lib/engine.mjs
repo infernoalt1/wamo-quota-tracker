@@ -104,6 +104,11 @@ export function start(g,forcedRoles){
  beginNight(g);
 }
 function win(g,team,reason){g.phase='ended';g.winner=team;g.reason=reason;g.pending=null;g.deadline=null;log(g,`${team==='good'?'Good':'Evil'} wins. ${reason}`);}
+// One row per seat of a finished game, for the lasting record kept outside the room.
+// Teams are judged at the end, so a Goon who turned evil wins and loses with evil.
+export function results(g){
+ return g.players.map(p=>({session:p.session,role:p.role,initialRole:p.initialRole,evil:evil(p),won:evil(p)===(g.winner==='evil'),survived:!!(p.alive||p.zombuulUp),demon:isDemon(p)}));
+}
 function checkWin(g){
  if(g.mastermindDay)return;
  // A Zombuul that appears dead is still alive for ending the game.

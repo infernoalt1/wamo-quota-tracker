@@ -16,7 +16,35 @@ const SCHEMA=`CREATE TABLE IF NOT EXISTS botc_accounts(
   avatar BYTEA,
   avatar_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)`;
+);
+CREATE TABLE IF NOT EXISTS botc_games(
+  id UUID PRIMARY KEY,
+  script TEXT NOT NULL,
+  winner TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  players SMALLINT NOT NULL,
+  ended_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS botc_game_players(
+  game_id UUID NOT NULL REFERENCES botc_games(id) ON DELETE CASCADE,
+  account_id UUID NOT NULL REFERENCES botc_accounts(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  initial_role TEXT NOT NULL,
+  evil BOOLEAN NOT NULL,
+  won BOOLEAN NOT NULL,
+  survived BOOLEAN NOT NULL,
+  demon BOOLEAN NOT NULL,
+  PRIMARY KEY(game_id,account_id)
+);
+CREATE INDEX IF NOT EXISTS botc_game_players_account ON botc_game_players(account_id)`;
+// Totals per account; the leaderboard works out rates and ranks from these.
+const TOTALS=`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,
+  count(*)::int AS games,count(*) FILTER(WHERE p.won)::int AS wins,
+  count(*) FILTER(WHERE NOT p.evil)::int AS good_games,count(*) FILTER(WHERE NOT p.evil AND p.won)::int AS good_wins,
+  count(*) FILTER(WHERE p.evil)::int AS evil_games,count(*) FILTER(WHERE p.evil AND p.won)::int AS evil_wins,
+  count(*) FILTER(WHERE p.demon AND p.won)::int AS demon_wins
+FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts a ON a.id=p.account_id
+WHERE $1::text IS NULL OR g.script=$1 GROUP BY a.id`;
 export function pgStore(pool){
   let ready;
   const query=async(sql,args)=>{ready||=pool.query(SCHEMA).catch(e=>{ready=null;throw e;});await ready;return (await pool.query(sql,args)).rows;};
@@ -30,6 +58,18 @@ export function pgStore(pool){
     bySession:session=>one(`SELECT ${COLUMNS} FROM botc_accounts WHERE session=$1`,[session]),
     setPicture:(session,bytes)=>one(`UPDATE botc_accounts SET avatar=$2,avatar_version=avatar_version+1 WHERE session=$1 RETURNING ${COLUMNS}`,[session,bytes]),
     picture:async id=>(await one('SELECT avatar FROM botc_accounts WHERE id=$1',[id]))?.avatar||null,
+    accountIds:async sessions=>new Map((await query('SELECT id,session FROM botc_accounts WHERE session=ANY($1::uuid[])',[sessions])).map(a=>[a.session,a.id])),
+    // One statement, so a game is saved with all its players or not at all.
+    async saveGame({id,script,winner,reason,size,players}){
+      await query(`WITH game AS (INSERT INTO botc_games(id,script,winner,reason,players) VALUES($1,$2,$3,$4,$5))
+        INSERT INTO botc_game_players(game_id,account_id,role,initial_role,evil,won,survived,demon)
+        SELECT $1,account_id,role,initial_role,evil,won,survived,demon FROM jsonb_to_recordset($6::jsonb)
+        AS x(account_id UUID,role TEXT,initial_role TEXT,evil BOOLEAN,won BOOLEAN,survived BOOLEAN,demon BOOLEAN)`,
+        [id,script,winner,reason,size,JSON.stringify(players.map(p=>({account_id:p.account,role:p.role,initial_role:p.initialRole,evil:p.evil,won:p.won,survived:p.survived,demon:p.demon})))]);
+    },
+    totals:script=>query(TOTALS,[script||null]),
+    history:id=>query(`SELECT g.script,g.ended_at,g.players,p.role,p.initial_role,p.evil,p.won,p.survived,p.demon
+      FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id WHERE p.account_id=$1 ORDER BY g.ended_at DESC`,[id]),
   };
 }
 // Without a database the game still works: everyone simply plays as a guest.
@@ -40,10 +80,10 @@ export function defaultStore(){
   return pgStore(pool);
 }
 const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
-const pictureOf=a=>a?.pictured?`${a.id}?v=${a.avatar_version}`:null;
+export const pictureOf=a=>a?.pictured?`${a.id}?v=${a.avatar_version}`:null;
 const summary=a=>a?{username:a.username,avatar:pictureOf(a)}:null;
-const keyOf=username=>username.toLocaleLowerCase('en');
-function usernameOf(value){const v=String(value||'').normalize('NFKC').trim().replace(/\s+/g,' ');if(!/^[\p{L}\p{N}][\p{L}\p{N} _.-]{1,19}$/u.test(v))throw refuse('Usernames are 2–20 letters or numbers.');return v;}
+export const keyOf=username=>username.toLocaleLowerCase('en');
+export function usernameOf(value){const v=String(value||'').normalize('NFKC').trim().replace(/\s+/g,' ');if(!/^[\p{L}\p{N}][\p{L}\p{N} _.-]{1,19}$/u.test(v))throw refuse('Usernames are 2–20 letters or numbers.');return v;}
 function passwordOf(value){const v=String(value||'');if(v.length<6||Buffer.byteLength(v)>72)throw refuse('Passwords are 6–72 characters.');return v;}
 function jpegOf(image){const m=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(image)),bytes=m&&Buffer.from(m[1],'base64');if(!bytes||bytes.length>MAX_PICTURE||bytes[0]!==0xff||bytes[1]!==0xd8||bytes[2]!==0xff)throw refuse('Please choose a different picture.');return bytes;}
 const clientOf=req=>req.headers['x-forwarded-for']?.split(',').at(-1).trim()||req.socket.remoteAddress||'';

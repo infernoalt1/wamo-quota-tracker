@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { newGame, join, act, tick, view } from './lib/engine.mjs';
 import { mountAccounts, defaultStore } from './lib/accounts.mjs';
+import { mountLeaderboard } from './lib/leaderboard.mjs';
 
 const ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_TTL=6*60*60*1000;
@@ -28,14 +29,16 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     markSeen(game.code,session);
     const data=view(game,session),now=Date.now();
     data.players.forEach((p,i)=>{const seen=presence.get(`${game.code}:${game.players[i].session}`);p.away=!seen||seen.closed||now-seen.at>awayAfter;});
+    const record=leaderboard.statusFor(game,session);if(record)data.record=record;
     reply(req,res,data);
   }
   const load=code=>{const room=rooms.get(code);if(!room)throw Error('Room not found. Check the code.');return JSON.parse(room.state);};
-  const save=(code,game)=>rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});
+  const save=(code,game)=>{leaderboard.noteEnd(game);rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});};
   router.use((req,res,next)=>{res.setHeader('Cache-Control','no-store, private');const now=Date.now();for(const [code,room] of rooms)if(now-room.updated>ROOM_TTL)rooms.delete(code);for(const [key,seen] of presence)if(now-seen.at>ROOM_TTL)presence.delete(key);next();});
   router.use('/account/avatar',express.json({limit:'96kb'}));
   router.use(express.json({limit:'4kb'}));
   const accounts=mountAccounts(router,{store,rooms,identity,setSession});
+  const leaderboard=mountLeaderboard(router,{store,rooms});
   router.get('/',(req,res)=>{try{
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.
