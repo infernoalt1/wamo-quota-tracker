@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1c2622">
+  <title>Wardmoor · WAMO games</title>
+  <link rel="stylesheet" href="/wardmoor/style.css">
+  <script defer src="/wardmoor/app.js"></script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud" hidden>
+    <div id="board" class="card" aria-label="Most renowned"></div>
+    <canvas id="minimap" width="168" height="168" class="card" aria-label="Map of the nine regions"></canvas>
+    <div id="feed" aria-live="polite"></div>
+    <div id="claim" class="card" hidden></div>
+    <div id="dock">
+      <div id="vitals">
+        <button id="armor" class="card" title="Change armor (Q)"></button>
+        <div class="meters">
+          <div class="meter"><i id="hp"></i><span id="hp-text"></span></div>
+          <div id="renown"></div>
+        </div>
+      </div>
+      <div id="bar"></div>
+    </div>
+  </div>
+  <section id="gate">
+    <form id="gate-form" class="sheet" autocomplete="off">
+      <h1 id="gate-title">Wardmoor</h1>
+      <p id="gate-text">Nine regions, one moor. Take the standing stones, earn renown, and spend your nights worth hunting.</p>
+      <div id="gate-fields">
+        <label>Your name<input id="name" maxlength="16" autocomplete="nickname" placeholder="Wanderer"></label>
+        <label>Warband <small>optional, up to 10 share a name</small><input id="band" maxlength="16" placeholder="Fight alone"></label>
+      </div>
+      <button id="go" type="submit">Walk the moor</button>
+      <p id="gate-error" role="alert" hidden></p>
+      <p class="muted">Needs a keyboard and mouse. Press Esc in the game for the rules.</p>
+    </form>
+  </section>
+  <dialog id="rules">
+    <h2>How to play</h2>
+    <div class="columns">
+      <div>
+        <h3>Controls</h3>
+        <ul>
+          <li><b>WASD</b> or arrows move.</li>
+          <li><b>Left mouse</b> uses what you hold. Hold it to keep attacking or keep your buckler up.</li>
+          <li><b>1 to 7</b> change tools.</li>
+          <li><b>Q</b> changes armor, but not within 8 seconds of being hit.</li>
+        </ul>
+        <h3>Renown</h3>
+        <p>Monsters and rivals pay renown, which unlocks tools and armor. A rival is worth 12 plus a quarter of their renown, so leaders are valuable targets. When you die you lose 40% of yours, and anything you can no longer afford locks again.</p>
+      </div>
+      <div>
+        <h3>Standing stones</h3>
+        <p>Stay inside a stone's ring with no rival inside to claim its region. Bring friends to claim faster. Owning a region pays 25% more renown for kills there and raises militia who guard it. The middle of the moor has the strongest monsters.</p>
+        <h3>Warbands</h3>
+        <p>Enter the same warband name as your friends. You can't hurt each other, and regions belong to the whole band.</p>
+      </div>
+    </div>
+    <button id="rules-close" type="button">Back to the moor</button>
+  </dialog>
+</body>
+</html>

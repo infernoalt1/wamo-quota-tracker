@@ -1,0 +1,56 @@
+:root { --ink: #16201c; --paper: #e9dfc4; --paper-dim: #b9b095; --moss: #4f6b4a; --ember: #d9793a; --blood: #b23a30; --panel: rgba(22, 32, 28, .84); --line: rgba(233, 223, 196, .24); }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font: 15px/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+[hidden] { display: none !important; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.muted { color: var(--paper-dim); font-size: 13px; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#board { position: absolute; top: 12px; left: 12px; min-width: 190px; padding: 8px 12px; font-size: 13px; }
+#board h2 { margin: 0 0 4px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--paper-dim); font-weight: 400; }
+#board div { display: flex; justify-content: space-between; gap: 14px; }
+#board span:first-child { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#board .me { color: var(--ember); }
+#minimap { position: absolute; top: 12px; right: 12px; width: 168px; height: 168px; }
+#feed { position: absolute; top: 192px; right: 12px; width: 260px; text-align: right; font-size: 13px; text-shadow: 0 1px 2px #000; }
+#feed div { margin-bottom: 3px; }
+#claim { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 7px 16px; min-width: 240px; text-align: center; font-size: 14px; }
+#claim i { display: block; height: 5px; margin-top: 5px; border-radius: 3px; background: var(--ember); }
+#dock { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 7px; align-items: stretch; }
+#vitals { display: flex; gap: 8px; align-items: center; }
+#armor { pointer-events: auto; font: inherit; font-size: 13px; color: var(--paper); padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+#armor:hover { border-color: var(--paper); }
+.meters { flex: 1; display: flex; gap: 12px; align-items: center; }
+.meter { position: relative; flex: 1; height: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--blood); transition: width .12s linear; }
+.meter span { position: relative; display: block; text-align: center; font-size: 13px; line-height: 18px; text-shadow: 0 1px 1px #000; }
+#renown { color: #f4c98f; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 10px; font-size: 15px; white-space: nowrap; }
+#bar { display: flex; gap: 6px; }
+.slot { position: relative; width: 66px; height: 66px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; pointer-events: auto; cursor: pointer; padding: 0; color: var(--paper); font: inherit; }
+.slot canvas { width: 100%; height: 100%; display: block; }
+.slot b { position: absolute; top: 2px; left: 5px; font-size: 12px; font-weight: 400; color: var(--paper-dim); }
+.slot.on { border-color: var(--ember); box-shadow: inset 0 0 0 1px var(--ember); }
+.slot.locked { opacity: .55; cursor: default; }
+.slot.locked canvas { filter: grayscale(1) brightness(.6); }
+.slot small { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font-size: 11px; color: var(--ember); }
+.slot u { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, .55); text-decoration: none; }
+#gate { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(12, 18, 16, .62); }
+.sheet { width: min(430px, 100%); background: var(--paper); color: var(--ink); padding: 26px 28px; border-radius: 6px; box-shadow: 0 18px 50px rgba(0, 0, 0, .55); }
+.sheet h1 { margin: 0 0 6px; font-size: 40px; font-weight: 400; letter-spacing: .01em; }
+.sheet p { margin: 0 0 14px; }
+.sheet .muted { color: #5f5a48; margin: 12px 0 0; }
+.sheet label { display: block; margin-bottom: 11px; font-size: 14px; }
+.sheet label small { color: #5f5a48; }
+.sheet input { display: block; width: 100%; margin-top: 3px; padding: 8px 10px; border: 1px solid #8e8669; border-radius: 4px; background: #f6efda; font: inherit; color: var(--ink); }
+.sheet button, dialog button { width: 100%; padding: 10px; border: 0; border-radius: 4px; background: var(--moss); color: #fbf6e6; font: inherit; font-size: 16px; cursor: pointer; }
+.sheet button:hover, dialog button:hover { background: #5d7d57; }
+.sheet button:disabled { background: #8e8669; cursor: default; }
+#gate-error { color: var(--blood); margin: 10px 0 0; }
+dialog { width: min(720px, calc(100% - 32px)); background: var(--paper); color: var(--ink); border: 0; border-radius: 6px; padding: 22px 26px; }
+dialog::backdrop { background: rgba(12, 18, 16, .6); }
+dialog h2 { margin: 0 0 8px; font-weight: 400; font-size: 26px; }
+dialog h3 { margin: 10px 0 4px; font-size: 16px; }
+dialog ul { margin: 0; padding-left: 18px; }
+dialog p { margin: 0 0 8px; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 14px; }
+@media (max-width: 620px) { .columns { grid-template-columns: 1fr; } .slot { width: 42px; height: 42px; } #board { display: none; } }
