@@ -833,6 +833,17 @@ export class Game {
         this.send(p, { t: 'toast', m: `Learned ${sk.name}` });
         break;
       }
+      case 'reset': {
+        if (p.dead || !inSafe(p)) { this.say(p, 'You can only reset your skills inside Hanbin Haven, the safe village.'); break; }
+        const n = p.skills.filter((s) => !SKILLS[s].free).length;
+        if (!n) break;
+        p.skills = [...FREE_SKILLS];
+        p.hotbar = p.hotbar.map((s) => (s && SKILLS[s].free ? s : null));
+        this.removeSummonsOf(p.id);
+        p.dirty = true; this.sendProf(p);
+        this.send(p, { t: 'toast', m: `Skills reset: ${n} point${n === 1 ? '' : 's'} refunded` });
+        break;
+      }
       case 'hb': {
         const s = m.s | 0;
         if (s < 0 || s >= p.slots) break;

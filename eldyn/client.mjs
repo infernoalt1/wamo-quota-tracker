@@ -144,7 +144,7 @@ function buildHotbar() {
     const locked = i >= prof.slots, id = prof.hotbar[i], sk = id && SKILLS[id];
     d.className = 'slot' + (locked ? ' locked' : '') + (i === slotSel ? ' sel' : '');
     if (sk) d.style.setProperty('--tc', TREES.find((t) => t.id === sk.tree).color);
-    d.innerHTML = `<span class="key">${(i + 1) % 10}</span><div class="ico">${locked ? '' : (sk ? sk.icon : '')}</div><div class="cd"></div><span class="cdt"></span>${sk && sk.en ? `<span class="en">${sk.en}</span>` : ''}${locked ? `<div class="lk">🔒<br>T${(i - 4) * 5}</div>` : ''}`;
+    d.innerHTML = `<span class="key">${keyName(binds['slot' + i])}</span><div class="ico">${locked ? '' : (sk ? sk.icon : '')}</div><div class="cd"></div><span class="cdt"></span>${sk && sk.en ? `<span class="en">${sk.en}</span>` : ''}${locked ? `<div class="lk">🔒<br>T${(i - 4) * 5}</div>` : ''}`;
     d.title = locked ? `Unlocks at soma tier ${(i - 4) * 5}` : sk ? `${sk.name}: ${sk.desc}\n${sk.en} energy · ${sk.cd / 1000}s cooldown\nRight-click to clear` : 'Empty slot. Click it, then click a learned skill in the skill tree (K).';
     d.addEventListener('mousedown', (e) => {
       e.stopPropagation();
@@ -211,15 +211,15 @@ let toastT = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = '1'; clearTimeout(toastT); toastT = setTimeout(() => (t.style.opacity = '0'), 3000); }
 
 // ------------------------------------------------------------------ panels
-const PANELS = ['skills', 'factions', 'board', 'help', 'map'];
+const PANELS = ['skills', 'factions', 'board', 'help', 'map', 'keys'];
 const panelOpen = (id) => $(id).style.display === 'block';
 function togglePanel(id) {
   const open = panelOpen(id);
   for (const p of PANELS) $(p).style.display = 'none';
   if (!open) {
     $(id).style.display = 'block';
-    if (id === 'skills') renderSkills(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap();
-  }
+    if (id === 'skills') renderSkills(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap(); if (id === 'keys') renderKeys();
+  } else if (id === 'keys') rebinding = null;
 }
 document.querySelectorAll('[data-close]').forEach((x) => x.addEventListener('click', () => togglePanel(x.closest('.panel').id)));
 document.querySelectorAll('[data-open]').forEach((x) => x.addEventListener('click', () => togglePanel(x.dataset.open)));
@@ -383,9 +383,53 @@ function renderMap() {
 // ------------------------------------------------------------------ input
 const worldMouse = () => ({ x: me.x + (mouseX - VW / 2) / zoom, y: me.y + (mouseY - VH / 2) / zoom });
 function aimAngle() { return Math.atan2(mouseY - VH / 2, mouseX - VW / 2); }
+// Rebindable keys, stored per browser as KeyboardEvent.code values (layout-independent).
+const ACTIONS = [
+  ['up', 'Move up', 'KeyW'], ['down', 'Move down', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
+  ...Array.from({ length: 10 }, (_, i) => ['slot' + i, `Hotbar slot ${i + 1}`, 'Digit' + ((i + 1) % 10)]),
+  ['skills', 'Skill trees', 'KeyK'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Leaderboard', 'Tab'],
+  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'],
+];
+const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([id, , code]) => [id, code]));
+let binds = { ...DEFAULT_BINDS };
+try { Object.assign(binds, JSON.parse(store.get('hanbin_binds') || '{}')); } catch { /* ignore a corrupt save */ }
+let actionOf = new Map();
+function applyBinds() {
+  actionOf = new Map(Object.entries(binds).map(([a, c]) => [c, a]));
+  store.set('hanbin_binds', JSON.stringify(binds));
+  document.querySelectorAll('[data-open]').forEach((b) => { b.textContent = `${keyName(binds[b.dataset.open === 'board' ? 'board' : b.dataset.open])} ${b.dataset.label}`; });
+  if (started || prof.slots) buildHotbar();
+}
+function keyName(code) {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
+  if (code.startsWith('Arrow')) return { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' }[code];
+  return { Space: 'Space', ShiftLeft: 'LShift', ShiftRight: 'RShift', ControlLeft: 'LCtrl', ControlRight: 'RCtrl', AltLeft: 'LAlt', AltRight: 'RAlt', Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backslash: '\\', CapsLock: 'Caps' }[code] || code;
+}
+const pressed = (action) => !!keys[binds[action]];
+// Arrow keys also move, unless they have been bound to something else.
+const arrow = (code) => keys[code] && !actionOf.has(code);
 function mask() {
   if (chatOpen || me.dead || !connected) return 0;
-  return (keys.w || keys.arrowup ? 1 : 0) | (keys.s || keys.arrowdown ? 2 : 0) | (keys.a || keys.arrowleft ? 4 : 0) | (keys.d || keys.arrowright ? 8 : 0);
+  return (pressed('up') || arrow('ArrowUp') ? 1 : 0) | (pressed('down') || arrow('ArrowDown') ? 2 : 0) | (pressed('left') || arrow('ArrowLeft') ? 4 : 0) | (pressed('right') || arrow('ArrowRight') ? 8 : 0);
+}
+let rebinding = null;
+function renderKeys() {
+  const b = $('keysbody'); b.innerHTML = '';
+  const grid = el('div', 'keygrid');
+  for (const [id, label] of ACTIONS) {
+    grid.appendChild(el('span', '', label));
+    const btn = el('button', 'keybtn' + (rebinding === id ? ' wait' : ''), rebinding === id ? 'Press a key…' : keyName(binds[id]));
+    btn.onclick = () => { rebinding = rebinding === id ? null : id; renderKeys(); };
+    grid.appendChild(btn);
+  }
+  b.appendChild(grid);
+  b.appendChild(el('p', 'dim', 'Click an action, then press the new key (Esc cancels). Picking a key that is already used swaps the two. Left click is always hotbar slot 1 and right click slot 2.'));
+  const reset = el('button', '', 'Restore defaults');
+  reset.onclick = () => { binds = { ...DEFAULT_BINDS }; rebinding = null; applyBinds(); renderKeys(); };
+  b.appendChild(reset);
 }
 function castSlot(s) { const w = worldMouse(); send({ t: 'cast', s, a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }); }
 let lastK = -1, lastA = 0, lastSent = 0;
@@ -398,25 +442,37 @@ setInterval(() => { if (!connected || chatOpen) return; for (const s of held) ca
 
 addEventListener('keydown', (e) => {
   if (!started) return;
+  if (rebinding) {
+    e.preventDefault();
+    if (e.code !== 'Escape') {
+      const old = binds[rebinding], other = actionOf.get(e.code);
+      if (other && other !== rebinding) binds[other] = old;
+      binds[rebinding] = e.code;
+      applyBinds();
+    }
+    rebinding = null; renderKeys(); return;
+  }
   if (chatOpen) {
     if (e.key === 'Enter') { const v = $('chatin').value.trim(); if (v) send({ t: 'chat', m: v }); closeChat(); }
     else if (e.key === 'Escape') closeChat();
     e.stopPropagation(); return;
   }
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-  const k = e.key.toLowerCase();
-  if (k === 'enter') { openChat(); e.preventDefault(); return; }
-  if (k === 'escape') { for (const p of PANELS) $(p).style.display = 'none'; slotSel = -1; buildHotbar(); return; }
-  if (k === 'k') return togglePanel('skills');
-  if (k === 'f') return togglePanel('factions');
-  if (k === 'h') return togglePanel('help');
-  if (k === 'm') return togglePanel('map');
-  if (k === 'tab') { e.preventDefault(); return togglePanel('board'); }
-  if (/^[0-9]$/.test(k) && !e.repeat) { const s = (+k + 9) % 10; held.add(s); castSlot(s); return; }
-  keys[k] = true;
-  if (k.startsWith('arrow') || k === ' ') e.preventDefault();
+  if (e.code === 'Escape') { for (const p of PANELS) $(p).style.display = 'none'; slotSel = -1; buildHotbar(); return; }
+  const act = actionOf.get(e.code);
+  if (act || e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Tab') e.preventDefault();
+  keys[e.code] = true;
+  if (!act || e.repeat) return;
+  if (act === 'chat') return openChat();
+  if (act === 'board') return togglePanel('board');
+  if (PANELS.includes(act)) return togglePanel(act);
+  if (act.startsWith('slot')) { const s = +act.slice(4); held.add(s); castSlot(s); }
 });
-addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); keys[k] = false; if (/^[0-9]$/.test(k)) held.delete((+k + 9) % 10); });
+addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+  const act = actionOf.get(e.code);
+  if (act && act.startsWith('slot')) held.delete(+act.slice(4));
+});
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; held.clear(); });
 function openChat() { chatOpen = true; const i = $('chatin'); i.style.display = 'block'; i.value = ''; i.focus(); }
 function closeChat() { chatOpen = false; const i = $('chatin'); i.style.display = 'none'; i.blur(); }
@@ -731,6 +787,13 @@ function frame(now) {
 }
 
 // ------------------------------------------------------------------ start
+$('resetBtn').onclick = () => {
+  const n = prof.skills.filter((s) => !SKILLS[s].free).length;
+  if (!n) return toast('You have no skill points to reset.');
+  if (Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) > VILLAGE.r) return toast('Go to Hanbin Haven to reset your skills.');
+  if (confirm(`Refund all ${n} skill point${n === 1 ? '' : 's'}? Learned skills will be removed from your hotbar.`)) send({ t: 'reset' });
+};
+applyBinds();
 buildHotbar();
 setMode('login');
 showLogin();

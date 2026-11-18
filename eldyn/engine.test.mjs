@@ -64,6 +64,21 @@ test('learning needs points, tier and the parent skill; passives stay off the ho
   assert.equal(p.pts, 2);
 });
 
+test('skill points can be reset, but only in the safe village', () => {
+  const { game, p, msgs } = setup({ soma: 40 * 25, skills: ['cleave', 'parry', 'heavy_blade'], hotbar: ['slash', 'cleave', 'parry', 'arrow'] });
+  assert.equal(p.pts, 2);
+  p.x = CASTLES[0].x; p.y = CASTLES[0].y + 120;
+  game.handle(p, { t: 'reset' });
+  assert.ok(p.skills.includes('cleave'), 'refused outside the village');
+  assert.ok(msgs.some((m) => m.t === 'msg' && /Hanbin Haven/.test(m.m)));
+  p.x = VILLAGE.x + 60; p.y = VILLAGE.y;
+  game.handle(p, { t: 'reset' });
+  assert.deepEqual(p.skills.sort(), ['arrow', 'slash']);
+  assert.equal(p.pts, 5);
+  assert.deepEqual(p.hotbar.slice(0, 4), ['slash', null, null, 'arrow']);
+  assert.equal(p.mods.melee, 1);
+});
+
 test('skills beyond what the tier allows are refunded on join', () => {
   const { p } = setup({ soma: 40, skills: ['cleave', 'shield_bash', 'parry'], hotbar: ['slash', 'cleave', 'parry'] });
   assert.equal(p.tier, 1);

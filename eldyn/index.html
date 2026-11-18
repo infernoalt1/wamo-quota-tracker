@@ -33,7 +33,7 @@
     <canvas id="mini" width="236" height="157"></canvas>
     <div id="regionlbl"></div>
     <div class="menu">
-      <button data-open="skills" title="Skill trees">K Skills</button><button data-open="factions" title="Factions">F Factions</button><button data-open="map" title="World map">M Map</button><button data-open="board" title="Leaderboard">Tab Ranks</button><button data-open="help" title="How to play">H Help</button>
+      <button data-open="skills" data-label="Skills" title="Skill trees">K Skills</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
     </div>
   </div>
   <div id="capture" class="abs box"><div id="captxt"></div><div class="bar"><i id="capbar" class="cap"></i></div></div>
@@ -42,17 +42,19 @@
 </div>
 
 <div id="skills" class="panel">
-  <h2><span>Skill Trees <small id="skpts"></small></span><span class="x" data-close>✕</span></h2>
+  <h2><span>Skill Trees <small id="skpts"></small></span><span><button id="resetBtn" class="small" title="Refund every skill point. Only works in Hanbin Haven.">Reset skill points</button> <span class="x" data-close>✕</span></span></h2>
   <div id="treetabs"></div>
   <div class="skillwrap"><div id="treeview"></div><div id="skinfo"></div></div>
 </div>
 <div id="factions" class="panel"><h2><span>Factions</span><span class="x" data-close>✕</span></h2><div id="facbody"></div></div>
 <div id="board" class="panel"><h2><span>Leaderboard</span><span class="x" data-close>✕</span></h2><div id="boardbody"></div></div>
+<div id="keys" class="panel"><h2><span>Keybinds</span><span class="x" data-close>✕</span></h2><div id="keysbody"></div></div>
 <div id="map" class="panel"><h2><span>Map of Hanbin Island</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas></div>
 <div id="help" class="panel">
   <h2><span>How to play</span><span class="x" data-close>✕</span></h2>
   <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Use skills</b> <kbd>1</kbd>–<kbd>0</kbd>, <kbd>Left click</kbd> = slot 1, <kbd>Right click</kbd> = slot 2 (hold to repeat)</p>
   <p><kbd>K</kbd> skills · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> leaderboard · <kbd>Enter</kbd> chat (<code>/f message</code> for faction chat) · <kbd>Esc</kbd> close</p>
+  <p>These are the default keys. Change any of them under <b>Keybinds</b> (<kbd>O</kbd>). You can reset your skill points for free in the Skill Trees panel, but only while standing in Hanbin Haven.</p>
   <p><b>Soma</b> is permanent and never capped. Every soma tier gives a skill point, and every 5 tiers unlocks another hotbar slot (up to 10).</p>
   <p><b>Valor</b> is capped and sets your rank, from Peasant to King. Your armour improves with rank. You lose 75% of your valor when you die.</p>
   <p>Earn both by slaying monsters and players and by conquering castles. Danger (◆) rises toward the coasts, and so do the rewards.</p>

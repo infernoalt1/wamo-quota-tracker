@@ -93,6 +93,11 @@ i.hp { background:linear-gradient(#e0504a,#9a1e18); } i.en { background:linear-g
 .slotpick button { min-width:44px; }
 .slotpick button.on { border-color:#fff; background:#43381c; }
 #factions { width:min(540px,96vw); }
+#keys { width:min(520px,96vw); font-size:14px; }
+.keygrid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px 10px; align-items:center; }
+.keybtn { min-width:84px; font-family:monospace; font-size:13px; }
+.keybtn.wait { border-color:#9fe07a; color:#9fe07a; animation:pulse 1s infinite; }
+button.small { font-size:12px; padding:3px 8px; vertical-align:middle; }
 #board { width:min(580px,96vw); }
 #help { width:min(660px,96vw); font-size:14px; line-height:1.5; }
 #help p { margin:7px 0; }
