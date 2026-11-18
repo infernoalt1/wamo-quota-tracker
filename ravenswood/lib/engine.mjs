@@ -56,17 +56,18 @@ function roleInfo(g,p,target){
  if(target.id===p.id)return p.shown;
  const truth=seenRole(g,target,p);return impaired(g,p)?discretion(g,`${label(p.shown)}: impaired information`,truth,evil(target)?goodCover(target,p):pick(ofType('minion'))):truth;
 }
-const seat=(name,session,id=crypto.randomUUID(),avatar=null,avatarHidden=false)=>({id,session,name,avatar,avatarHidden,alive:true,ghost:true,inbox:[],claim:'',ready:false});
+// `account` and `look` come from the player's optional account: a username and the decorations they wear.
+const seat=(name,session,id=crypto.randomUUID(),avatar=null,avatarHidden=false,account=null,look=null)=>({id,session,name,avatar,avatarHidden,account,look,alive:true,ghost:true,inbox:[],claim:'',ready:false});
 const lobby=settings=>({phase:'lobby',day:0,events:[],messages:[],groups:[],decisions:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],drunks:[],woke:[],innkeep:[],deadline:null,paused:false,settings});
-export function newGame(code,name,session,avatar=null){
- const p=seat(name,session,undefined,avatar);
+export function newGame(code,name,session,avatar=null,{account=null,look=null}={}){
+ const p=seat(name,session,undefined,avatar,false,account,look);
  return {code,host:p.id,players:[p],round:1,...lobby({daySeconds:240,voteSeconds:40,script:'tb'}),created:Date.now()};
 }
-export function join(g,name,session,avatar=null){
+export function join(g,name,session,avatar=null,{account=null,look=null}={}){
  const existing=g.players.find(p=>p.session===session);if(existing)return existing;
  assert(g.phase==='lobby','This game has already started.');assert(g.players.length<15,'This table is full.');
  assert(!g.players.some(p=>p.name.toLowerCase()===name.toLowerCase()),'That name is already seated.');
- const p=seat(name,session,undefined,avatar);g.players.push(p);return p;
+ const p=seat(name,session,undefined,avatar,false,account,look);g.players.push(p);return p;
 }
 function unseat(g,p){
  g.players=g.players.filter(x=>x!==p);
@@ -77,7 +78,7 @@ function unseat(g,p){
 function rematch(g){
  const {code,host,players,round,settings,created,phase}=g;
  for(const key of Object.keys(g))delete g[key];
- Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id,p.avatar,p.avatarHidden)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
+ Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id,p.avatar,p.avatarHidden,p.account,p.lookNext!==undefined?p.lookNext:p.look)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
 }
 export function start(g,forcedRoles){
  assert(COUNTS[g.players.length],'Gather 5–15 players to begin.');
@@ -541,7 +542,7 @@ export function view(g,session){
  const ended=g.phase==='ended';
  const groups=g.groups.filter(c=>c.members.includes(me.id));
  return {code:g.code,round:g.round,interrupted:g.interrupted,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
- players:g.players.map(p=>({id:p.id,name:p.name,avatar:p.avatarHidden?null:p.avatar||null,pictured:!!p.avatar,avatarHidden:!!p.avatarHidden,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown,evil:evil(p)}: {})})),
+ players:g.players.map(p=>({id:p.id,name:p.name,account:p.account||null,look:p.look||null,avatar:p.avatarHidden?null:p.avatar||null,pictured:!!p.avatar,avatarHidden:!!p.avatarHidden,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown,evil:evil(p)}: {})})),
  me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox,moonPending:!!me.moonPending,statementUsed:me.statementDay===g.day},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
  nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,

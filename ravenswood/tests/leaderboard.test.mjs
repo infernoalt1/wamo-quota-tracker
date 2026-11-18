@@ -4,14 +4,23 @@ import express from 'express';
 import { newGame, join, start, act, kill, view, results } from '../lib/engine.mjs';
 import { mountLeaderboard, MIN_GAMES } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
+import { botcApi } from '../server.mjs';
+import { lookOf, progressOf } from '../lib/cosmetics.mjs';
 
 // The same interface as the Postgres store, held in memory.
 function memoryStore(){
   const accounts=[],games=[],rows=[];
   return {
     accounts,games,rows,
-    add(username){const a={id:crypto.randomUUID(),username,key:keyOf(username),session:crypto.randomUUID(),avatar_version:0,pictured:false};accounts.push(a);return a;},
+    items:[],
+    add(username){const a={id:crypto.randomUUID(),username,key:keyOf(username),session:crypto.randomUUID(),avatar_version:0,pictured:false,look:null};accounts.push(a);return a;},
+    async create({id,username,key,session}){if(accounts.some(a=>a.key===key||a.session===session))return null;const a={id,username,key,session,password_hash:'x',avatar_version:0,pictured:false,look:null};accounts.push(a);return {...a};},
     byKey:async key=>accounts.find(a=>a.key===key)||null,
+    bySession:async session=>{const a=accounts.find(x=>x.session===session);return a?{...a}:null;},
+    async setLook(id,look){const a=accounts.find(x=>x.id===id);a.look=look;return {...a};},
+    wonSince:async(ids,since)=>new Set(rows.filter(r=>r.won&&ids.includes(r.account)&&games.find(g=>g.id===r.game_id).ended_at>=since).map(r=>r.account)),
+    async wallet(id){const mine=this.items.filter(i=>i.account===id);return {earned:rows.filter(r=>r.account===id).reduce((n,r)=>n+(r.points||0),0),spent:mine.reduce((n,i)=>n+i.price,0),owned:mine.map(i=>i.item)};},
+    async buy(id,item,price){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(w.earned-w.spent<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
     accountIds:async sessions=>new Map(accounts.filter(a=>sessions.includes(a.session)).map(a=>[a.session,a.id])),
     async saveGame({players,...game}){if(games.some(g=>g.id===game.id))throw Error('duplicate key');games.push({...game,ended_at:new Date(Date.now()+games.length)});for(const p of players)rows.push({game_id:game.id,...p});},
     async totals(script){
@@ -54,7 +63,7 @@ test('a finished game with three accounts is saved, and guests are left out',asy
   assert.deepEqual({script:store.games[0].script,winner:store.games[0].winner,size:store.games[0].size},{script:'tb',winner:'good',size:5});
   assert.equal(store.rows.length,3);
   assert.deepEqual(store.rows.map(r=>[r.role,r.won,r.evil]),[['chef',true,false],['soldier',true,false],['slayer',true,false]]);
-  assert.deepEqual(board.statusFor(saved,sessions[0]),{status:'saved',counted:true,needed:3});
+  const {points,...status}=board.statusFor(saved,sessions[0]);assert.deepEqual(status,{status:'saved',counted:true,needed:3});assert.equal(points.total,45);
   assert.deepEqual(board.statusFor(saved,sessions[4]),{status:'saved',counted:false,needed:3});
 });
 test('a game with fewer than three accounts does not count',async()=>{
@@ -116,8 +125,8 @@ async function serve(store){
   return {get,close:()=>server.close()};
 }
 // Records finished games directly: `wins` of `games` won, as the given side and game mode.
-async function played(store,account,games,wins,{evil=false,script='tb',role='chef',demon=false}={}){
-  for(let i=0;i<games;i++)await store.saveGame({id:crypto.randomUUID(),script,winner:'good',reason:'',size:5,players:[{account:account.id,role,initialRole:role,evil,won:i<wins,survived:i%2===0,demon}]});
+async function played(store,account,games,wins,{evil=false,script='tb',role='chef',demon=false,points=0,survived}={}){
+  for(let i=0;i<games;i++)await store.saveGame({id:crypto.randomUUID(),script,winner:'good',reason:'',size:5,players:[{account:account.id,role,initialRole:role,evil,won:i<wins,survived:survived??i%2===0,demon,points}]});
 }
 test('the leaderboard ranks by win rate from five games, then lists everyone else',async()=>{
   const store=memoryStore(),[ana,bo,cy,di]=['Ana','Bo','Cy','Di'].map(n=>store.add(n));
@@ -163,4 +172,74 @@ test('a database failure on the leaderboard does not leak details',async()=>{
   const store=memoryStore();store.totals=async()=>{throw Error('password authentication failed for user secret');};
   const s=await serve(store),quiet=console.error;console.error=()=>{};
   try{const r=await s.get('/leaderboard');assert.equal(r.status,503);assert.doesNotMatch(JSON.stringify(r.data),/secret/);}finally{console.error=quiet;s.close();}
+});
+
+const evilWins=g=>{g.poison=null;[0,1,2].forEach(i=>kill(g,g.players[i],'slayer'));assert.equal(g.winner,'evil');};
+const nextGame=(load,host,end)=>{const g=load('ABCDEFGH');act(g,host,{type:'rematch'});start(g,ROLES5);end(g);return g;};
+test('winners earn the most, and Demon wins and the first win of the day add a bonus',async()=>{
+  const store=memoryStore(),{save,load,board}=harness(store),{g,sessions}=table(store,5);
+  goodWins(g);save(g);await settled();
+  assert.deepEqual(store.rows.map(r=>r.points),[45,45,45,5,5]);
+  assert.deepEqual(board.statusFor(load('ABCDEFGH'),sessions[0]).points,{total:45,parts:[['Finished the game',5],['Your team won',25],['First win today',15]]});
+  save(nextGame(load,sessions[0],evilWins));await settled();
+  assert.deepEqual(store.rows.slice(5).map(r=>r.points),[5,5,5,45,55]);
+  save(nextGame(load,sessions[0],goodWins));await settled();
+  assert.deepEqual(store.rows.slice(10).map(r=>r.points),[30,30,30,5,5]);
+});
+test('decorations that no longer exist simply disappear',()=>{
+  assert.deepEqual(lookOf({frame:'nope',color:'ash',title:'brass'}),{color:'ash'});
+  assert.equal(lookOf({frame:'constructor'}),null);
+  assert.equal(progressOf([{won:true,demon:true,evil:true,survived:false,initial_role:'imp'}]).demon_wins,1);
+});
+
+async function shop(){
+  const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store}));
+  const server=await new Promise(done=>{const s=app.listen(0,'127.0.0.1',()=>done(s));});
+  const base=`http://127.0.0.1:${server.address().port}/botc/api/game`;
+  const browser=()=>{let cookie='';return async(path,body)=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(cookie?{cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)}),set=r.headers.get('set-cookie');if(set)cookie=set.split(';')[0];return {status:r.status,data:await r.json()};};};
+  const member=async name=>{const call=browser();await call('/account/register',{username:name,password:'hunter22'});return {call,account:store.accounts.find(a=>a.username===name)};};
+  return {store,browser,member,close:()=>server.close()};
+}
+const shopTest=(name,fn)=>test(name,async()=>{const s=await shop();try{await fn(s);}finally{s.close();}});
+shopTest('the shop needs an account, and sells only what you can afford',async({store,browser,member})=>{
+  assert.equal((await browser()('/shop')).status,401);
+  const {call,account}=await member('Ana');
+  let r=await call('/shop');assert.equal(r.status,200);assert.equal(r.data.balance,0);assert.deepEqual(r.data.look,{});assert.equal(r.data.daily.ready,true);
+  assert.equal((await call('/shop/buy',{item:'brass'})).status,400);
+  await played(store,account,5,5,{points:30});
+  r=await call('/shop/buy',{item:'brass'});
+  assert.equal(r.status,200);assert.equal(r.data.balance,30);assert.deepEqual(r.data.owned,['brass']);assert.deepEqual(r.data.look,{frame:'brass'});assert.equal(r.data.later,false);
+  r=await call('/shop/buy',{item:'brass'});assert.equal(r.data.balance,30);
+  for(const item of ['demon_crown','__proto__','constructor',42])assert.equal((await call('/shop/buy',{item})).status,400);
+  assert.equal((await call('/shop/buy',{item:'nightshade'})).status,400);
+  assert.equal((await call('/account')).data.account.look.frame,'brass');
+});
+shopTest('you can only wear what you own or have earned, and can take things off',async({store,member})=>{
+  const {call,account}=await member('Ana');
+  assert.equal((await call('/shop/equip',{kind:'frame',item:'nightshade'})).status,400);
+  assert.equal((await call('/shop/equip',{kind:'frame',item:'demon_crown'})).status,400);
+  assert.equal((await call('/shop/equip',{kind:'frame',item:'ash'})).status,400);
+  assert.equal((await call('/shop/equip',{kind:'hat',item:null})).status,400);
+  await played(store,account,10,10,{evil:true,demon:true,role:'imp',survived:false});
+  let r=await call('/shop/equip',{kind:'frame',item:'demon_crown'});
+  assert.equal(r.status,200);assert.deepEqual(r.data.look,{frame:'demon_crown'});assert.equal(r.data.progress.demon_wins,10);
+  r=await call('/shop/equip',{kind:'color',item:'ghostlight'});assert.deepEqual(r.data.look,{frame:'demon_crown',color:'ghostlight'});
+  r=await call('/shop/equip',{kind:'frame',item:null});assert.deepEqual(r.data.look,{color:'ghostlight'});
+});
+shopTest('seats show the account and look, and a change made mid-game waits for the next game',async({store,member})=>{
+  const ana=await member('Ana'),others=await Promise.all(['Bo','Cy','Di','Ed'].map(member));
+  await played(store,ana.account,10,10,{points:30});
+  await ana.call('/shop/buy',{item:'brass'});
+  const game=(await ana.call('/',{type:'create',name:'Ana'})).data,code=game.code;
+  for(const o of others)await o.call('/',{type:'join',name:o.account.username,code});
+  let seen=(await others[0].call(`?code=${code}`)).data.players[0];
+  assert.equal(seen.account,'Ana');assert.deepEqual(seen.look,{frame:'brass'});
+  await ana.call('/shop/equip',{kind:'color',item:null});
+  await ana.call('/',{type:'start',code});
+  const r=await ana.call('/shop/buy',{item:'nightshade'});
+  assert.equal(r.data.later,true);assert.deepEqual(r.data.look,{frame:'nightshade'});
+  assert.deepEqual((await others[0].call(`?code=${code}`)).data.players[0].look,{frame:'brass'});
+  await ana.call('/',{type:'rematch',code});
+  assert.deepEqual((await others[0].call(`?code=${code}`)).data.players[0].look,{frame:'nightshade'});
+  assert.equal((await others[0].call(`?code=${code}`)).data.players[1].account,'Bo');
 });

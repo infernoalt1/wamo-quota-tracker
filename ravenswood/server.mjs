@@ -4,6 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { newGame, join, act, tick, view } from './lib/engine.mjs';
 import { mountAccounts, defaultStore } from './lib/accounts.mjs';
 import { mountLeaderboard } from './lib/leaderboard.mjs';
+import { mountShop } from './lib/shop.mjs';
 
 const ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_TTL=6*60*60*1000;
@@ -39,6 +40,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
   router.use(express.json({limit:'4kb'}));
   const accounts=mountAccounts(router,{store,rooms,identity,setSession});
   const leaderboard=mountLeaderboard(router,{store,rooms});
+  mountShop(router,{store,identity,accounts});
   router.get('/',(req,res)=>{try{
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.
@@ -54,17 +56,17 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).json({error:'Use the game website to submit actions.'});
     const data=req.body,session=identity(req)||randomUUID();
     setSession(req,res,session);
-    const avatar=['create','join'].includes(data.type)?await accounts.avatarFor(session):null;
+    const {avatar=null,...who}=['create','join'].includes(data.type)?await accounts.seatFor(session):{};
     if(data.type==='create'){
       const name=nameOf(data.name);
       if(rooms.size>=500)throw Error('The town is full. Please try again later.');
       if([...rooms.values()].filter(r=>Date.now()-r.updated<3600000&&r.state.includes(session)).length>=8)throw Error('You have several recent tables. Rejoin one or try later.');
       let code;do{code=Array.from(randomBytes(8),n=>ALPHABET[n%ALPHABET.length]).join('');}while(rooms.has(code));
-      const game=newGame(code,name,session,avatar);save(code,game);
+      const game=newGame(code,name,session,avatar,who);save(code,game);
       return send(req,res,game,session);
     }
     const code=codeOf(data.code),game=load(code);
-    if(data.type==='join')join(game,nameOf(data.name),session,avatar);
+    if(data.type==='join')join(game,nameOf(data.name),session,avatar,who);
     else{
       view(game,session);
       // Commit elapsed transitions independently: stale actions may fail but cannot rewind time.

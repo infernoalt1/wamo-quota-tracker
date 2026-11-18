@@ -2,11 +2,12 @@
 import pg from 'pg';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
+import { lookOf } from './cosmetics.mjs';
 
 const MAX_PICTURE=48*1024;
 const MINUTE=60*1000;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
-const COLUMNS='id,username,password_hash,session,avatar_version,avatar IS NOT NULL AS pictured';
+const COLUMNS='id,username,password_hash,session,avatar_version,avatar IS NOT NULL AS pictured,look';
 const SCHEMA=`CREATE TABLE IF NOT EXISTS botc_accounts(
   id UUID PRIMARY KEY,
   username TEXT NOT NULL,
@@ -36,9 +37,18 @@ CREATE TABLE IF NOT EXISTS botc_game_players(
   demon BOOLEAN NOT NULL,
   PRIMARY KEY(game_id,account_id)
 );
-CREATE INDEX IF NOT EXISTS botc_game_players_account ON botc_game_players(account_id)`;
+CREATE INDEX IF NOT EXISTS botc_game_players_account ON botc_game_players(account_id);
+ALTER TABLE botc_accounts ADD COLUMN IF NOT EXISTS look JSONB;
+ALTER TABLE botc_game_players ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS botc_items(
+  account_id UUID NOT NULL REFERENCES botc_accounts(id) ON DELETE CASCADE,
+  item TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  bought_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(account_id,item)
+)`;
 // Totals per account; the leaderboard works out rates and ranks from these.
-const TOTALS=`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,
+const TOTALS=`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,a.look,
   count(*)::int AS games,count(*) FILTER(WHERE p.won)::int AS wins,
   count(*) FILTER(WHERE NOT p.evil)::int AS good_games,count(*) FILTER(WHERE NOT p.evil AND p.won)::int AS good_wins,
   count(*) FILTER(WHERE p.evil)::int AS evil_games,count(*) FILTER(WHERE p.evil AND p.won)::int AS evil_wins,
@@ -47,7 +57,8 @@ FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts 
 WHERE $1::text IS NULL OR g.script=$1 GROUP BY a.id`;
 export function pgStore(pool){
   let ready;
-  const query=async(sql,args)=>{ready||=pool.query(SCHEMA).catch(e=>{ready=null;throw e;});await ready;return (await pool.query(sql,args)).rows;};
+  const prepare=()=>ready||=pool.query(SCHEMA).catch(e=>{ready=null;throw e;});
+  const query=async(sql,args)=>{await prepare();return (await pool.query(sql,args)).rows;};
   const one=async(sql,args)=>(await query(sql,args))[0]||null;
   return {
     async create({id,username,key,hash,session}){
@@ -62,14 +73,36 @@ export function pgStore(pool){
     // One statement, so a game is saved with all its players or not at all.
     async saveGame({id,script,winner,reason,size,players}){
       await query(`WITH game AS (INSERT INTO botc_games(id,script,winner,reason,players) VALUES($1,$2,$3,$4,$5))
-        INSERT INTO botc_game_players(game_id,account_id,role,initial_role,evil,won,survived,demon)
-        SELECT $1,account_id,role,initial_role,evil,won,survived,demon FROM jsonb_to_recordset($6::jsonb)
-        AS x(account_id UUID,role TEXT,initial_role TEXT,evil BOOLEAN,won BOOLEAN,survived BOOLEAN,demon BOOLEAN)`,
-        [id,script,winner,reason,size,JSON.stringify(players.map(p=>({account_id:p.account,role:p.role,initial_role:p.initialRole,evil:p.evil,won:p.won,survived:p.survived,demon:p.demon})))]);
+        INSERT INTO botc_game_players(game_id,account_id,role,initial_role,evil,won,survived,demon,points)
+        SELECT $1,account_id,role,initial_role,evil,won,survived,demon,points FROM jsonb_to_recordset($6::jsonb)
+        AS x(account_id UUID,role TEXT,initial_role TEXT,evil BOOLEAN,won BOOLEAN,survived BOOLEAN,demon BOOLEAN,points INTEGER)`,
+        [id,script,winner,reason,size,JSON.stringify(players.map(p=>({account_id:p.account,role:p.role,initial_role:p.initialRole,evil:p.evil,won:p.won,survived:p.survived,demon:p.demon,points:p.points||0})))]);
     },
     totals:script=>query(TOTALS,[script||null]),
     history:id=>query(`SELECT g.script,g.ended_at,g.players,p.role,p.initial_role,p.evil,p.won,p.survived,p.demon
       FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id WHERE p.account_id=$1 ORDER BY g.ended_at DESC`,[id]),
+    setLook:(id,look)=>one(`UPDATE botc_accounts SET look=$2 WHERE id=$1 RETURNING ${COLUMNS}`,[id,look&&JSON.stringify(look)]),
+    wonSince:async(ids,since)=>new Set((await query(`SELECT DISTINCT p.account_id FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id
+      WHERE p.won AND p.account_id=ANY($1::uuid[]) AND g.ended_at>=$2`,[ids,since])).map(r=>r.account_id)),
+    wallet:id=>one(`SELECT (SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1) AS earned,
+      (SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1) AS spent,
+      (SELECT coalesce(array_agg(item),'{}') FROM botc_items WHERE account_id=$1) AS owned`,[id]),
+    // Locking the account row makes two purchases at once take turns, so points cannot be spent twice.
+    async buy(id,item,price){
+      await prepare();
+      const client=await pool.connect();
+      try{
+        await client.query('BEGIN');
+        await client.query('SELECT 1 FROM botc_accounts WHERE id=$1 FOR UPDATE',[id]);
+        const w=(await client.query(`SELECT (SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1)-(SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1) AS balance,
+          EXISTS(SELECT 1 FROM botc_items WHERE account_id=$1 AND item=$2) AS owned`,[id,item])).rows[0];
+        const result=w.owned?'owned':w.balance<price?'short':'bought';
+        if(result==='bought')await client.query('INSERT INTO botc_items(account_id,item,price) VALUES($1,$2,$3)',[id,item,price]);
+        await client.query('COMMIT');
+        return result;
+      }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+      finally{client.release();}
+    },
   };
 }
 // Without a database the game still works: everyone simply plays as a guest.
@@ -81,11 +114,17 @@ export function defaultStore(){
 }
 const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
 export const pictureOf=a=>a?.pictured?`${a.id}?v=${a.avatar_version}`:null;
-const summary=a=>a?{username:a.username,avatar:pictureOf(a)}:null;
+const summary=a=>a?{username:a.username,avatar:pictureOf(a),look:lookOf(a.look)}:null;
 export const keyOf=username=>username.toLocaleLowerCase('en');
 export function usernameOf(value){const v=String(value||'').normalize('NFKC').trim().replace(/\s+/g,' ');if(!/^[\p{L}\p{N}][\p{L}\p{N} _.-]{1,19}$/u.test(v))throw refuse('Usernames are 2–20 letters or numbers.');return v;}
 function passwordOf(value){const v=String(value||'');if(v.length<6||Buffer.byteLength(v)>72)throw refuse('Passwords are 6–72 characters.');return v;}
 function jpegOf(image){const m=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(image)),bytes=m&&Buffer.from(m[1],'base64');if(!bytes||bytes.length>MAX_PICTURE||bytes[0]!==0xff||bytes[1]!==0xd8||bytes[2]!==0xff)throw refuse('Please choose a different picture.');return bytes;}
+// Decorations cannot change mid-game: chat closes at night, so a change could be a secret signal.
+// A change made during a game waits on the seat and is worn from the next game on.
+export function dress(seat,game,look){
+  if(!['lobby','ended'].includes(game.phase)){seat.lookNext=look;return true;}
+  seat.look=look;delete seat.lookNext;return false;
+}
 const clientOf=req=>req.headers['x-forwarded-for']?.split(',').at(-1).trim()||req.socket.remoteAddress||'';
 
 export function mountAccounts(router,{store,rooms,identity,setSession}){
@@ -139,7 +178,7 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
     if(!account||!await bcrypt.compare(String(req.body?.password||''),account.password_hash))throw refuse('Wrong username or password.',401);
     hits.delete(attempts);
     const guest=identity(req);
-    if(guest&&guest!==account.session&&!await store.bySession(guest))eachSeat(guest,(seat,game)=>{if(game.players.some(p=>p.session===account.session))return false;seat.session=account.session;seat.avatar=pictureOf(account);});
+    if(guest&&guest!==account.session&&!await store.bySession(guest))eachSeat(guest,(seat,game)=>{if(game.players.some(p=>p.session===account.session))return false;seat.session=account.session;seat.avatar=pictureOf(account);seat.account=account.username;dress(seat,game,lookOf(account.look));});
     setSession(req,res,account.session);
     res.json({account:summary(account),room:latestRoom(account.session)});
   }));
@@ -158,5 +197,10 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
     res.setHeader('Content-Type','image/jpeg');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','public, max-age=31536000, immutable');
     res.end(bytes);
   }));
-  return {avatarFor:async session=>{if(!store)return null;try{return pictureOf(await store.bySession(session));}catch{return null;}}};
+  // What a seat shows for its account. A database hiccup just seats the player as a guest.
+  async function seatFor(session){
+    if(!store)return {};
+    try{const a=await store.bySession(session);return a?{avatar:pictureOf(a),account:a.username,look:lookOf(a.look)}:{};}catch{return {};}
+  }
+  return {seatFor,eachSeat};
 }

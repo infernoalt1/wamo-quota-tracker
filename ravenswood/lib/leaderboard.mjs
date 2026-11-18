@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { results } from './engine.mjs';
 import { SCRIPTS } from './characters.mjs';
 import { pictureOf, keyOf, usernameOf } from './accounts.mjs';
+import { POINTS, lookOf } from './cosmetics.mjs';
 
 // With fewer accounts at the table, one person with several browser profiles could farm wins.
 export const MIN_ACCOUNTS=3;
@@ -11,10 +12,20 @@ export const MIN_GAMES=5;
 
 const tally=rows=>({games:rows.length,wins:rows.filter(r=>r.won).length});
 const rate=(wins,games)=>games?wins/games:0;
+// The daily bonus resets at midnight UTC, the same moment for everyone.
+export const dayStart=(now=Date.now())=>new Date(Math.floor(now/86400000)*86400000);
+// Points for one player's game, itemised so the end screen can explain them.
+export function pointsFor(p,firstWinToday){
+  const parts=[['Finished the game',POINTS.finish]];
+  if(p.won)parts.push(['Your team won',POINTS.win]);
+  if(p.won&&p.demon)parts.push(['Won as the Demon',POINTS.demon]);
+  if(p.won&&firstWinToday)parts.push(['First win today',POINTS.daily]);
+  return {total:parts.reduce((n,[,v])=>n+v,0),parts};
+}
 const scriptOf=value=>value&&value!=='all'?(Object.hasOwn(SCRIPTS,value)?value:null):undefined;
 
 function standings(totals){
-  const players=totals.map(t=>({username:t.username,avatar:pictureOf(t),games:t.games,wins:t.wins,good:{games:t.good_games,wins:t.good_wins},evil:{games:t.evil_games,wins:t.evil_wins},demonWins:t.demon_wins}));
+  const players=totals.map(t=>({username:t.username,avatar:pictureOf(t),look:lookOf(t.look),games:t.games,wins:t.wins,good:{games:t.good_games,wins:t.good_wins},evil:{games:t.evil_games,wins:t.evil_wins},demonWins:t.demon_wins}));
   const ranked=players.filter(p=>p.games>=MIN_GAMES).sort((a,b)=>rate(b.wins,b.games)-rate(a.wins,a.games)||b.wins-a.wins||b.games-a.games||a.username.localeCompare(b.username));
   const unranked=players.filter(p=>p.games<MIN_GAMES).sort((a,b)=>b.games-a.games||b.wins-a.wins||a.username.localeCompare(b.username));
   return [...ranked.map((p,i)=>({rank:i+1,...p})),...unranked.map(p=>({rank:null,...p}))];
@@ -23,7 +34,7 @@ function profileOf(account,rows){
   const counts=new Map();
   for(const r of rows){const c=counts.get(r.initial_role)||[];c.push(r);counts.set(r.initial_role,c);}
   return {
-    username:account.username,avatar:pictureOf(account),...tally(rows),
+    username:account.username,avatar:pictureOf(account),look:lookOf(account.look),...tally(rows),
     survived:rows.filter(r=>r.survived).length,
     good:tally(rows.filter(r=>!r.evil)),evil:tally(rows.filter(r=>r.evil)),
     demonWins:rows.filter(r=>r.demon&&r.won).length,
@@ -61,8 +72,14 @@ export function mountLeaderboard(router,{store,rooms}){
       const rows=results(game),accounts=await store.accountIds(rows.map(r=>r.session));
       const players=rows.filter(r=>accounts.has(r.session)).map(({session,...r})=>({...r,account:accounts.get(session)}));
       if(players.length<MIN_ACCOUNTS)return settle(code,id,l=>{l.status='skipped';});
+      const wonToday=await store.wonSince(players.filter(p=>p.won).map(p=>p.account),dayStart());
+      const earned=new Map(players.map(p=>[p.account,pointsFor(p,!wonToday.has(p.account))]));
+      players.forEach(p=>{p.points=earned.get(p.account).total;});
       await store.saveGame({id,script:game.settings.script,winner:game.winner,reason:game.reason,size:rows.length,players});
-      settle(code,id,l=>{l.status='saved';l.sessions=rows.filter(r=>accounts.has(r.session)).map(r=>r.session);});
+      settle(code,id,l=>{
+        l.status='saved';l.sessions=rows.filter(r=>accounts.has(r.session)).map(r=>r.session);
+        l.points=Object.fromEntries(l.sessions.map(s=>[s,earned.get(accounts.get(s))]));
+      });
     }catch(e){console.error('BOTC leaderboard:',e.message);settle(code,id,l=>{l.status='failed';});}
   }
   return {
@@ -73,6 +90,6 @@ export function mountLeaderboard(router,{store,rooms}){
       const id=randomUUID();game.ledger={id,status:'pending',sessions:[]};
       queueMicrotask(()=>write(game.code,id,structuredClone(game)));
     },
-    statusFor:(game,session)=>game.ledger?{status:game.ledger.status,counted:game.ledger.sessions.includes(session),needed:MIN_ACCOUNTS}:null,
+    statusFor:(game,session)=>game.ledger?{status:game.ledger.status,counted:game.ledger.sessions.includes(session),needed:MIN_ACCOUNTS,...(game.ledger.points?.[session]?{points:game.ledger.points[session]}:{})}:null,
   };
 }
