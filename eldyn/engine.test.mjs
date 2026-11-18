@@ -48,7 +48,7 @@ test('skill trees have five trees, branching prerequisites and long cooldowns', 
 
 test('learning needs points, tier and the parent skill; passives stay off the hotbar', () => {
   const { game, p } = setup({ soma: 40 * 5 * 5 }); // tier 5
-  assert.equal(p.tier, 5); assert.equal(p.pts, 5);
+  assert.equal(p.tier, 5); assert.equal(p.pts, 6, 'one starting point plus one per tier');
   game.handle(p, { t: 'learn', id: 'whirlwind' }); // needs cleave first
   assert.ok(!p.skills.includes('whirlwind'));
   game.handle(p, { t: 'learn', id: 'cleave' });
@@ -61,12 +61,12 @@ test('learning needs points, tier and the parent skill; passives stay off the ho
   assert.equal(p.mods.melee, 1.15);
   game.handle(p, { t: 'hb', s: 4, id: 'heavy_blade' });
   assert.notEqual(p.hotbar[4], 'heavy_blade');
-  assert.equal(p.pts, 2);
+  assert.equal(p.pts, 3);
 });
 
 test('skill points can be reset, but only in the safe village', () => {
   const { game, p, msgs } = setup({ soma: 40 * 25, skills: ['cleave', 'parry', 'heavy_blade'], hotbar: ['slash', 'cleave', 'parry', 'arrow'] });
-  assert.equal(p.pts, 2);
+  assert.equal(p.pts, 3);
   p.x = CASTLES[0].x; p.y = CASTLES[0].y + 120;
   game.handle(p, { t: 'reset' });
   assert.ok(p.skills.includes('cleave'), 'refused outside the village');
@@ -74,7 +74,7 @@ test('skill points can be reset, but only in the safe village', () => {
   p.x = VILLAGE.x + 60; p.y = VILLAGE.y;
   game.handle(p, { t: 'reset' });
   assert.deepEqual(p.skills.sort(), ['arrow', 'slash']);
-  assert.equal(p.pts, 5);
+  assert.equal(p.pts, 6);
   assert.deepEqual(p.hotbar.slice(0, 4), ['slash', null, null, 'arrow']);
   assert.equal(p.mods.melee, 1);
 });
@@ -82,7 +82,7 @@ test('skill points can be reset, but only in the safe village', () => {
 test('skills beyond what the tier allows are refunded on join', () => {
   const { p } = setup({ soma: 40, skills: ['cleave', 'shield_bash', 'parry'], hotbar: ['slash', 'cleave', 'parry'] });
   assert.equal(p.tier, 1);
-  assert.equal(p.skills.filter((s) => !SKILLS[s].free).length, 1);
+  assert.equal(p.skills.filter((s) => !SKILLS[s].free).length, 2);
   assert.ok(p.hotbar.every((s) => !s || p.skills.includes(s)));
 });
 
@@ -170,4 +170,66 @@ test('server: sign up over HTTP, join over WebSocket, progress is saved on leave
     assert.equal(reply.t, 'auth');
     bad.close();
   } finally { h.close(); server.close(); }
+});
+
+test('valor ranks grant health and damage, and dying can cost them', () => {
+  const { game, p } = setup({ valor: 0 });
+  const base = p.maxhp;
+  game.gain(p, 2000, 0); // Count
+  assert.equal(p.rank, 5);
+  assert.equal(p.maxhp, Math.round(base * 1.2));
+  assert.ok(p.dmgMul > 1.07);
+  p.x = CASTLES[0].x + 600; p.y = CASTLES[0].y;
+  game.killPlayer(p, null);
+  assert.equal(p.rank, 2, '500 valor left is Soldier');
+  assert.equal(p.maxhp, Math.round(base * 1.1));
+});
+
+test('recall needs Knight rank, takes a channel, and moving cancels it', () => {
+  const { game, p, advance } = setup({ valor: 100 });
+  const away = { x: CASTLES[0].x, y: CASTLES[0].y + 300 };
+  Object.assign(p, away);
+  game.handle(p, { t: 'recall' });
+  assert.equal(p.channel, null, 'Squire cannot recall');
+  game.gain(p, 600, 0);
+  game.handle(p, { t: 'recall' });
+  assert.ok(p.channel);
+  p.x += 40; advance(50); game.tick();
+  assert.equal(p.channel, null, 'moving cancels');
+  Object.assign(p, away);
+  game.handle(p, { t: 'recall' });
+  const tp = p.tp;
+  for (let i = 0; i < 170; i++) { advance(50); game.tick(); }
+  assert.ok(Math.hypot(p.x - VILLAGE.x, p.y - VILLAGE.y) < VILLAGE.r);
+  assert.ok(p.tp > tp, 'client is told about the teleport');
+});
+
+test('client movement is limited by speed and walls', () => {
+  const { game, p, advance } = setup();
+  const c = CASTLES[0], H = WORLD.CASTLE_HALF;
+  p.x = c.x - H - 60; p.y = c.y;
+  for (let i = 0; i < 10; i++) { advance(50); game.tick(); }
+  const x0 = p.x;
+  game.handle(p, { t: 'in', a: 0, x: p.x + 1000, y: p.y, tp: p.tp });
+  assert.ok(p.x - x0 <= 190 * 0.5 + 1, 'no teleporting');
+  for (let i = 0; i < 20; i++) { advance(50); game.tick(); game.handle(p, { t: 'in', a: 0, x: p.x + 20, y: p.y, tp: p.tp }); }
+  assert.ok(p.x < c.x - H + 1, 'the wall still blocks');
+  const x1 = p.x;
+  game.handle(p, { t: 'in', a: 0, x: p.x - 10, y: p.y, tp: p.tp - 1 });
+  assert.equal(p.x, x1, 'stale positions are ignored');
+});
+
+test('combos: fire shatters chilled foes and melee crushes stunned ones', () => {
+  const { game, p } = setup({ soma: 40000 });
+  const c = CASTLES[0];
+  p.x = c.x + 700; p.y = c.y;
+  const n = game.mkNpc('ogre', p.x + 40, p.y, {});
+  game.gridBuild();
+  const base = game.dealDamage(p, n, 20, { premul: true });
+  n.hp = n.maxhp; n.chillUntil = game.T + 1000;
+  const shatter = game.dealDamage(p, n, 20, { premul: true, el: 'fire' });
+  assert.equal(shatter, Math.round(base * 1.6));
+  assert.equal(n.chillUntil, 0);
+  n.hp = n.maxhp; n.stunUntil = game.T + 1000;
+  assert.equal(game.dealDamage(p, n, 20, { premul: true, melee: true }), Math.round(base * 1.35));
 });

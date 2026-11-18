@@ -1,8 +1,9 @@
 // Hanbin Island browser client: sign-in, rendering, HUD and input.
 import {
   WORLD, REGIONS, CASTLES, VILLAGE, SKILLS, SKILL_LIST, TREES, MOBS, RANKS, ROADS, LAND_GRID, REGION_GRID, GW, GH, RC,
-  rankOf, somaForTier, regionAt, moveBody, landValue, noise, fbm, roadDist, propsIn, rng,
+  rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng, rankBonus, RECALL_RANK, TRAVEL_RANK, COMBOS,
 } from './shared.mjs';
+import { BIOME_RGB, chunkPixels } from './terrain.mjs';
 import { creature, playerLook, banner, prop, castleBase, castleTop, villageBase, villageTop, CASTLE_SPRITE_SIZE, VILLAGE_SPRITE_SIZE } from './sprites.mjs';
 
 const { W: WW, H: WH, CASTLE_HALF: CH } = WORLD;
@@ -11,13 +12,25 @@ const cv = $('game'), ctx = cv.getContext('2d');
 const mini = $('mini'), mctx = mini.getContext('2d');
 let VW = innerWidth, VH = innerHeight, DPR = 1, zoom = 1;
 function resize() {
-  DPR = Math.min(2, devicePixelRatio || 1); VW = innerWidth; VH = innerHeight;
+  DPR = Math.min(1.5, devicePixelRatio || 1); VW = innerWidth; VH = innerHeight;
   cv.width = VW * DPR; cv.height = VH * DPR; cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
   zoom = Math.max(0.55, Math.min(1.6, Math.min(VW / 1500, VH / 840)));
+  vignette = null;
+}
+let vignette = null, vignetteHurt = false;
+// The edge shading is drawn once per size into its own canvas instead of every frame.
+function getVignette(hurt) {
+  if (vignette && vignetteHurt === hurt) return vignette;
+  const c = document.createElement('canvas'); c.width = Math.ceil(VW / 2); c.height = Math.ceil(VH / 2);
+  const x = c.getContext('2d'), w = c.width, h = c.height;
+  const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, hurt ? 'rgba(130,0,0,.45)' : 'rgba(0,0,0,.35)');
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  vignette = c; vignetteHurt = hurt;
+  return c;
 }
 addEventListener('resize', resize); resize();
 
-const BIOME_RGB = { grass: [92, 148, 64], forest: [70, 126, 56], darkforest: [48, 92, 52], snow: [228, 236, 242], rock: [132, 128, 120], ash: [86, 74, 70], swamp: [86, 104, 66], desert: [218, 190, 126], heath: [140, 146, 78] };
 const BIOME_NAME = { grass: 'Meadows', forest: 'Forest', darkforest: 'Deep forest', snow: 'Tundra', rock: 'Highlands', ash: 'Ashlands', swamp: 'Marsh', desert: 'Dunes', heath: 'Heath' };
 const STATUS = [[1, '💫', 'Stunned'], [4, '🐌', 'Slowed'], [8, '📉', 'Weakened'], [16, '⬆️', 'Rallied'], [32, '🛡️', 'Shielded'], [128, '🌿', 'Regenerating']];
 const TALL = new Set(['tree', 'pine', 'dead', 'cactus']);
@@ -114,24 +127,29 @@ function handle(m) {
 }
 function onSnap(m) {
   const prevH = me.h;
-  Object.assign(me, m.me);
-  me.sx = m.me.x; me.sy = m.me.y;
-  if (!me.init) { me.x = me.sx; me.y = me.sy; me.init = true; }
+  // Your own position is predicted locally; only take the server's after a forced move (dash, knockback,
+  // teleport, respawn) or if the two have drifted far apart.
+  const { x, y, ...rest } = m.me;
+  Object.assign(me, rest);
+  me.sx = x; me.sy = y;
+  if (!me.init || m.me.tp !== me.tpSeen || Math.hypot(x - me.x, y - me.y) > 220) { me.x = x; me.y = y; me.init = true; me.tpSeen = m.me.tp; }
   if (me.h < prevH) me.flash = performance.now();
   for (const [id, c] of m.me.cd) cdReady[id] = performance.now() + c;
   seq++;
   const now = performance.now();
   for (const e of m.e) {
     let o = ents.get(e.i);
-    if (!o) { o = { x: e.x, y: e.y, ph: Math.random() * 6, h: e.h }; ents.set(e.i, o); }
+    if (!o) { o = { x: e.x, y: e.y, ph: Math.random() * 6, h: e.h, buf: [] }; ents.set(e.i, o); }
     if (e.h < o.h) o.flash = now;
-    o.tx = e.x; o.ty = e.y; o.k = e.k; o.a = e.a; o.h = e.h; o.m = e.m; o.fl = e.fl; o.n = e.n; o.f = e.f; o.rk = e.rk; o.ow = e.ow; o.wp = e.wp; o.at = e.at; o.sp = e.sp; o.seq = seq; o.id = e.i;
+    o.buf.push([now, e.x, e.y]); if (o.buf.length > 8) o.buf.shift();
+    o.k = e.k; o.a = e.a; o.h = e.h; o.m = e.m; o.fl = e.fl; o.n = e.n; o.f = e.f; o.rk = e.rk; o.ow = e.ow; o.wp = e.wp; o.at = e.at; o.sp = e.sp; o.seq = seq; o.id = e.i;
   }
   for (const [id, o] of ents) if (o.seq !== seq) ents.delete(id);
   projs = m.pr; zones = m.zs;
   for (const f of m.fx) {
     if (f.t === 'dmg') floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: '#ffd0c0', t0: now, life: 800 });
     else if (f.t === 'heal') floaters.push({ x: f.x, y: f.y, txt: '+' + f.v, c: '#8fe8a0', t0: now, life: 900 });
+    else if (f.t === 'combo') floaters.push({ x: f.x, y: f.y, txt: f.txt + '!', c: '#ffe066', t0: now, life: 1100, big: 1 });
     else { f.t0 = now; f.seed = Math.random() * 1000; fxs.push(f); }
   }
 }
@@ -309,6 +327,15 @@ function renderFactions() {
 }
 function renderBoard() {
   const b = $('boardbody'); b.innerHTML = '';
+  b.appendChild(el('h4', '', 'Rank rewards'));
+  b.appendChild(el('p', 'dim', 'Valor sets your rank. Each rank keeps the rewards below it, but dying costs 75% of your valor, so you can lose them.'));
+  const cur = rankOf(me.v).idx, rt = el('table', 'lb ranks');
+  RANKS.forEach((r, i) => {
+    const tr = el('tr', i <= cur ? 'got' : '');
+    [i <= cur ? '✓' : '', r.name, r.v, r.perk].forEach((v) => tr.appendChild(el('td', '', String(v))));
+    rt.appendChild(tr);
+  });
+  b.appendChild(rt);
   b.appendChild(el('h4', '', 'Top players online'));
   const t = el('table', 'lb'); t.innerHTML = '<tr><th>#</th><th>Name</th><th>Rank</th><th>Valor</th><th>Soma</th></tr>';
   meta.lb.forEach((p, i) => { const tr = el('tr'); const f = facInfo.get(p.f); [i + 1, (f ? `[${f.name}] ` : '') + p.n, rankOf(p.v).name, p.v, `T${p.t} (${p.s})`].forEach((v) => tr.appendChild(el('td', '', String(v)))); t.appendChild(tr); });
@@ -378,7 +405,20 @@ function renderMap() {
     m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = 'bold 12px Georgia';
   }
   m.fillStyle = '#fff'; m.strokeStyle = '#000'; m.lineWidth = 2; m.beginPath(); m.arc(me.x * sx, me.y * sy, 5, 0, 7); m.fill(); m.stroke();
+  const rk = rankOf(me.v).idx;
+  $('maphint').textContent = rk >= TRAVEL_RANK ? 'Click a castle your faction holds to travel there, or press ' + keyName(binds.recall) + ' to recall to Hanbin Haven.'
+    : rk >= RECALL_RANK ? 'Press ' + keyName(binds.recall) + " to recall to Hanbin Haven. Reach Baron to travel to your faction's castles."
+    : "Reach Knight to unlock Recall, and Baron to travel between your faction's castles.";
 }
+$('bigmap').addEventListener('click', (e) => {
+  const c = $('bigmap'), r = c.getBoundingClientRect(), wx = (e.clientX - r.left) / r.width * WW, wy = (e.clientY - r.top) / r.height * WH;
+  const hit = CASTLES.map((k) => [k, Math.hypot(k.x - wx, k.y - wy)]).sort((a, b) => a[1] - b[1])[0];
+  if (!hit || hit[1] > 350) return;
+  const k = hit[0];
+  if (rankOf(me.v).idx < TRAVEL_RANK) return toast('Fort travel unlocks at the rank of Baron.');
+  if (!prof.fac || owners.get(k.id) !== prof.fac) return toast('Your faction does not hold ' + k.name + '.');
+  send({ t: 'travel', id: k.id }); togglePanel('map');
+});
 
 // ------------------------------------------------------------------ input
 const worldMouse = () => ({ x: me.x + (mouseX - VW / 2) / zoom, y: me.y + (mouseY - VH / 2) / zoom });
@@ -388,7 +428,7 @@ const ACTIONS = [
   ['up', 'Move up', 'KeyW'], ['down', 'Move down', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
   ...Array.from({ length: 10 }, (_, i) => ['slot' + i, `Hotbar slot ${i + 1}`, 'Digit' + ((i + 1) % 10)]),
   ['skills', 'Skill trees', 'KeyK'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Leaderboard', 'Tab'],
-  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'],
+  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['recall', 'Recall to Haven (Knight)', 'KeyB'],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([id, , code]) => [id, code]));
 let binds = { ...DEFAULT_BINDS };
@@ -432,11 +472,16 @@ function renderKeys() {
   b.appendChild(reset);
 }
 function castSlot(s) { const w = worldMouse(); send({ t: 'cast', s, a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }); }
-let lastK = -1, lastA = 0, lastSent = 0;
+// Send our predicted position 20 times a second while it differs from what the server last confirmed.
+let lastA = 0, lastSent = 0, lastX = 0, lastY = 0;
 setInterval(() => {
-  if (!connected) return;
-  const k = mask(), a = aimAngle(), now = performance.now();
-  if (k !== lastK || Math.abs(a - lastA) > 0.04 || now - lastSent > 400) { send({ t: 'in', k, a: +a.toFixed(3) }); lastK = k; lastA = a; lastSent = now; }
+  if (!connected || !me.init) return;
+  const a = aimAngle(), now = performance.now();
+  const moved = Math.hypot(me.x - lastX, me.y - lastY) > 0.5 || Math.hypot(me.x - me.sx, me.y - me.sy) > 1;
+  if (moved || Math.abs(a - lastA) > 0.04 || now - lastSent > 400) {
+    send({ t: 'in', a: +a.toFixed(3), x: +me.x.toFixed(1), y: +me.y.toFixed(1), tp: me.tpSeen });
+    lastA = a; lastSent = now; lastX = me.x; lastY = me.y;
+  }
 }, 50);
 setInterval(() => { if (!connected || chatOpen) return; for (const s of held) castSlot(s); }, 90);
 
@@ -465,6 +510,7 @@ addEventListener('keydown', (e) => {
   if (!act || e.repeat) return;
   if (act === 'chat') return openChat();
   if (act === 'board') return togglePanel('board');
+  if (act === 'recall') return send({ t: 'recall' });
   if (PANELS.includes(act)) return togglePanel(act);
   if (act.startsWith('slot')) { const s = +act.slice(4); held.add(s); castSlot(s); }
 });
@@ -486,64 +532,50 @@ addEventListener('mouseup', (e) => held.delete(e.button === 2 ? 1 : 0));
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ------------------------------------------------------------------ ground chunks
-const CHUNK = 512, RES = 4, NPX = CHUNK / RES, chunks = new Map(), SAND = [222, 206, 150], DIRT = [150, 118, 78];
+const CHUNK = 512, RES = 4, NPX = CHUNK / RES, chunks = new Map(), pending = new Set();
 const tmp = document.createElement('canvas'); tmp.width = NPX; tmp.height = NPX; const tctx = tmp.getContext('2d');
-function buildChunk(cx, cy) {
-  const img = tctx.createImageData(NPX, NPX), d = img.data, x0 = cx * CHUNK, y0 = cy * CHUNK;
-  const roads = ROADS.filter((r) => Math.max(r.x0, r.x1) > x0 - 40 && Math.min(r.x0, r.x1) < x0 + CHUNK + 40 && Math.max(r.y0, r.y1) > y0 - 40 && Math.min(r.y0, r.y1) < y0 + CHUNK + 40);
-  for (let j = 0; j < NPX; j++) for (let i = 0; i < NPX; i++) {
-    const x = x0 + i * RES + RES / 2, y = y0 + j * RES + RES / 2, lv = landValue(x, y), o = (j * NPX + i) * 4;
-    let r, g, b;
-    if (lv < 0) {
-      const t = Math.min(1, -lv / 0.14), wave = noise(x / 70, y / 26 + x / 400, 77) > 0.72 ? 14 : 0;
-      r = 78 - 46 * t + wave; g = 158 - 86 * t + wave; b = 182 - 52 * t + wave;
-    } else {
-      const jx = x + (noise(x / 26, y / 26, 91) - 0.5) * 80, jy = y + (noise(x / 26, y / 26, 93) - 0.5) * 80;
-      const biome = REGIONS[regionAt(jx, jy)].biome, c = BIOME_RGB[biome];
-      const br = 0.86 + 0.26 * fbm(x / 260, y / 260, 41, 2) + (noise(x / 9, y / 9, 7) - 0.5) * 0.08;
-      r = c[0] * br; g = c[1] * br; b = c[2] * br;
-      if (lv < 0.04 && biome !== 'snow') { const t = 1 - lv / 0.04; r += (SAND[0] - r) * t; g += (SAND[1] - g) * t; b += (SAND[2] - b) * t; }
-      if (roads.length) {
-        const rd = roadDist(x, y, roads) + (noise(x / 30, y / 30, 5) - 0.5) * 8;
-        if (rd < 24) { const t = Math.min(1, (24 - rd) / 8) * (0.85 + noise(x / 7, y / 7, 3) * 0.15); r += (DIRT[0] - r) * t; g += (DIRT[1] - g) * t; b += (DIRT[2] - b) * t; }
-      }
-    }
-    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
-  }
-  tctx.putImageData(img, 0, 0);
+let worker = null;
+try {
+  worker = new Worker(new URL('./chunkworker.mjs', import.meta.url), { type: 'module' });
+  worker.onmessage = (e) => { const { cx, cy, px } = e.data; pending.delete(cy * 100 + cx); finishChunk(cx, cy, px); };
+  worker.onerror = () => { worker = null; pending.clear(); };
+} catch { worker = null; }
+// Turns raw ground pixels into a chunk canvas and sprinkles grass tufts, flowers and pebbles on top.
+function finishChunk(cx, cy, px) {
+  tctx.putImageData(new ImageData(px, NPX, NPX), 0, 0);
   const c = document.createElement('canvas'); c.width = CHUNK; c.height = CHUNK;
   const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
   x.drawImage(tmp, 0, 0, CHUNK, CHUNK);
-  // scattered grass tufts, flowers and pebbles
+  const x0 = cx * CHUNK, y0 = cy * CHUNK;
+  const roads = ROADS.filter((r) => Math.max(r.x0, r.x1) > x0 - 40 && Math.min(r.x0, r.x1) < x0 + CHUNK + 40 && Math.max(r.y0, r.y1) > y0 - 40 && Math.min(r.y0, r.y1) < y0 + CHUNK + 40);
   const R = rng(cx * 7919 + cy * 104729);
   for (let k = 0; k < 90; k++) {
-    const px = R() * CHUNK, py = R() * CHUNK, wx = x0 + px, wy = y0 + py;
+    const px2 = R() * CHUNK, py = R() * CHUNK, wx = x0 + px2, wy = y0 + py;
     if (landValue(wx, wy) < 0.05 || roadDist(wx, wy, roads) < 30) continue;
     const biome = REGIONS[regionAt(wx, wy)].biome, roll = R();
     if (biome === 'grass' || biome === 'forest' || biome === 'heath' || biome === 'swamp' || biome === 'darkforest') {
       x.strokeStyle = biome === 'heath' ? 'rgba(90,80,30,.5)' : 'rgba(30,70,20,.45)'; x.lineWidth = 1.4;
-      for (let t = -1; t <= 1; t++) { x.beginPath(); x.moveTo(px + t * 2, py); x.lineTo(px + t * 3.5, py - 6 - R() * 3); x.stroke(); }
-      if (roll < 0.18 && biome !== 'darkforest') { x.fillStyle = ['#f6f0a0', '#f080a0', '#ffffff', '#b090f0'][Math.floor(R() * 4)]; x.beginPath(); x.arc(px + 4, py - 3, 1.8, 0, 7); x.fill(); }
+      for (let t = -1; t <= 1; t++) { x.beginPath(); x.moveTo(px2 + t * 2, py); x.lineTo(px2 + t * 3.5, py - 6 - R() * 3); x.stroke(); }
+      if (roll < 0.18 && biome !== 'darkforest') { x.fillStyle = ['#f6f0a0', '#f080a0', '#ffffff', '#b090f0'][Math.floor(R() * 4)]; x.beginPath(); x.arc(px2 + 4, py - 3, 1.8, 0, 7); x.fill(); }
     } else if (biome === 'desert' || biome === 'rock' || biome === 'ash') {
-      x.fillStyle = biome === 'ash' ? 'rgba(30,20,20,.35)' : 'rgba(80,60,40,.3)'; x.beginPath(); x.ellipse(px, py, 2 + R() * 3, 1.5 + R() * 2, R() * 3, 0, 7); x.fill();
-      if (biome === 'ash' && roll < 0.1) { x.fillStyle = 'rgba(255,110,40,.6)'; x.beginPath(); x.arc(px + 5, py, 1.6, 0, 7); x.fill(); }
+      x.fillStyle = biome === 'ash' ? 'rgba(30,20,20,.35)' : 'rgba(80,60,40,.3)'; x.beginPath(); x.ellipse(px2, py, 2 + R() * 3, 1.5 + R() * 2, R() * 3, 0, 7); x.fill();
+      if (biome === 'ash' && roll < 0.1) { x.fillStyle = 'rgba(255,110,40,.6)'; x.beginPath(); x.arc(px2 + 5, py, 1.6, 0, 7); x.fill(); }
     } else if (biome === 'snow') {
-      x.fillStyle = 'rgba(160,180,200,.35)'; x.beginPath(); x.ellipse(px, py, 6 + R() * 6, 2, 0, 0, 7); x.fill();
+      x.fillStyle = 'rgba(160,180,200,.35)'; x.beginPath(); x.ellipse(px2, py, 6 + R() * 6, 2, 0, 0, 7); x.fill();
     }
   }
-  return c;
+  chunks.set(cy * 100 + cx, { canvas: c, used: performance.now() });
+  if (chunks.size > 60) { const old = [...chunks.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, 10); for (const [ok] of old) chunks.delete(ok); }
 }
 let chunkBudget = 0;
+// Returns a ready chunk, or asks for it (from the worker, or built here one at a time without one).
 function getChunk(cx, cy) {
-  const k = cy * 100 + cx;
-  let c = chunks.get(k);
+  const k = cy * 100 + cx, c = chunks.get(k);
   if (c) { c.used = performance.now(); return c.canvas; }
-  if (chunkBudget <= 0) return null;
-  chunkBudget--;
-  c = { canvas: buildChunk(cx, cy), used: performance.now() };
-  chunks.set(k, c);
-  if (chunks.size > 48) { const old = [...chunks.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, 8); for (const [ok] of old) chunks.delete(ok); }
-  return c.canvas;
+  if (pending.has(k)) return null;
+  if (worker) { if (pending.size < 6) { pending.add(k); worker.postMessage({ cx, cy, size: CHUNK, res: RES }); } return null; }
+  if (chunkBudget-- > 0) { finishChunk(cx, cy, chunkPixels(cx, cy, CHUNK, RES)); return chunks.get(k).canvas; }
+  return null;
 }
 
 // ------------------------------------------------------------------ drawing helpers
@@ -689,26 +721,43 @@ function drawFx(now) {
   }
   floaters = floaters.filter((f) => now - f.t0 < f.life);
   ctx.textAlign = 'center'; ctx.font = 'bold 14px Georgia'; ctx.lineJoin = 'round';
-  for (const f of floaters) { const p = (now - f.t0) / f.life; ctx.globalAlpha = 1 - p * p; ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.strokeText(f.txt, f.x, f.y - p * 34); ctx.fillStyle = f.c; ctx.fillText(f.txt, f.x, f.y - p * 34); ctx.globalAlpha = 1; }
+  for (const f of floaters) {
+    const p = (now - f.t0) / f.life;
+    ctx.font = f.big ? `bold ${Math.round(18 + 6 * Math.max(0, 1 - p * 4))}px Georgia` : 'bold 14px Georgia';
+    ctx.globalAlpha = 1 - p * p; ctx.strokeStyle = '#000'; ctx.lineWidth = f.big ? 4 : 3; ctx.strokeText(f.txt, f.x, f.y - p * 34); ctx.fillStyle = f.c; ctx.fillText(f.txt, f.x, f.y - p * 34); ctx.globalAlpha = 1;
+  }
 }
 
 // ------------------------------------------------------------------ frame
-let last = performance.now();
+let last = performance.now(), frameNo = 0;
+// Prop sprites are looked up once per prop and kept on it.
+function propSprite(p) { return p.spr || (p.spr = prop(p.k, p.v, REGIONS[regionAt(p.x, p.y)].biome)); }
+// A ring around you while a teleport channels.
+function drawChannel(now) {
+  if (!me.ch) return;
+  const [rem, total, label] = me.ch, f = 1 - rem / total, cx = VW / 2, cy = VH / 2 - 60 * zoom;
+  ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.arc(cx, cy, 22, 0, 7); ctx.stroke();
+  ctx.strokeStyle = '#c8a0ff'; ctx.beginPath(); ctx.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+  ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000';
+  ctx.strokeText(label, cx, cy - 32); ctx.fillStyle = '#e8d8ff'; ctx.fillText(label, cx, cy - 32);
+}
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  // self prediction with the same collision as the server, then gentle reconciliation
+  // You move instantly on your own screen using the same collision as the server.
   const k = mask();
   const dx = ((k & 8) ? 1 : 0) - ((k & 4) ? 1 : 0), dy = ((k & 2) ? 1 : 0) - ((k & 1) ? 1 : 0), len = Math.hypot(dx, dy);
   const ox = me.x, oy = me.y;
   if (len > 0 && !me.dead && me.sp > 0) [me.x, me.y] = moveBody(me.x, me.y, 14, (dx / len) * me.sp * dt, (dy / len) * me.sp * dt);
-  const ex = me.sx - me.x, ey = me.sy - me.y;
-  if (Math.hypot(ex, ey) > 160) { me.x = me.sx; me.y = me.sy; } else { const f = Math.min(1, dt * 5); me.x += ex * f; me.y += ey * f; }
   const moved = Math.hypot(me.x - ox, me.y - oy);
   me.ph += moved * 0.22; me.moving = moved > 0.3;
-  const f2 = Math.min(1, dt * 14);
+  // Everyone else is drawn ~110ms in the past, smoothly between the two snapshots around that moment.
+  const rt = now - 110;
   for (const o of ents.values()) {
-    const px = o.x, py = o.y;
-    o.x += (o.tx - o.x) * f2; o.y += (o.ty - o.y) * f2;
+    const b = o.buf, px = o.x, py = o.y;
+    let i = b.length - 1;
+    while (i > 0 && b[i][0] > rt) i--;
+    if (i >= b.length - 1 || b[i][0] > rt) { o.x = b[i][1]; o.y = b[i][2]; }
+    else { const [t0, x0, y0] = b[i], [t1, x1, y1] = b[i + 1], f = Math.min(1, (rt - t0) / (t1 - t0 || 1)); o.x = x0 + (x1 - x0) * f; o.y = y0 + (y1 - y0) * f; }
     const m2 = Math.hypot(o.x - px, o.y - py); o.ph += m2 * 0.22; o.moving = m2 > 0.2;
   }
 
@@ -717,15 +766,17 @@ function frame(now) {
   ctx.save(); ctx.translate(VW / 2, VH / 2); ctx.scale(zoom, zoom); ctx.translate(-me.x, -me.y);
   const hw = VW / 2 / zoom, hh = VH / 2 / zoom, x0 = me.x - hw, y0 = me.y - hh, x1 = me.x + hw, y1 = me.y + hh;
   // ground: build the nearest missing chunks first, a couple per frame
-  chunkBudget = 2;
-  const need = [];
-  for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) need.push([cx, cy]);
-  need.sort((a, b) => Math.hypot(a[0] * CHUNK + 256 - me.x, a[1] * CHUNK + 256 - me.y) - Math.hypot(b[0] * CHUNK + 256 - me.x, b[1] * CHUNK + 256 - me.y));
-  for (const [cx, cy] of need) {
+  chunkBudget = 1;
+  for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
     if (cx < 0 || cy < 0 || cx * CHUNK >= WW || cy * CHUNK >= WH) continue;
     const c = getChunk(cx, cy);
     if (c) ctx.drawImage(c, cx * CHUNK, cy * CHUNK, CHUNK + 0.5, CHUNK + 0.5);
     else { ctx.fillStyle = '#4a6a3a'; ctx.fillRect(cx * CHUNK, cy * CHUNK, CHUNK, CHUNK); }
+  }
+  // warm up the ring of chunks just off screen so walking never shows blank ground
+  if (worker && pending.size === 0 && frameNo % 10 === 0) {
+    for (let cy = Math.floor((y0 - CHUNK) / CHUNK); cy <= Math.floor((y1 + CHUNK) / CHUNK); cy++) for (let cx = Math.floor((x0 - CHUNK) / CHUNK); cx <= Math.floor((x1 + CHUNK) / CHUNK); cx++)
+      if (cx >= 0 && cy >= 0 && cx * CHUNK < WW && cy * CHUNK < WH) getChunk(cx, cy);
   }
   const CS = CASTLE_SPRITE_SIZE, VS = VILLAGE_SPRITE_SIZE;
   const visCastles = CASTLES.filter((c) => c.x + CS / 2 > x0 && c.x - CS / 2 < x1 && c.y + CS / 2 > y0 && c.y - CS / 2 < y1);
@@ -736,7 +787,7 @@ function frame(now) {
   const props = propsIn(x0 - 60, y0 - 60, x1 + 60, y1 + 60), tall = [];
   for (const p of props) {
     if (TALL.has(p.k)) { tall.push(p); continue; }
-    const s = prop(p.k, p.v, REGIONS[regionAt(p.x, p.y)].biome), w = s.c.width / 2;
+    const s = propSprite(p), w = s.c.width / 2;
     ctx.drawImage(s.c, p.x - w / 2, p.y - w / 2, w, w);
   }
   drawZones(now);
@@ -749,7 +800,7 @@ function frame(now) {
   list.sort((a, b) => a.y - b.y);
   for (const it of list) {
     if (it.p) {
-      const p = it.p, s = prop(p.k, p.v, REGIONS[regionAt(p.x, p.y)].biome), w = s.c.width / 2;
+      const p = it.p, s = propSprite(p), w = s.c.width / 2;
       const under = Math.hypot(p.x - me.x, p.y - me.y) < s.r * 0.85;
       if (under) ctx.globalAlpha = 0.45;
       ctx.drawImage(s.c, p.x - w / 2, p.y - w / 2, w, w);
@@ -778,11 +829,12 @@ function frame(now) {
   }
   drawFx(now);
   ctx.restore();
-  // soft vignette and a red edge when hurt
-  const vg = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.45, VW / 2, VH / 2, Math.max(VW, VH) * 0.75);
-  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, me.h < me.mh * 0.3 && !me.dead ? `rgba(120,0,0,${0.35 + 0.15 * Math.sin(now / 200)})` : 'rgba(0,0,0,.35)');
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
-  drawMinimap();
+  drawChannel(now);
+  // soft vignette, red when badly hurt
+  const hurt = me.h < me.mh * 0.3 && !me.dead;
+  if (hurt) ctx.globalAlpha = 0.75 + 0.25 * Math.sin(now / 200);
+  ctx.drawImage(getVignette(hurt), 0, 0, VW, VH); ctx.globalAlpha = 1;
+  if (++frameNo % 6 === 0) drawMinimap();
   requestAnimationFrame(frame);
 }
 
@@ -793,6 +845,7 @@ $('resetBtn').onclick = () => {
   if (Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) > VILLAGE.r) return toast('Go to Hanbin Haven to reset your skills.');
   if (confirm(`Refund all ${n} skill point${n === 1 ? '' : 's'}? Learned skills will be removed from your hotbar.`)) send({ t: 'reset' });
 };
+$('combolist').innerHTML = COMBOS.map(([n, d]) => `<li><b>${n}</b>: ${d}</li>`).join('');
 applyBinds();
 buildHotbar();
 setMode('login');

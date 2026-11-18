@@ -271,9 +271,36 @@ export function losClear(ax, ay, bx, by) {
 
 // ------------------------------------------------------------------ valor & ranks
 export const VALOR_CAP = 8000;
+// Each rank keeps the rewards of the ranks below it. Dying costs 75% of valor, so rewards can be lost.
 export const RANKS = [
-  { name: 'Peasant', v: 0 }, { name: 'Squire', v: 80 }, { name: 'Soldier', v: 250 }, { name: 'Knight', v: 600 }, { name: 'Baron', v: 1200 },
-  { name: 'Count', v: 2000 }, { name: 'Duke', v: 3200 }, { name: 'Prince', v: 5000 }, { name: 'King', v: 8000 },
+  { name: 'Peasant', v: 0, perk: 'Every journey starts somewhere.' },
+  { name: 'Squire', v: 80, perk: '+10% max health.' },
+  { name: 'Soldier', v: 250, perk: '+8% damage.' },
+  { name: 'Knight', v: 600, perk: 'Recall: teleport home to Hanbin Haven after an 8s channel.' },
+  { name: 'Baron', v: 1200, perk: 'Fort travel: teleport to any castle your faction holds (open the map).' },
+  { name: 'Count', v: 2000, perk: '+10% more max health, energy regenerates 15% faster.' },
+  { name: 'Duke', v: 3200, perk: 'Commander aura: faction allies near you deal 10% more damage.' },
+  { name: 'Prince', v: 5000, perk: 'Swift travel: teleports take 3s. +8% move speed.' },
+  { name: 'King', v: 8000, perk: 'Royal might: +10% more damage and max health. All of Hanbin hears of your fall.' },
+];
+export const RECALL_RANK = 3, TRAVEL_RANK = 4, AURA_RANK = 6;
+export function rankBonus(idx) {
+  return {
+    hp: 1 + (idx >= 1 ? 0.1 : 0) + (idx >= 5 ? 0.1 : 0) + (idx >= 8 ? 0.1 : 0),
+    dmg: 1 + (idx >= 2 ? 0.08 : 0) + (idx >= 8 ? 0.1 : 0),
+    en: idx >= 5 ? 1.15 : 1, speed: idx >= 7 ? 1.08 : 1,
+    channel: idx >= 7 ? 3000 : 8000,
+  };
+}
+// Status combos, shown in the help and on the skills that set them up.
+export const COMBOS = [
+  ['Shatter', 'Fire damage on a chilled foe (Frost Nova) deals +60% and breaks the chill.'],
+  ['Ignite', 'Fire damage on a poisoned foe bursts into flame, hitting everything nearby.'],
+  ['Crush', 'Melee hits on a stunned foe deal +35%.'],
+  ['Pinned', 'Arrows deal double damage to a foe caught in a Snare Trap.'],
+  ['Wall Slam', 'Knocking a foe into a wall, tower or rock stuns it for 1s and deals extra damage.'],
+  ['Marked', 'Crippling Shot marks a foe: you and your allies deal +20% damage to it.'],
+  ['Exposed', 'Weakened foes (Parry, Riposte, Intimidate, War Horn) take +15% damage.'],
 ];
 export function rankOf(valor) {
   let idx = 0;
@@ -299,33 +326,33 @@ const S = (id, name, tree, tier, req, cd, en, icon, desc, at, extra) => ({ id, n
 const P = (id, name, tree, tier, req, icon, desc, at) => S(id, name, tree, tier, req, 0, 0, icon, desc, at, { passive: true });
 export const SKILL_LIST = [
   S('slash', 'Slash', 'blade', 0, null, 500, 0, '⚔️', 'Quick sword arc in front of you.', [1, 0], { free: true }),
-  S('cleave', 'Cleave', 'blade', 1, 'slash', 6000, 15, '🪓', 'Heavy, wide arc that knocks foes back.', [0, 1]),
-  S('shield_bash', 'Shield Bash', 'blade', 2, 'slash', 9000, 15, '🛡️', 'Short bash that stuns for 1.3s.', [2, 1]),
+  S('cleave', 'Cleave', 'blade', 1, 'slash', 6000, 15, '🪓', 'Heavy, wide arc that knocks foes back (Wall Slam).', [0, 1]),
+  S('shield_bash', 'Shield Bash', 'blade', 2, 'slash', 9000, 15, '🛡️', 'Short bash that stuns for 1.3s. Follow up with melee to Crush.', [2, 1]),
   P('heavy_blade', 'Heavy Blade', 'blade', 3, 'cleave', '🗡️', 'Passive: melee skills deal 15% more damage.', [0, 2]),
   S('whirlwind', 'Whirlwind', 'blade', 5, 'cleave', 14000, 30, '🌀', 'Spin three times, hitting everything around you.', [1, 2]),
-  S('ground_slam', 'Ground Slam', 'blade', 6, 'shield_bash', 18000, 30, '💢', 'Slam the ground: damage and slow everything nearby.', [2, 3]),
+  S('ground_slam', 'Ground Slam', 'blade', 6, 'shield_bash', 18000, 30, '💢', 'Slam the ground: damage, slow and stun everything nearby for 0.6s.', [2, 3]),
   P('bloodlust', 'Bloodlust', 'blade', 8, 'whirlwind', '🩸', 'Passive: melee hits heal you for 8% of damage dealt.', [1, 3]),
   S('executioner', 'Executioner', 'blade', 10, 'heavy_blade', 20000, 35, '⚰️', 'Brutal strike. Double damage to foes under 35% health.', [0, 4]),
-  S('titan_strike', 'Titan Strike', 'blade', 14, 'ground_slam', 30000, 50, '🔨', 'Crushing cone that stuns for 1.8s.', [2, 5]),
+  S('titan_strike', 'Titan Strike', 'blade', 14, 'ground_slam', 30000, 50, '🔨', 'Crushing cone that stuns for 1.8s and knocks foes back (Wall Slam).', [2, 5]),
 
   S('arrow', 'Arrow', 'marksman', 0, null, 650, 0, '🏹', 'Fire an arrow toward the cursor.', [1, 0], { free: true }),
   S('power_shot', 'Power Shot', 'marksman', 1, 'arrow', 7000, 15, '🎯', 'Fast shot that pierces up to three foes.', [0, 1]),
-  S('crippling_shot', 'Crippling Shot', 'marksman', 2, 'arrow', 9000, 12, '🦵', 'Arrow that slows the target by 55% for 3.5s.', [2, 1]),
+  S('crippling_shot', 'Crippling Shot', 'marksman', 2, 'arrow', 9000, 12, '🦵', 'Slows the target by 55% and Marks it for 6s: your side deals +20% to it.', [2, 1]),
   S('volley', 'Volley', 'marksman', 3, 'power_shot', 12000, 25, '🌠', 'Fan of seven arrows.', [0, 2]),
   P('eagle_eye', 'Eagle Eye', 'marksman', 4, 'crippling_shot', '🦅', 'Passive: ranged damage +15%, arrows fly 25% farther.', [1, 2]),
-  S('snare_trap', 'Snare Trap', 'marksman', 5, 'crippling_shot', 16000, 20, '🪤', 'Set a hidden trap that roots the first enemy for 2.2s.', [2, 3]),
+  S('snare_trap', 'Snare Trap', 'marksman', 5, 'crippling_shot', 16000, 20, '🪤', 'Hidden trap that roots the first enemy for 2.2s. Arrows deal double to it (Pinned).', [2, 3]),
   S('explosive_arrow', 'Explosive Arrow', 'marksman', 6, 'volley', 15000, 35, '💥', 'Arrow that bursts on impact.', [0, 3]),
   S('rain_of_arrows', 'Rain of Arrows', 'marksman', 10, 'explosive_arrow', 26000, 45, '🌧️', 'Arrows pour onto the target area for 2 seconds.', [0, 4]),
-  S('piercing_gale', 'Piercing Gale', 'marksman', 13, 'eagle_eye', 28000, 45, '🌪️', 'A great bolt that pierces everything and hurls foes back.', [1, 5]),
+  S('piercing_gale', 'Piercing Gale', 'marksman', 13, 'eagle_eye', 28000, 45, '🌪️', 'A great bolt that pierces everything and hurls foes back (Wall Slam).', [1, 5]),
 
-  S('firebolt', 'Firebolt', 'sorcery', 1, null, 2500, 12, '🔥', 'Fireball with a small splash.', [0, 1]),
+  S('firebolt', 'Firebolt', 'sorcery', 1, null, 2500, 12, '🔥', 'Fireball with a splash. Shatters chilled foes and Ignites poisoned ones.', [0, 1]),
   S('healing_draught', 'Healing Draught', 'sorcery', 1, null, 12000, 20, '🧪', 'Heal yourself and nearby allies.', [2, 1]),
-  S('frost_nova', 'Frost Nova', 'sorcery', 3, 'firebolt', 14000, 28, '❄️', 'Burst of frost: damages and slows enemies around you.', [0, 2]),
-  S('poison_flask', 'Poison Flask', 'sorcery', 4, 'healing_draught', 12000, 25, '☠️', 'Throw a flask that leaves a poison cloud for 6s.', [2, 2]),
+  S('frost_nova', 'Frost Nova', 'sorcery', 3, 'firebolt', 14000, 28, '❄️', 'Burst of frost: damages, slows and chills enemies around you. Hit them with fire to Shatter.', [0, 2]),
+  S('poison_flask', 'Poison Flask', 'sorcery', 4, 'healing_draught', 12000, 25, '☠️', 'Throw a flask that leaves a poison cloud for 6s. Fire on poisoned foes Ignites.', [2, 2]),
   P('alchemist', 'Alchemist', 'sorcery', 5, 'healing_draught', '⚗️', 'Passive: healing +35%, energy regenerates 20% faster.', [1, 2]),
   S('chain_lightning', 'Chain Lightning', 'sorcery', 6, 'frost_nova', 15000, 32, '⚡', 'Lightning that leaps between up to four foes.', [0, 3]),
   S('arcane_ward', 'Arcane Ward', 'sorcery', 7, 'alchemist', 22000, 30, '🔮', 'You and nearby allies take 60% less damage for 4s.', [1, 3]),
-  S('meteor', 'Meteor', 'sorcery', 11, 'chain_lightning', 32000, 60, '☄️', 'Call down a meteor on the target area after a short delay.', [0, 4]),
+  S('meteor', 'Meteor', 'sorcery', 11, 'chain_lightning', 32000, 60, '☄️', 'Call down a fiery meteor on the target area after a short delay.', [0, 4]),
   S('rejuvenation', 'Rejuvenation', 'sorcery', 12, 'arcane_ward', 30000, 40, '🌿', 'You and nearby allies regenerate health for 6s.', [1, 4]),
 
   S('rally', 'Rally', 'command', 2, null, 25000, 30, '📯', 'Allies nearby: +30% damage and +20% speed for 8s.', [1, 1]),
@@ -333,17 +360,17 @@ export const SKILL_LIST = [
   P('inspire', 'Inspire', 'command', 4, 'rally', '🎖️', 'Passive: summons are 30% stronger; Rally lasts 12s.', [1, 2]),
   S('war_banner', 'War Banner', 'command', 5, 'rally', 40000, 40, '🚩', 'Plant a banner that heals and empowers allies.', [2, 2]),
   S('summon_archers', 'Summon Archers', 'command', 7, 'summon_footmen', 40000, 45, '🏹', 'Call three archers to fight for you.', [0, 3]),
-  S('war_horn', 'War Horn', 'command', 7, 'war_banner', 28000, 30, '📢', 'Blast that hurls enemies back and weakens them.', [2, 3]),
+  S('war_horn', 'War Horn', 'command', 7, 'war_banner', 28000, 30, '📢', 'Blast that hurls enemies back (Wall Slam) and weakens them (Exposed).', [2, 3]),
   S('fortify', 'Fortify', 'command', 9, 'war_banner', 35000, 40, '🏰', 'You and nearby allies take 60% less damage for 5s.', [1, 4]),
   S('summon_knights', 'Summon Knights', 'command', 10, 'summon_archers', 50000, 60, '🐴', 'Call three armoured knights.', [0, 4]),
   S('legion_call', 'Legion Call', 'command', 16, 'summon_knights', 100000, 90, '👑', 'Summon a legion of knights and archers.', [0, 5]),
 
   S('parry', 'Parry', 'technique', 1, null, 4000, 8, '🤺', 'Brief guard. Blocks the next hit, stuns and weakens the attacker.', [0, 1]),
   S('dash', 'Dash', 'technique', 1, null, 7000, 12, '💨', 'Quick dash toward the cursor.', [2, 1]),
-  S('riposte', 'Riposte', 'technique', 3, 'parry', 6000, 15, '🗡️', 'Lunge forward and weaken foes. Double damage right after a parry.', [0, 2]),
+  S('riposte', 'Riposte', 'technique', 3, 'parry', 6000, 15, '🗡️', 'Lunge forward and weaken foes (Exposed). Double damage right after a parry.', [0, 2]),
   P('second_wind', 'Second Wind', 'technique', 4, 'dash', '🍃', 'Passive: +10% move speed, energy regenerates 15% faster.', [1, 2]),
   S('shadowstep', 'Shadowstep', 'technique', 5, 'dash', 12000, 18, '👤', 'Vanish and reappear at the cursor.', [2, 2]),
-  S('intimidate', 'Intimidate', 'technique', 6, 'riposte', 18000, 25, '😠', 'Weaken and slow every enemy nearby.', [0, 3]),
+  S('intimidate', 'Intimidate', 'technique', 6, 'riposte', 18000, 25, '😠', 'Weaken (Exposed) and slow every enemy nearby.', [0, 3]),
   S('smoke_bomb', 'Smoke Bomb', 'technique', 8, 'shadowstep', 20000, 25, '🌫️', 'Smoke cloud that slows and weakens enemies inside it.', [2, 3]),
   S('iron_skin', 'Iron Skin', 'technique', 9, 'intimidate', 24000, 30, '🪨', 'Take 60% less damage for 5 seconds.', [0, 4]),
   S('counter_stance', 'Counter Stance', 'technique', 12, 'iron_skin', 28000, 30, '♞', 'For 2.2s, parry every hit that lands on you.', [0, 5]),

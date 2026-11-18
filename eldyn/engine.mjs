@@ -3,6 +3,7 @@
 import {
   WORLD, VILLAGE, REGIONS, CASTLES, SANCTUARY, REGION_CELLS, RC, GW, SKILLS, MOBS, WILD_TABLE, VALOR_CAP, FREE_SKILLS, TREE_OF,
   rankOf, tierOf, slotsForTier, garrisonFor, regionAt, inCastle, moveBody, freeAt, shotBlocked, losClear,
+  rankBonus, RECALL_RANK, TRAVEL_RANK, AURA_RANK,
 } from './shared.mjs';
 
 const { W, H, CASTLE_HALF: CH, WALL } = WORLD;
@@ -66,6 +67,7 @@ export class Game {
     let m = e.dmgMul || 1;
     if (this.T < e.weakUntil) m *= 0.6;
     if (this.T < e.buffUntil) m *= 1.3;
+    if (this.T < e.auraUntil) m *= 1.1;
     return m;
   }
   speedOf(e) {
@@ -78,7 +80,28 @@ export class Game {
   stun(e, ms) { if (e.stunUntil !== undefined && e.kind !== 'banner') e.stunUntil = Math.max(e.stunUntil, this.T + ms); }
   weaken(e, ms) { if (e.weakUntil !== undefined) e.weakUntil = Math.max(e.weakUntil, this.T + ms); }
   slow(e, f, ms) { if (e.slowUntil === undefined) return; e.slowF = this.T < e.slowUntil ? Math.min(e.slowF, f) : f; e.slowUntil = Math.max(e.slowUntil, this.T + ms); }
-  knock(e, ang, d) { if (e.kind === 'banner' || e.dead) return; [e.x, e.y] = moveBody(e.x, e.y, e.r, Math.cos(ang) * d, Math.sin(ang) * d); }
+  // Knockback; a foe stopped short by a wall, tower, rock or the shore takes a Wall Slam.
+  knock(e, ang, d, src) {
+    if (e.kind === 'banner' || e.dead || e.hp <= 0) return;
+    const ox = e.x, oy = e.y;
+    [e.x, e.y] = moveBody(e.x, e.y, e.r, Math.cos(ang) * d, Math.sin(ang) * d);
+    if (e.isPlayer) e.tp++;
+    if (src && d >= 40 && Math.hypot(e.x - ox, e.y - oy) < d * 0.6) {
+      this.combo(e, 'WALL SLAM');
+      this.stun(e, 1000);
+      this.dealDamage(src, e, 20 + d * 0.15, { parryable: false });
+    }
+  }
+  combo(e, txt) {
+    if (this.T < (e.comboAt || 0)) return;
+    e.comboAt = this.T + 350;
+    this.fx({ t: 'combo', x: e.x, y: e.y - 34, txt });
+  }
+  cancelChannel(p, why) {
+    if (!p.channel) return;
+    p.channel = null;
+    this.send(p, { t: 'toast', m: why });
+  }
   heal(src, e, amt) {
     if (e.dead || e.hp <= 0) return;
     amt = Math.round(amt * (src && src.mods ? src.mods.heal : 1));
@@ -115,8 +138,8 @@ export class Game {
   dealDamage(src, tgt, amt, o = {}) {
     const T = this.T;
     if (tgt.dead || tgt.hp <= 0) return 0;
-    if (inSafe(tgt) || (src && !src.isStub && inSafe(src))) return 0;
-    if (src && !this.hostile(src, tgt)) return 0;
+    if (!src || inSafe(tgt) || (!src.isStub && inSafe(src))) return 0;
+    if (!this.hostile(src, tgt)) return 0;
     if (src && !o.premul) amt *= this.dmgMulOf(src);
     if (o.parryable !== false && (T < tgt.parryUntil || T < tgt.counterUntil)) {
       if (T < tgt.parryUntil) tgt.parryUntil = 0;
@@ -126,6 +149,20 @@ export class Game {
       this.fx({ t: 'parry', x: tgt.x, y: tgt.y });
       return 0;
     }
+    // combos
+    if (o.el === 'fire' && T < tgt.chillUntil) { amt *= 1.6; tgt.chillUntil = 0; this.combo(tgt, 'SHATTER'); }
+    if (o.el === 'fire' && T < tgt.poisonUntil) {
+      tgt.poisonUntil = 0; this.combo(tgt, 'IGNITE'); amt += 30;
+      const st = src.isStub ? src : this.mkStub(src);
+      this.fx({ t: 'boom', x: tgt.x, y: tgt.y, r: 110 });
+      for (const e of this.near(tgt.x, tgt.y, 110)) if (e !== tgt && this.teamOf(e) !== st.team) this.dealDamage(st, e, 30, { parryable: false, premul: true, el: 'blast' });
+      if (tgt.dead || tgt.hp <= 0) return 0;
+    }
+    if (o.melee && T < tgt.stunUntil) { amt *= 1.35; this.combo(tgt, 'CRUSH'); }
+    if (o.ranged && T < tgt.rootUntil) { amt *= 2; this.combo(tgt, 'PINNED'); }
+    if (T < tgt.weakUntil) amt *= 1.15;
+    if (T < tgt.markUntil && this.teamOf(src) === tgt.markTeam) amt *= 1.2;
+    if (tgt.isPlayer && tgt.channel) this.cancelChannel(tgt, 'Teleport interrupted!');
     if (T < tgt.shieldUntil) amt *= 0.4;
     if (tgt.isPlayer && tgt.mods.lastStand && tgt.hp < tgt.maxhp * 0.3) amt *= 0.65;
     amt = Math.round(amt);
@@ -155,6 +192,7 @@ export class Game {
       this.sendProf(p);
     }
     const nr = rankOf(p.valor).idx;
+    if (nr !== p.rank) { this.recalc(p); this.sendProf(p); }
     if (nr > oldRank) {
       this.send(p, { t: 'toast', m: `You are now a ${rankOf(p.valor).name}!` });
       if (nr >= 3) this.broadcast({ t: 'msg', m: `${p.name} has risen to the rank of ${rankOf(p.valor).name}.`, c: '#e0b84f' });
@@ -176,9 +214,12 @@ export class Game {
   killPlayer(p, killer) {
     if (p.dead) return;
     const T = this.T;
-    p.dead = true; p.respawnAt = T + 5000; p.k = 0; p.spin = null;
+    p.dead = true; p.respawnAt = T + 5000; p.k = 0; p.spin = null; p.channel = null;
+    const wasRank = rankOf(p.valor);
     const lost = Math.floor(p.valor * 0.75);
     p.valor -= lost; p.dirty = true;
+    this.recalc(p); this.sendProf(p);
+    if (wasRank.idx === 8) this.broadcast({ t: 'msg', m: `👑 King ${p.name} has fallen${killer && killer !== p ? ' to ' + killer.name : ''}!`, c: '#f0c840' });
     this.removeSummonsOf(p.id);
     this.send(p, { t: 'died', lost, by: killer && killer !== p ? killer.name : null });
     if (killer && killer !== p && this.teamOf(killer) !== this.teamOf(p)) {
@@ -196,7 +237,26 @@ export class Game {
     let sp = null, bd = Infinity;
     if (p.fac) for (const c of this.castles) if (c.owner === p.fac) { const d = Math.hypot(c.x - p.x, c.y - p.y); if (d < bd) { bd = d; sp = c; } }
     const pos = sp ? this.freeSpot(sp.x, sp.y + 60, 120) : this.villageSpot();
-    p.x = pos.x; p.y = pos.y;
+    p.x = pos.x; p.y = pos.y; p.tp++;
+  }
+  // Recall (to the village) and fort travel (to a castle the faction holds) take a channel that damage or movement breaks.
+  startChannel(p, dest, label) {
+    if (p.dead) return;
+    p.channel = { until: this.T + p.mods.channel, total: p.mods.channel, dest, label, x: p.x, y: p.y };
+    this.send(p, { t: 'toast', m: `${label}... stand still` });
+  }
+  finishChannel(p) {
+    const ch = p.channel; p.channel = null;
+    let pos;
+    if (ch.dest === 'haven') pos = this.villageSpot();
+    else {
+      const c = this.castles.find((k) => k.id === ch.dest);
+      if (!c || c.owner !== p.fac || !p.fac) return this.say(p, 'Your faction no longer holds that castle.');
+      pos = this.freeSpot(c.x, c.y + 60, 120);
+    }
+    this.fx({ t: 'poof', x: p.x, y: p.y, c: '#6040a0' });
+    p.x = pos.x; p.y = pos.y; p.tp++;
+    this.fx({ t: 'ring', x: p.x, y: p.y, r: 60, c: '#c8a0ff', fill: 1 });
   }
   villageSpot() { return this.freeSpot(VILLAGE.x, VILLAGE.y, VILLAGE.r * 0.55, 60); }
   freeSpot(x, y, spread, minD = 0) {
@@ -211,20 +271,23 @@ export class Game {
   // ---------------------------------------------------------------- players
   recalc(p) {
     const has = (id) => p.skills.includes(id);
+    p.rank = rankOf(p.valor).idx;
+    const rb = rankBonus(p.rank);
     p.mods = {
       melee: has('heavy_blade') ? 1.15 : 1, ranged: has('eagle_eye') ? 1.15 : 1, range: has('eagle_eye') ? 1.25 : 1,
-      heal: has('alchemist') ? 1.35 : 1, en: (has('alchemist') ? 1.2 : 1) * (has('second_wind') ? 1.15 : 1),
-      speed: has('second_wind') ? 1.1 : 1, lifesteal: has('bloodlust') ? 0.08 : 0, summon: has('inspire') ? 0.3 : 0,
-      rally: has('inspire') ? 12000 : 8000, lastStand: has('last_stand'),
+      heal: has('alchemist') ? 1.35 : 1, en: (has('alchemist') ? 1.2 : 1) * (has('second_wind') ? 1.15 : 1) * rb.en,
+      speed: (has('second_wind') ? 1.1 : 1) * rb.speed, lifesteal: has('bloodlust') ? 0.08 : 0, summon: has('inspire') ? 0.3 : 0,
+      rally: has('inspire') ? 12000 : 8000, lastStand: has('last_stand'), channel: rb.channel,
     };
-    p.maxhp = 100 + 8 * p.tier; p.maxen = 100 + 3 * p.tier; p.dmgMul = 1 + 0.04 * p.tier;
+    p.maxhp = Math.round((100 + 8 * p.tier) * rb.hp); p.maxen = 100 + 3 * p.tier; p.dmgMul = (1 + 0.04 * p.tier) * rb.dmg;
     p.slots = slotsForTier(p.tier);
-    p.pts = p.tier - p.skills.filter((s) => !SKILLS[s].free).length;
+    // One starting point, then one per soma tier.
+    p.pts = p.tier + 1 - p.skills.filter((s) => !SKILLS[s].free).length;
     p.hp = Math.min(p.hp, p.maxhp); p.en = Math.min(p.en, p.maxen);
   }
   sendProf(p) {
     this.recalc(p);
-    this.send(p, { t: 'prof', skills: p.skills, hotbar: p.hotbar, pts: p.pts, slots: p.slots, tier: p.tier, fac: p.fac || 0, name: p.name });
+    this.send(p, { t: 'prof', skills: p.skills, hotbar: p.hotbar, pts: p.pts, slots: p.slots, tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, dmg: +p.dmgMul.toFixed(2) });
   }
   send(p, obj) { if (p.out) p.out(typeof obj === 'string' ? obj : JSON.stringify(obj)); }
   broadcast(obj) { const s = JSON.stringify(obj); for (const p of this.players.values()) this.send(p, s); }
@@ -241,7 +304,7 @@ export class Game {
     const pos = this.villageSpot();
     const p = {
       id: this.nid(), isPlayer: true, kind: 'player', accountId: account.id, name: account.username, out,
-      x: pos.x, y: pos.y, r: 14, ang: 0, k: 0, wp: 'sword',
+      x: pos.x, y: pos.y, r: 14, ang: 0, k: 0, wp: 'sword', tp: 0, moveBudget: 0, channel: null,
       valor: clamp(pr.valor | 0, 0, VALOR_CAP), soma: Math.max(0, pr.soma | 0), skills, hotbar, fac,
       tier: 0, hp: 100, en: 100, dead: false, respawnAt: 0, cds: {}, spin: null,
       stunUntil: 0, slowUntil: 0, slowF: 1, weakUntil: 0, buffUntil: 0, shieldUntil: 0, parryUntil: 0, counterUntil: 0, riposteUntil: 0, regenUntil: 0, regenRate: 0,
@@ -469,7 +532,8 @@ export class Game {
     this.projs.push({
       x: src.x + Math.cos(ang) * (src.r + 4), y: src.y + Math.sin(ang) * (src.r + 4),
       vx: Math.cos(ang) * o.speed, vy: Math.sin(ang) * o.speed, ang, life: o.life * lifeMul, kind: o.kind || 'arrow',
-      dmg: o.dmg * mul, aoe: o.aoe || 0, aoeDmg: (o.aoeDmg || 0) * mul, pierce: o.pierce || 0, knock: o.knock || 0, slow: o.slow || 0,
+      dmg: o.dmg * mul, aoe: o.aoe || 0, aoeDmg: (o.aoeDmg || 0) * mul, pierce: o.pierce || 0, knock: o.knock || 0, slow: o.slow || 0, mark: o.mark || 0,
+      el: o.kind === 'fire' ? 'fire' : null, ranged: o.kind === 'fire' || o.kind === 'dark' ? o.kind === 'fire' && o.player : true,
       hit: new Set(), stub: this.mkStub(src), team: this.teamOf(src),
     });
   }
@@ -490,9 +554,10 @@ export class Game {
         for (const e of this.near(p.x, p.y, 8)) {
           if (p.hit.has(e.id) || this.teamOf(e) === p.team || e.kind === 'banner' && !p.aoe) continue;
           p.hit.add(e.id);
-          if (p.dmg > 0) this.dealDamage(p.stub, e, p.dmg, { premul: true });
+          if (p.dmg > 0) this.dealDamage(p.stub, e, p.dmg, { premul: true, el: p.el, ranged: p.ranged });
           if (p.slow) this.slow(e, 0.45, p.slow);
-          if (p.knock) this.knock(e, p.ang, p.knock);
+          if (p.mark) { e.markUntil = this.T + p.mark; e.markTeam = p.team; this.combo(e, 'MARKED'); }
+          if (p.knock) this.knock(e, p.ang, p.knock, p.stub);
           if (p.aoe) this.explode(p, e);
           if (p.pierce-- <= 0) { dead = true; break; }
         }
@@ -503,7 +568,7 @@ export class Game {
   }
   explode(p, except) {
     this.fx({ t: 'boom', x: p.x, y: p.y, r: p.aoe });
-    for (const o of this.near(p.x, p.y, p.aoe)) if (o !== except && this.teamOf(o) !== p.team) this.dealDamage(p.stub, o, p.aoeDmg, { parryable: false, premul: true });
+    for (const o of this.near(p.x, p.y, p.aoe)) if (o !== except && this.teamOf(o) !== p.team) this.dealDamage(p.stub, o, p.aoeDmg, { parryable: false, premul: true, el: p.el });
   }
   updateZones() {
     const T = this.T, keep = [];
@@ -511,20 +576,23 @@ export class Game {
       if (z.type === 'meteor') {
         if (T >= z.at) {
           this.fx({ t: 'boom', x: z.x, y: z.y, r: z.r, big: 1 });
-          for (const e of this.near(z.x, z.y, z.r)) if (this.teamOf(e) !== z.team) { this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true }); this.stun(e, 600); }
+          for (const e of this.near(z.x, z.y, z.r)) if (this.teamOf(e) !== z.team) { this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true, el: 'fire' }); this.stun(e, 600); }
           continue;
         }
       } else {
         if (T >= z.until) continue;
         if (z.type === 'trap') {
           const hit = this.near(z.x, z.y, z.r).find((e) => this.teamOf(e) !== z.team && e.kind !== 'banner');
-          if (hit) { this.stun(hit, 2200); this.dealDamage(z.stub, hit, z.dmg, { parryable: false, premul: true }); this.fx({ t: 'ring', x: z.x, y: z.y, r: 50, c: '#c8a060' }); continue; }
+          if (hit) { this.stun(hit, 2200); hit.rootUntil = this.T + 2200; this.dealDamage(z.stub, hit, z.dmg, { parryable: false, premul: true }); this.fx({ t: 'ring', x: z.x, y: z.y, r: 50, c: '#c8a060' }); continue; }
         } else if (T >= z.next) {
           z.next = T + z.every;
           for (const e of this.near(z.x, z.y, z.r)) {
             if (this.teamOf(e) === z.team) continue;
             if (z.type === 'smoke') { this.slow(e, 0.6, 700); this.weaken(e, 700); }
-            else this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true });
+            else {
+              if (z.type === 'poison') e.poisonUntil = this.T + 1500;
+              this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true, ranged: z.type === 'rain' });
+            }
           }
         }
       }
@@ -552,7 +620,7 @@ export class Game {
         hits++;
         if (o.stun) this.stun(e, o.stun);
         if (o.slow) this.slow(e, o.slow, 3000);
-        if (o.knock) this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), o.knock);
+        if (o.knock) this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), o.knock, p);
       }
     }
     return hits;
@@ -576,20 +644,20 @@ export class Game {
     const T = this.T, cos = Math.cos(ang), sin = Math.sin(ang);
     switch (id) {
       // Blade
-      case 'slash': return this.meleeArc(p, 80, 1.7, 16);
-      case 'cleave': return this.meleeArc(p, 100, 2.8, 36, { knock: 60, c: '#ff9a7a' });
-      case 'shield_bash': return this.meleeArc(p, 72, 1.4, 18, { stun: 1300, c: '#cfd8e8' });
+      case 'slash': return this.meleeArc(p, 80, 1.7, 18);
+      case 'cleave': return this.meleeArc(p, 100, 2.8, 44, { knock: 70, c: '#ff9a7a' });
+      case 'shield_bash': return this.meleeArc(p, 72, 1.4, 22, { stun: 1300, c: '#cfd8e8' });
       case 'whirlwind': p.spin = { left: 3, next: T }; return;
       case 'ground_slam':
         this.fx({ t: 'ring', x: p.x, y: p.y, r: 170, c: '#b08a5a' });
-        return this.meleeArc(p, 170, 6.4, 38, { slow: 0.5 });
-      case 'executioner': return this.meleeArc(p, 95, 1.4, 70, { execute: true, c: '#ff4040' });
-      case 'titan_strike': return this.meleeArc(p, 140, 2.2, 110, { stun: 1800, knock: 40, c: '#ffd070' });
+        return this.meleeArc(p, 170, 6.4, 45, { slow: 0.5, stun: 600 });
+      case 'executioner': return this.meleeArc(p, 95, 1.4, 90, { execute: true, c: '#ff4040' });
+      case 'titan_strike': return this.meleeArc(p, 140, 2.2, 130, { stun: 1800, knock: 80, c: '#ffd070' });
       // Marksman
       case 'arrow': return this.fireProj(p, ang, { speed: 650, dmg: 14, life: 0.85, player: 1 });
-      case 'power_shot': return this.fireProj(p, ang, { speed: 900, dmg: 40, life: 0.95, kind: 'power', pierce: 3, player: 1 });
-      case 'crippling_shot': return this.fireProj(p, ang, { speed: 700, dmg: 18, life: 0.85, slow: 3500, kind: 'power', player: 1 });
-      case 'volley': for (let i = -3; i <= 3; i++) this.fireProj(p, ang + i * 0.12, { speed: 650, dmg: 15, life: 0.85, player: 1 }); return;
+      case 'power_shot': return this.fireProj(p, ang, { speed: 900, dmg: 50, life: 0.95, kind: 'power', pierce: 3, player: 1 });
+      case 'crippling_shot': return this.fireProj(p, ang, { speed: 700, dmg: 20, life: 0.85, slow: 3500, mark: 6000, kind: 'power', player: 1 });
+      case 'volley': for (let i = -3; i <= 3; i++) this.fireProj(p, ang + i * 0.12, { speed: 650, dmg: 17, life: 0.85, player: 1 }); return;
       case 'snare_trap': {
         const mine = this.zones.filter((z) => z.owner === p.id && z.type === 'trap');
         if (mine.length >= 2) mine[0].until = 0;
@@ -597,21 +665,21 @@ export class Game {
         this.addZone(p, 'trap', pt.x, pt.y, 34, 30000, { dmg: 25 * this.dmgMulOf(p) });
         return;
       }
-      case 'explosive_arrow': return this.fireProj(p, ang, { speed: 620, dmg: 30, life: 0.95, kind: 'fire', aoe: 120, aoeDmg: 45, player: 1 });
+      case 'explosive_arrow': return this.fireProj(p, ang, { speed: 620, dmg: 35, life: 0.95, kind: 'fire', aoe: 120, aoeDmg: 55, player: 1 });
       case 'rain_of_arrows': {
         const pt = this.aimPoint(p, ang, 420);
-        this.addZone(p, 'rain', pt.x, pt.y, 150, 2000, { dmg: 12 * this.dmgMulOf(p) * p.mods.ranged, every: 250 });
+        this.addZone(p, 'rain', pt.x, pt.y, 150, 2000, { dmg: 15 * this.dmgMulOf(p) * p.mods.ranged, every: 250 });
         return;
       }
-      case 'piercing_gale': return this.fireProj(p, ang, { speed: 1000, dmg: 85, life: 0.9, kind: 'gale', pierce: 99, knock: 120, player: 1 });
+      case 'piercing_gale': return this.fireProj(p, ang, { speed: 1000, dmg: 100, life: 0.9, kind: 'gale', pierce: 99, knock: 120, player: 1 });
       // Alchemy & Sorcery
-      case 'firebolt': return this.fireProj(p, ang, { speed: 540, dmg: 24, life: 1.0, kind: 'fire', aoe: 60, aoeDmg: 14 });
+      case 'firebolt': return this.fireProj(p, ang, { speed: 540, dmg: 30, life: 1.0, kind: 'fire', aoe: 60, aoeDmg: 18 });
       case 'healing_draught':
         for (const e of this.alliesNear(p, p.x, p.y, 150)) this.heal(p, e, e === p ? 70 : 40);
         return this.fx({ t: 'ring', x: p.x, y: p.y, r: 150, c: '#5fe08a' });
       case 'frost_nova':
         this.fx({ t: 'ring', x: p.x, y: p.y, r: 170, c: '#8fd8ff', fill: 1 });
-        for (const e of this.hostileNear(p, p.x, p.y, 170)) { this.dealDamage(p, e, 22, { parryable: false }); this.slow(e, 0.5, 3000); }
+        for (const e of this.hostileNear(p, p.x, p.y, 170)) { this.dealDamage(p, e, 28, { parryable: false }); this.slow(e, 0.5, 3000); e.chillUntil = T + 3500; }
         return;
       case 'poison_flask': {
         const pt = this.aimPoint(p, ang, 300);
@@ -622,7 +690,7 @@ export class Game {
         const pt = this.aimPoint(p, ang, 380);
         let cur = this.hostileNear(p, pt.x, pt.y, 160).sort((a, b) => dist(a, pt) - dist(b, pt))[0];
         const pts = [[rd(p.x), rd(p.y)]], hit = new Set();
-        let dmg = 40;
+        let dmg = 50;
         while (cur && hit.size < 4) {
           hit.add(cur.id); pts.push([rd(cur.x), rd(cur.y)]);
           this.dealDamage(p, cur, dmg, { parryable: false }); this.stun(cur, 250);
@@ -638,7 +706,7 @@ export class Game {
         return this.fx({ t: 'ring', x: p.x, y: p.y, r: 180, c: '#b88cff' });
       case 'meteor': {
         const pt = this.aimPoint(p, ang, 400);
-        this.zones.push({ type: 'meteor', x: pt.x, y: pt.y, r: 160, at: T + 1200, d: 1200, dmg: 130 * this.dmgMulOf(p), team: this.teamOf(p), stub: this.mkStub(p), owner: p.id });
+        this.zones.push({ type: 'meteor', x: pt.x, y: pt.y, r: 160, at: T + 1200, d: 1200, dmg: 170 * this.dmgMulOf(p), team: this.teamOf(p), stub: this.mkStub(p), owner: p.id });
         return;
       }
       case 'rejuvenation':
@@ -659,7 +727,7 @@ export class Game {
       }
       case 'war_horn':
         this.fx({ t: 'ring', x: p.x, y: p.y, r: 260, c: '#ffcf70', fill: 1 });
-        for (const e of this.hostileNear(p, p.x, p.y, 260)) { this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), 140); this.weaken(e, 5000); }
+        for (const e of this.hostileNear(p, p.x, p.y, 260)) { this.weaken(e, 5000); this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), 140, p); }
         return;
       case 'fortify':
         for (const e of this.alliesNear(p, p.x, p.y, 260)) if (e.shieldUntil !== undefined) e.shieldUntil = Math.max(e.shieldUntil, T + 5000);
@@ -668,7 +736,7 @@ export class Game {
       case 'parry': p.parryUntil = T + 650; return this.fx({ t: 'ring', x: p.x, y: p.y, r: 30, c: '#4fc3e0' });
       case 'dash': {
         const ox = p.x, oy = p.y;
-        [p.x, p.y] = moveBody(p.x, p.y, p.r, cos * 190, sin * 190);
+        [p.x, p.y] = moveBody(p.x, p.y, p.r, cos * 190, sin * 190); p.tp++;
         return this.fx({ t: 'line', x: ox, y: oy, x2: p.x, y2: p.y, c: '#bfefff' });
       }
       case 'riposte': {
@@ -683,14 +751,14 @@ export class Game {
           this.dealDamage(p, e, (win ? 62 : 28) * p.mods.melee, { melee: true, parryable: !win });
           this.weaken(e, 5000);
         }
-        p.x = ex; p.y = ey;
+        p.x = ex; p.y = ey; p.tp++;
         return this.fx({ t: 'line', x: ox, y: oy, x2: ex, y2: ey, c: win ? '#ffe070' : '#ffffff' });
       }
       case 'shadowstep': {
         const pt = this.aimPoint(p, ang, 300);
         for (let k = 0; k < 12; k++) {
           const f = 1 - k / 12, x = p.x + (pt.x - p.x) * f, y = p.y + (pt.y - p.y) * f;
-          if (freeAt(x, y, p.r)) { this.fx({ t: 'poof', x: p.x, y: p.y, c: '#402060' }); p.x = x; p.y = y; this.fx({ t: 'poof', x, y, c: '#402060' }); return; }
+          if (freeAt(x, y, p.r)) { this.fx({ t: 'poof', x: p.x, y: p.y, c: '#402060' }); p.x = x; p.y = y; p.tp++; this.fx({ t: 'poof', x, y, c: '#402060' }); return; }
         }
         return;
       }
@@ -710,6 +778,7 @@ export class Game {
     const id = p.hotbar[slot], sk = id && SKILLS[id];
     if (!sk || sk.passive || !p.skills.includes(id)) return;
     if ((p.cds[id] || 0) > this.T || p.en < sk.en) return;
+    this.cancelChannel(p, 'Teleport cancelled.');
     p.en -= sk.en; p.cds[id] = this.T + sk.cd; p.ang = ang;
     p.aimX = Number.isFinite(ax) ? ax : null; p.aimY = Number.isFinite(ay) ? ay : null;
     p.wp = WEAPON_OF[sk.tree]; p.atkAt = this.T;
@@ -725,13 +794,28 @@ export class Game {
     if (inSafe(p)) p.hp = Math.min(p.maxhp, p.hp + p.maxhp * 0.08 * DT);
     else if (T - p.lastHitAt > 5000) p.hp = Math.min(p.maxhp, p.hp + (1 + p.maxhp * 0.01) * DT);
     if (p.spin && T >= p.spin.next) {
-      this.meleeArc(p, 120, 6.4, 22, { c: '#ffb0a0' });
+      this.meleeArc(p, 120, 6.4, 26, { c: '#ffb0a0' });
       p.spin.next = T + 300;
       if (--p.spin.left <= 0) p.spin = null;
     }
+    // The client moves itself; the server only grants it a speed budget to spend (see handle 'in').
     const spd = this.speedOf(p);
-    const dx = ((p.k & 8) ? 1 : 0) - ((p.k & 4) ? 1 : 0), dy = ((p.k & 2) ? 1 : 0) - ((p.k & 1) ? 1 : 0), len = Math.hypot(dx, dy);
-    if (len > 0 && spd > 0) [p.x, p.y] = moveBody(p.x, p.y, p.r, (dx / len) * spd * DT, (dy / len) * spd * DT);
+    p.moveBudget = Math.min(spd * 0.5, p.moveBudget + spd * DT * 1.2);
+    if (p.channel) {
+      if (Math.hypot(p.x - p.channel.x, p.y - p.channel.y) > 12) this.cancelChannel(p, 'Teleport cancelled: you moved.');
+      else if (T >= p.channel.until) this.finishChannel(p);
+    }
+    if (p.rank >= AURA_RANK && p.fac && this.tickNo % 5 === 0) {
+      for (const o of this.near(p.x, p.y, 320)) if (o !== p && o.isPlayer && o.fac === p.fac) o.auraUntil = T + 400;
+    }
+  }
+  // Applies a position the client reports, limited by speed budget and collision.
+  clientMove(p, x, y) {
+    const dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy);
+    if (d < 0.05 || p.moveBudget <= 0) return;
+    const f = Math.min(1, p.moveBudget / d);
+    [p.x, p.y] = moveBody(p.x, p.y, p.r, dx * f, dy * f);
+    p.moveBudget -= d * f;
   }
   updateCastles() {
     for (const c of this.castles) {
@@ -808,7 +892,8 @@ export class Game {
     return JSON.stringify({
       t: 's', n: this.tickNo,
       me: { x: rd(p.x), y: rd(p.y), h: rd(p.hp), mh: p.maxhp, en: rd(p.en), me: p.maxen, v: p.valor, s: p.soma, sp: rd(this.speedOf(p)), fl: this.flagsOf(p), cd,
-        dead: p.dead ? 1 : 0, rs: p.dead ? Math.max(0, p.respawnAt - T) : 0, cz, cp, cdf },
+        dead: p.dead ? 1 : 0, rs: p.dead ? Math.max(0, p.respawnAt - T) : 0, cz, cp, cdf, tp: p.tp,
+      ch: p.channel ? [Math.max(0, p.channel.until - T), p.channel.total, p.channel.label] : 0 },
       e: ents, pr, zs, fx: fxs,
     });
   }
@@ -821,7 +906,25 @@ export class Game {
   // ---------------------------------------------------------------- messages from a client
   handle(p, m) {
     switch (m.t) {
-      case 'in': if (!p.dead) { p.k = m.k & 15; if (Number.isFinite(m.a)) p.ang = m.a; } break;
+      case 'in':
+        if (Number.isFinite(m.a)) p.ang = m.a;
+        // Positions sent before the client saw the latest forced move (dash, knockback, respawn) are stale.
+        if (!p.dead && m.tp === p.tp && Number.isFinite(m.x) && Number.isFinite(m.y)) this.clientMove(p, m.x, m.y);
+        break;
+      case 'recall':
+        if (p.dead || p.channel) break;
+        if (p.rank < RECALL_RANK) { this.say(p, 'Recall unlocks at the rank of Knight.'); break; }
+        if (inSafe(p)) break;
+        this.startChannel(p, 'haven', 'Recalling to Hanbin Haven');
+        break;
+      case 'travel': {
+        if (p.dead || p.channel) break;
+        if (p.rank < TRAVEL_RANK) { this.say(p, 'Fort travel unlocks at the rank of Baron.'); break; }
+        const c = this.castles.find((k) => k.id === (m.id | 0));
+        if (!c || !p.fac || c.owner !== p.fac) { this.say(p, 'You can only travel to castles your faction holds.'); break; }
+        this.startChannel(p, c.id, `Travelling to ${c.name}`);
+        break;
+      }
       case 'cast': this.cast(p, m.s, +m.a, +m.x, +m.y); break;
       case 'learn': {
         const sk = SKILLS[m.id];
