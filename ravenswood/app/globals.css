@@ -425,25 +425,25 @@ button.leader-row:hover{background:#ffffff08}
 .leader-name .deco-title{line-height:1.3}
 .profile-head h2+.deco-title{display:block;margin-top:2px}
 .modal h2+.deco-title{display:block;margin:-4px 0 4px}
-.seat-menu .deco-title{display:block;margin-top:-4px}
 .status-note.good{border-color:#4f6b45;color:#c9e3bd}
 .status-note.error{border-color:#7a4545;color:#f0c4c4}
 .status-note{margin:10px 0}
 .finale-points{display:flex;flex-direction:column;align-items:center;gap:3px;margin:-8px 0 18px;animation:finale-rise .6s ease-out 1.8s both}
 .finale-points strong{display:inline-flex;align-items:center;gap:6px;font-family:'Spectral',serif;font-size:20px;font-weight:500;color:#f0d9a6}
 .finale-points span{font-size:12px;color:var(--muted)}
-.shop-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin:16px 0 6px}
-.shop-preview,.shop-wallet{border:1px solid var(--line);border-radius:8px;padding:16px;background:#ffffff05}
-.shop-preview{display:flex;align-items:center;gap:20px;background:radial-gradient(circle at 25% 50%,#2c2638,#1c1b22 70%)}
-.shop-preview>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.shop-wallet{border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-top:10px}
+/* Pinned near the top of the drawer while the items scroll underneath. It sits 12px below the edge, and the
+   upward shadow fills that strip so cards never peek above it; the 16px margin keeps the heading clear. */
+.shop-preview{position:sticky;top:-26px;z-index:3;display:flex;align-items:center;gap:18px;margin-top:16px;padding:10px 16px;border:1px solid #4a3f57;border-radius:8px;background:radial-gradient(circle at 15% 50%,#2c2638,#1f1d26 60%) #1f1d26;box-shadow:0 -12px 0 #1c1b22,0 12px 24px #000a}
+.shop-preview-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .shop-preview small{color:var(--muted);font-size:11px}
 .shop-preview-name{font-family:'Spectral',serif;font-size:22px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shop-face{width:44px;height:44px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2d2836;border:1px solid #4c4355;color:#d0bedf;font-size:14px;font-weight:600}
 .shop-face.big{width:64px;height:64px;font-size:20px;margin:14px}
-.shop-balance{display:flex;align-items:baseline;gap:8px;font-family:'Spectral',serif;font-size:30px;color:#f0d9a6;line-height:1}
+.shop-balance{display:flex;align-items:baseline;gap:8px;font-family:'Spectral',serif;font-size:26px;color:#f0d9a6;line-height:1;flex-shrink:0}
 .shop-balance svg{align-self:center}
 .shop-balance small{font-family:'DM Sans',sans-serif;font-size:12px;color:var(--muted)}
-.shop-earn{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:3px;font-size:12px;color:var(--muted)}
+.shop-earn{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 28px;font-size:12px;color:var(--muted)}
 .shop-earn li{display:flex;justify-content:space-between;gap:8px}
 .shop-earn b{color:#d9c49a;font-weight:600}
 .shop-earn li.ready span{color:#c9e3bd}
@@ -484,7 +484,11 @@ button.leader-row:hover{background:#ffffff08}
 .shop-guest p{font-size:12px;color:var(--muted);margin-top:2px}
 .shop-footnote{margin-top:16px}
 @media(max-width:560px){
- .shop-top{grid-template-columns:1fr}
+ .shop-preview{top:-22px;gap:10px;padding:8px 12px}
+ .shop-face.big{width:46px;height:46px;font-size:15px;margin:9px}
+ .shop-preview-name{font-size:18px}
+ .shop-balance{font-size:20px;flex-direction:column;align-items:flex-end;gap:0}
+ .shop-earn{grid-template-columns:1fr}
  .shop-grid{grid-template-columns:1fr 1fr;gap:8px}
  .shop-sample{height:84px}
  .shop-item-text{padding:8px 10px 2px}
