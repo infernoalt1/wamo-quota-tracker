@@ -50,6 +50,8 @@ Open `/mafia/` for the multiplayer social deduction game: private rooms, host se
 
 Open `/wardmoor/` for the real-time multiplayer hack-and-slash prototype: one shared world with bots, nine capturable regions, warbands, and renown-unlocked gear. Production uses the existing Node server. For local Vite development, also run `npm run dev:wardmoor`. Run `npm run test:wardmoor`.
 
+Open `/eldyn/` for Hanbin Island, a top-down multiplayer MMO: accounts with saved progress, valor ranks (Peasant to King) and permanent soma tiers, five branching skill trees, factions, and 23 walled castles to conquer across a 24-region island. Accounts, progress, factions and castle owners are stored in Postgres (`hanbin_*` tables) when `DATABASE_URL` is set, otherwise in memory. Production uses the existing Node server. For local Vite development, also run `npm run dev:eldyn`. Run `npm run test:eldyn`.
+
 Open `/decrypto/` for the multiplayer codebreaking game: private rooms, two switchable lobby teams, spectators, rotating encryptors, team chat, automatic scoring, tiebreakers, reconnects, and rematches. Production uses the existing Node server. For local Vite development, also run `npm run dev:decrypto`. Run `npm run test:decrypto`; see [the game README](decrypto/README.md).
 
 ## Blood on the Clocktower

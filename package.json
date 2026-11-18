@@ -12,6 +12,8 @@
     "test:mafia": "node --test mafia/*.test.mjs",
     "dev:wardmoor": "node wardmoor/server.mjs",
     "test:wardmoor": "node --test wardmoor/*.test.mjs",
+    "dev:eldyn": "node eldyn/server.mjs",
+    "test:eldyn": "node --test eldyn/*.test.mjs",
     "test:botc": "node --test ravenswood/tests/engine.test.mjs",
     "build": "vite build",
     "prebuild": "node scripts/prepare-vm.mjs && node scripts/hollowknight-manifest.mjs",

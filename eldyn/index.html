@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hanbin Island</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="tl" class="abs box">
+    <div class="namerow"><span id="pname"></span><span id="prank"></span></div>
+    <div class="bar"><i id="valbar" class="valor"></i><span id="valtxt"></span></div>
+    <div class="bar"><i id="somabar" class="soma"></i><span id="somatxt"></span></div>
+    <div id="ptsrow"></div>
+    <div id="facrow"></div>
+    <div id="passives" title="Passive skills"></div>
+  </div>
+  <div id="bl" class="abs">
+    <div id="chatlog"></div>
+    <input id="chatin" maxlength="120" placeholder="Say something... (/f message for faction chat)" autocomplete="off">
+  </div>
+  <div id="bottom" class="abs">
+    <div id="bars">
+      <div class="bar big"><i id="hpbar" class="hp"></i><span id="hptxt"></span></div>
+      <div class="bar big"><i id="enbar" class="en"></i><span id="entxt"></span></div>
+    </div>
+    <div id="hotbar"></div>
+  </div>
+  <div id="tr" class="abs box">
+    <canvas id="mini" width="236" height="157"></canvas>
+    <div id="regionlbl"></div>
+    <div class="menu">
+      <button data-open="skills" title="Skill trees">K Skills</button><button data-open="factions" title="Factions">F Factions</button><button data-open="map" title="World map">M Map</button><button data-open="board" title="Leaderboard">Tab Ranks</button><button data-open="help" title="How to play">H Help</button>
+    </div>
+  </div>
+  <div id="capture" class="abs box"><div id="captxt"></div><div class="bar"><i id="capbar" class="cap"></i></div></div>
+  <div id="toast" class="abs"></div>
+  <div id="death" class="abs"><div><div class="dt">You have fallen</div><small id="deathtxt"></small></div></div>
+</div>
+
+<div id="skills" class="panel">
+  <h2><span>Skill Trees <small id="skpts"></small></span><span class="x" data-close>✕</span></h2>
+  <div id="treetabs"></div>
+  <div class="skillwrap"><div id="treeview"></div><div id="skinfo"></div></div>
+</div>
+<div id="factions" class="panel"><h2><span>Factions</span><span class="x" data-close>✕</span></h2><div id="facbody"></div></div>
+<div id="board" class="panel"><h2><span>Leaderboard</span><span class="x" data-close>✕</span></h2><div id="boardbody"></div></div>
+<div id="map" class="panel"><h2><span>Map of Hanbin Island</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas></div>
+<div id="help" class="panel">
+  <h2><span>How to play</span><span class="x" data-close>✕</span></h2>
+  <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Use skills</b> <kbd>1</kbd>–<kbd>0</kbd>, <kbd>Left click</kbd> = slot 1, <kbd>Right click</kbd> = slot 2 (hold to repeat)</p>
+  <p><kbd>K</kbd> skills · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> leaderboard · <kbd>Enter</kbd> chat (<code>/f message</code> for faction chat) · <kbd>Esc</kbd> close</p>
+  <p><b>Soma</b> is permanent and never capped. Every soma tier gives a skill point, and every 5 tiers unlocks another hotbar slot (up to 10).</p>
+  <p><b>Valor</b> is capped and sets your rank, from Peasant to King. Your armour improves with rank. You lose 75% of your valor when you die.</p>
+  <p>Earn both by slaying monsters and players and by conquering castles. Danger (◆) rises toward the coasts, and so do the rewards.</p>
+  <p><b>Skill trees</b>: Blade, Marksman, Alchemy &amp; Sorcery, Command and Technique. Each tree branches, and some skills are passives. Skills have long cooldowns, so mix trees to build your own kit.</p>
+  <p><b>Factions</b>: found or join one. Faction members and the soldiers of your faction's castles are your allies.</p>
+  <p><b>Conquest</b>: every region has a walled castle. Enter its courtyard, defeat every defender (its guards and any players of the owning faction), then hold the courtyard to claim it. You need a faction. Hanbin Haven, the village at the centre, is a safe zone.</p>
+  <p><b>Parry</b> a hit to stun and weaken the attacker, then <b>Riposte</b> for a double-damage lunge.</p>
+</div>
+
+<div id="login">
+  <div class="card">
+    <h1>Hanbin Island</h1>
+    <p class="tag">Conquer castles. Found factions. Rise from peasant to king.</p>
+    <div id="resume">
+      <p>Signed in as <b id="resumeName"></b></p>
+      <button id="resumeBtn" class="primary big">Play</button>
+      <button id="switchBtn" class="link">Use a different account</button>
+    </div>
+    <form id="authform" autocomplete="on">
+      <div class="tabs"><button type="button" id="tabLogin" class="on">Sign in</button><button type="button" id="tabRegister">Create account</button></div>
+      <input id="userIn" class="txt" maxlength="16" placeholder="Username" autocomplete="username" required>
+      <input id="passIn" class="txt" type="password" maxlength="72" placeholder="Password (6+ characters)" autocomplete="current-password" required>
+      <button id="authBtn" class="primary big" type="submit">Sign in</button>
+    </form>
+    <div id="loginmsg"></div>
+  </div>
+</div>
+
+<script type="module" src="client.mjs"></script>
+</body>
+</html>
