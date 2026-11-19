@@ -185,7 +185,8 @@ function buildPassives() {
 }
 function updateHud() {
   const r = rankOf(me.v);
-  $('pname').textContent = prof.name || '';
+  $('pname').textContent = (prof.vet ? '★ ' : '') + (prof.name || '');
+  $('pname').title = prof.vet ? 'Veteran: played before Season 2' : '';
   $('prank').textContent = r.name;
   $('valbar').style.width = (r.next ? (me.v - r.cur) / (r.next - r.cur) : 1) * 100 + '%';
   $('valtxt').textContent = `Valor ${me.v}${r.next ? ' / ' + r.next : ' (max)'}`;
@@ -376,7 +377,7 @@ function renderBoard() {
   b.appendChild(rt);
   b.appendChild(el('h4', '', 'Top players online'));
   const t = el('table', 'lb'); t.innerHTML = '<tr><th>#</th><th>Name</th><th>Rank</th><th>Valor</th><th>Soma</th></tr>';
-  meta.lb.forEach((p, i) => { const tr = el('tr'); const f = facInfo.get(p.f); [i + 1, (f ? `[${f.name}] ` : '') + p.n, rankOf(p.v).name, p.v, `T${p.t} (${p.s})`].forEach((v) => tr.appendChild(el('td', '', String(v)))); t.appendChild(tr); });
+  meta.lb.forEach((p, i) => { const tr = el('tr'); const f = facInfo.get(p.f); [i + 1, (f ? `[${f.name}] ` : '') + (p.vt ? '★ ' : '') + p.n, rankOf(p.v).name, p.v, `T${p.t} (${p.s})`].forEach((v) => tr.appendChild(el('td', '', String(v)))); t.appendChild(tr); });
   b.appendChild(t);
   b.appendChild(el('h4', '', 'Realm control'));
   const f = [...facInfo.values()].filter((x) => x.c).sort((a, c) => c.c - a.c);
@@ -689,7 +690,7 @@ function drawLabels(o, x, y) {
   }
   ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   if (o.k === 'player') {
-    const f = facInfo.get(o.f), nm = o.n || prof.name;
+    const f = facInfo.get(o.f), nm = ((self ? prof.vet : o.vt) ? '★ ' : '') + (o.n || prof.name);
     ctx.font = 'bold 12px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 3;
     ctx.strokeText(nm, x, y - r - 30); ctx.fillStyle = self ? '#fff3c4' : ally ? '#a8f0b0' : '#ffd0c0'; ctx.fillText(nm, x, y - r - 30);
     ctx.font = '10px Georgia'; const sub = `${f ? f.name + ' · ' : ''}${RANKS[o.rk || 0].name}`;

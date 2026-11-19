@@ -4,7 +4,7 @@ import {
   WORLD, VILLAGE, REGIONS, CASTLES, CASTLE_TYPES, SANCTUARY, REGION_CELLS, RC, GW, SKILLS, MOBS, WILD_BY_BIOME, ELITE_AFFIXES, VALOR_CAP, FREE_SKILLS, TREE_OF,
   DUNGEONS, CAVES, RELICS, RELIC_LIST, RARITIES, MAX_RELIC_LV, MAX_STASH, CRATES, CASTLE_LEVEL_COST, CASTLE_TAX,
   rankOf, tierOf, slotsForTier, relicSlotsForTier, relicValue, garrisonFor, inCastle, inCastleWalls, moveBody, freeAt, shotBlocked, losClear,
-  rankBonus, RECALL_RANK, TRAVEL_RANK, AURA_RANK, ISLAND_REGIONS, dungeonAt,
+  rankBonus, RECALL_RANK, TRAVEL_RANK, AURA_RANK, ISLAND_REGIONS, dungeonAt, somaForTier,
 } from './shared.mjs';
 
 const { W } = WORLD;
@@ -28,6 +28,21 @@ function pickWeighted(tbl) {
 }
 export const factionNameOk = (n) => /^[\p{L}\p{N} _\-']{3,16}$/u.test(n);
 
+// ---------------------------------------------------------------- seasons
+// Season 2 (relics, dungeons, the big island) started everyone fresh. Players from before keep a
+// Veteran badge, a small head start (10% of their old soma, at most tier 5) and 300 gold; their old
+// progress is kept untouched under `legacy`. New players earn double soma until tier 5 to catch up.
+export const SEASON = 2, FRESH_TIERS = 5;
+export function migrateProgress(pr) {
+  if (pr.season === SEASON) return { progress: pr, note: null };
+  const oldSoma = Math.max(0, pr.soma | 0), played = oldSoma > 0 || (pr.valor | 0) > 0;
+  const progress = { season: SEASON, soma: Math.min(Math.round(oldSoma * 0.1), somaForTier(FRESH_TIERS)), fac: pr.fac || 0, bank: played ? 300 : 0 };
+  if (!played) return { progress, note: null };
+  progress.vet = 1;
+  progress.legacy = { season: pr.season || 1, soma: oldSoma, valor: pr.valor | 0, skills: pr.skills || [], hotbar: pr.hotbar || [] };
+  return { progress, note: `Season ${SEASON} has begun and everyone starts fresh. As a veteran you keep the ★ badge, a head start of ${progress.soma} soma and 300 gold for relic crates. Your old record (${oldSoma} soma) is saved.` };
+}
+
 export class Game {
   constructor({ world = {}, now = () => Date.now() } = {}) {
     this.now = now; this.T = now(); this.tickNo = 0; this.idc = 0;
@@ -35,9 +50,10 @@ export class Game {
     this.projs = []; this.zones = []; this.fxq = []; this.recentKills = new Map();
     this.factions = {}; this.nextFac = world.nextFac || 1;
     for (const [id, f] of Object.entries(world.factions || {})) this.factions[id] = { ...f, members: [...(f.members || [])] };
-    this.worldDirty = false;
+    this.worldDirty = world.season !== SEASON;
     this.castles = CASTLES.map((c) => {
-      const saved = world.castles && world.castles[c.id];
+      // A new season returns every castle to the bandits; factions themselves carry over.
+      const saved = world.season === SEASON && world.castles && world.castles[c.id];
       const ownerId = typeof saved === 'object' && saved ? saved.o : saved;
       const owner = ownerId && this.factions[ownerId] ? +ownerId : 0;
       const level = owner && typeof saved === 'object' ? clamp(saved.l | 0, 1, 3) : 1;
@@ -278,6 +294,7 @@ export class Game {
     if (!p || !p.isPlayer) return;
     const oldTier = p.tier, oldRank = rankOf(p.valor).idx;
     p.valor = Math.min(VALOR_CAP, p.valor + v);
+    if (p.tier < FRESH_TIERS) s *= 2; // newcomers earn double soma until tier 5
     p.soma += s; p.gold += g; p.dirty = true;
     if (v || s || g) this.send(p, { t: 'gain', v, s, g });
     const nt = tierOf(p.soma);
@@ -425,7 +442,7 @@ export class Game {
   }
   sendProf(p) {
     this.recalc(p);
-    this.send(p, { t: 'prof', skills: p.skills, hotbar: p.hotbar, pts: p.pts, slots: p.slots, tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, dmg: +p.dmgMul.toFixed(2), relics: p.relics, equip: p.equip, rslots: p.rslots });
+    this.send(p, { t: 'prof', skills: p.skills, hotbar: p.hotbar, pts: p.pts, slots: p.slots, tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, dmg: +p.dmgMul.toFixed(2), relics: p.relics, equip: p.equip, rslots: p.rslots, vet: p.vet });
   }
   send(p, obj) { if (p.out) p.out(typeof obj === 'string' ? obj : JSON.stringify(obj)); }
   broadcast(obj) { const s = JSON.stringify(obj); for (const p of this.players.values()) this.send(p, s); }
@@ -433,7 +450,7 @@ export class Game {
   // account = { id, username, progress }, out = function(string)
   join(account, out) {
     for (const o of this.players.values()) if (o.accountId === account.id) { this.send(o, { t: 'kicked', m: 'You signed in somewhere else.' }); if (o.onKick) o.onKick(); this.leave(o); }
-    const pr = account.progress || {};
+    const { progress: pr, note } = migrateProgress(account.progress || {});
     const fac = pr.fac && this.factions[pr.fac] && this.factions[pr.fac].members.includes(account.id) ? +pr.fac : 0;
     const skills = [...new Set([...FREE_SKILLS, ...(Array.isArray(pr.skills) ? pr.skills : []).filter((s) => SKILLS[s])])];
     let hotbar = Array.isArray(pr.hotbar) ? pr.hotbar.slice(0, 10) : ['slash', 'arrow'];
@@ -452,7 +469,7 @@ export class Game {
       gold: Math.max(0, pr.gold | 0), bank: Math.max(0, pr.bank | 0), relics, equip, nu, rel: {},
       tier: 0, hp: 100, en: 100, dead: false, respawnAt: 0, cds: {}, spin: null, hitCount: 0, moveTime: 0, lastMoveAt: 0, pulseAt: 0, portalCd: 0,
       stunUntil: 0, slowUntil: 0, slowF: 1, weakUntil: 0, buffUntil: 0, shieldUntil: 0, parryUntil: 0, counterUntil: 0, riposteUntil: 0, regenUntil: 0, regenRate: 0,
-      lastHit: null, lastHitAt: 0, lastChat: 0, dirty: false,
+      lastHit: null, lastHitAt: 0, lastChat: 0, dirty: !!note, vet: pr.vet ? 1 : 0, legacy: pr.legacy,
     };
     p.tier = tierOf(p.soma);
     this.recalc(p);
@@ -466,6 +483,7 @@ export class Game {
     this.sendProf(p);
     this.send(p, { t: 'meta', ...this.metaObj() });
     this.send(p, { t: 'msg', m: 'Welcome to Hanbin Island! Press H for help, K for skills, I for relics, F for factions.', c: '#e0b84f' });
+    if (note) { this.send(p, { t: 'msg', m: note, c: '#ffd070' }); this.send(p, { t: 'toast', m: `Season ${SEASON} has begun!` }); }
     return p;
   }
   leave(p) {
@@ -474,11 +492,13 @@ export class Game {
     this.players.delete(p.id);
     for (const z of this.zones) if (z.owner === p.id && z.type === 'trap') z.until = 0;
   }
-  progressOf(p) { return { valor: p.valor, soma: p.soma, skills: p.skills, hotbar: p.hotbar, fac: p.fac || 0, gold: p.gold, bank: p.bank, relics: p.relics, equip: p.equip, nu: p.nu }; }
+  progressOf(p) {
+    return { season: SEASON, valor: p.valor, soma: p.soma, skills: p.skills, hotbar: p.hotbar, fac: p.fac || 0, gold: p.gold, bank: p.bank, relics: p.relics, equip: p.equip, nu: p.nu, vet: p.vet, legacy: p.legacy };
+  }
   worldState() {
     const castles = {};
     for (const c of this.castles) if (c.owner) castles[c.id] = { o: c.owner, l: c.level };
-    return { factions: this.factions, castles, nextFac: this.nextFac };
+    return { season: SEASON, factions: this.factions, castles, nextFac: this.nextFac };
   }
 
   // ---------------------------------------------------------------- relics, gold and the shop
@@ -1222,7 +1242,7 @@ export class Game {
       if (e.dead || Math.abs(e.x - vx) > VIEW_W || Math.abs(e.y - vy) > VIEW_H) return;
       const o = { i: e.id, k: e.kind, x: rd(e.x), y: rd(e.y), a: +e.ang.toFixed(2), h: rd(e.hp), m: rd(e.maxhp), fl: this.flagsOf(e) };
       if (e.atkAt && T - e.atkAt < 300) o.at = 1;
-      if (e.isPlayer) { o.n = e.name; o.f = e.fac || 0; o.rk = rankOf(e.valor).idx; o.wp = e.wp; if (e.spin) o.sp = 1; }
+      if (e.isPlayer) { o.n = e.name; o.f = e.fac || 0; o.rk = rankOf(e.valor).idx; o.wp = e.wp; if (e.spin) o.sp = 1; if (e.vet) o.vt = 1; }
       else {
         if (e.owner) { const ow = this.players.get(e.owner); o.f = ow ? ow.fac || 0 : 0; o.ow = e.owner; } else o.f = e.fac || 0;
         if (e.elite) o.el = e.elite;
@@ -1258,7 +1278,7 @@ export class Game {
   }
   metaObj() {
     const facs = Object.values(this.factions).map((f) => ({ id: f.id, name: f.name, color: f.color, m: f.members.length, c: this.castles.filter((c) => c.owner === f.id).length, l: f.leaderName || '?' }));
-    const lb = [...this.players.values()].sort((a, b) => b.valor - a.valor || b.soma - a.soma).slice(0, 10).map((p) => ({ n: p.name, v: p.valor, s: p.soma, t: p.tier, f: p.fac || 0 }));
+    const lb = [...this.players.values()].sort((a, b) => b.valor - a.valor || b.soma - a.soma).slice(0, 10).map((p) => ({ n: p.name, v: p.valor, s: p.soma, t: p.tier, f: p.fac || 0, vt: p.vet || 0 }));
     const bosses = this.dungeons.map((ds) => (ds.boss ? 0 : Math.max(0, ds.bossAt - this.T)));
     return { c: this.castles.map((c) => [c.id, c.owner || 0, c.level]), f: facs, lb, on: this.players.size, bosses };
   }

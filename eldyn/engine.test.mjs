@@ -4,7 +4,7 @@ import http from 'node:http';
 import express from 'express';
 import { WebSocket } from 'ws';
 import { CASTLES, CASTLE_TYPES, VILLAGE, SKILLS, SKILL_LIST, TREES, DUNGEONS, CAVES, RELIC_LIST, MOBS, landValue, moveBody, inCastle, inCastleWalls, losClear, passable, dungeonAt, tierOf, somaForTier } from './shared.mjs';
-import { Game, CAPTURE_TIME } from './engine.mjs';
+import { Game, CAPTURE_TIME, SEASON, migrateProgress } from './engine.mjs';
 import { memoryStore, accountService } from './accounts.mjs';
 import { setupEldyn } from './server.mjs';
 
@@ -12,7 +12,7 @@ function setup(progress = {}) {
   let t = 1e12;
   const game = new Game({ now: () => t });
   const msgs = [];
-  const p = game.join({ id: 'acc-1', username: 'Tester', progress }, (s) => msgs.push(JSON.parse(s)));
+  const p = game.join({ id: 'acc-1', username: 'Tester', progress: { season: SEASON, ...progress } }, (s) => msgs.push(JSON.parse(s)));
   game.gridBuild();
   return { game, p, msgs, advance: (ms) => { t += ms; } };
 }
@@ -204,7 +204,7 @@ test('faction names allow spaces and accents, and errors are reported', () => {
 
 test('a saved world is restored, including castle owners and levels', () => {
   const c = CASTLES[2];
-  const world = { factions: { 3: { id: 3, name: 'Gulls', color: '#3498db', leader: 'a', leaderName: 'A', members: ['acc-1'] } }, castles: { [c.id]: { o: 3, l: 3 } }, nextFac: 4 };
+  const world = { season: SEASON, factions: { 3: { id: 3, name: 'Gulls', color: '#3498db', leader: 'a', leaderName: 'A', members: ['acc-1'] } }, castles: { [c.id]: { o: 3, l: 3 } }, nextFac: 4 };
   const game = new Game({ world, now: () => 1e12 });
   const gc = game.castles.find((k) => k.id === c.id);
   assert.equal(gc.owner, 3); assert.equal(gc.level, 3);
@@ -261,4 +261,31 @@ test('server: sign up over HTTP, join over WebSocket, progress is saved on leave
     assert.equal(a.progress.soma, 777); assert.equal(a.progress.bank, 55);
     assert.deepEqual(a.progress.relics, [{ u: 9, k: 'keen_edge', lv: 2 }]);
   } finally { h.close(); server.close(); }
+});
+
+test('season 2: veterans start fresh with a badge, a capped head start and their old record kept', () => {
+  const { progress, note } = migrateProgress({ soma: 26000, valor: 3500, skills: ['cleave'], fac: 3 });
+  assert.equal(progress.season, SEASON); assert.equal(progress.vet, 1); assert.equal(progress.bank, 300);
+  assert.equal(progress.soma, somaForTier(5), 'head start capped at tier 5');
+  assert.equal(progress.legacy.soma, 26000); assert.equal(progress.fac, 3); assert.ok(note);
+  assert.equal(migrateProgress({ soma: 900 }).progress.soma, 90, '10% of old soma');
+  const fresh = migrateProgress({});
+  assert.ok(!fresh.progress.vet && !fresh.note && fresh.progress.soma === 0, 'brand-new players are not veterans');
+  assert.equal(migrateProgress(progress).progress, progress, 'migrates only once');
+});
+
+test('old castle owners are cleared for the new season, but factions stay', () => {
+  const c = CASTLES[2];
+  const game = new Game({ world: { factions: { 3: { id: 3, name: 'Gulls', color: '#3498db', leader: 'a', members: ['a'] } }, castles: { [c.id]: 3 }, nextFac: 4 }, now: () => 1e12 });
+  assert.equal(game.castles.find((k) => k.id === c.id).owner, 0);
+  assert.ok(game.factions[3]);
+});
+
+test('newcomers earn double soma until tier 5', () => {
+  const { game, p } = setup();
+  game.gain(p, 0, 10);
+  assert.equal(p.soma, 20);
+  p.soma = somaForTier(5); p.tier = 5;
+  game.gain(p, 0, 10);
+  assert.equal(p.soma, somaForTier(5) + 10);
 });
