@@ -1,6 +1,8 @@
 // Hanbin Island: HTTP routes, accounts and the WebSocket game server, mounted at /eldyn.
 import express from 'express';
 import http from 'node:http';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Game, TICK } from './engine.mjs';
@@ -9,6 +11,16 @@ import { accountService, defaultStore } from './accounts.mjs';
 const FILES = { '': 'index.html', 'index.html': 'index.html', 'client.mjs': 'client.mjs', 'shared.mjs': 'shared.mjs', 'sprites.mjs': 'sprites.mjs', 'terrain.mjs': 'terrain.mjs', 'chunkworker.mjs': 'chunkworker.mjs', 'style.css': 'style.css' };
 const TYPES = { html: 'text/html; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' };
 const SAVE_EVERY = 15000;
+const readFile = (name) => fs.readFileSync(fileURLToPath(new URL(name, import.meta.url)), 'utf8');
+// Every file reference carries a version taken from the files' contents, so after an update no
+// browser or proxy can pair new code with an old cached copy of another file.
+const VERSION = createHash('sha1').update([...new Set(Object.values(FILES))].sort().map(readFile).join('\0')).digest('hex').slice(0, 10);
+function versioned(name) {
+  let s = readFile(name);
+  if (name === 'index.html') return s.replace(/(href|src)="(style\.css|client\.mjs)"/g, `$1="$2?v=${VERSION}"`);
+  if (name.endsWith('.mjs')) s = s.replace(/(['"])\.\/([\w-]+\.mjs)\1/g, `$1./$2?v=${VERSION}$1`);
+  return s;
+}
 
 export function setupEldyn(app, server, { store = defaultStore(), now = () => Date.now() } = {}) {
   const accounts = accountService(store);
@@ -22,8 +34,10 @@ export function setupEldyn(app, server, { store = defaultStore(), now = () => Da
     const name = FILES[req.params.file || ''];
     if (!name) return next();
     res.setHeader('Content-Type', TYPES[name.split('.').pop()]);
-    res.setHeader('Cache-Control', 'no-cache'); res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.sendFile(fileURLToPath(new URL(name, import.meta.url)));
+    // The page itself is always revalidated; versioned files never change, so they can be cached.
+    res.setHeader('Cache-Control', name !== 'index.html' && req.query.v === VERSION ? 'public, max-age=31536000, immutable' : 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(versioned(name));
   });
 
   // ---------------------------------------------------------------- accounts

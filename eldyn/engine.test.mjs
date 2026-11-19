@@ -244,6 +244,13 @@ test('server: sign up over HTTP, join over WebSocket, progress is saved on leave
     const page = await fetch(`http://${base}/eldyn/`);
     assert.match(await page.text(), /Hanbin Island/);
     for (const f of ['shared.mjs', 'terrain.mjs', 'chunkworker.mjs', 'sprites.mjs', 'client.mjs']) assert.match((await fetch(`http://${base}/eldyn/${f}`)).headers.get('content-type'), /javascript/, f);
+    // Every file reference is versioned so stale caches can never mix old and new files.
+    const html = await (await fetch(`http://${base}/eldyn/`)).text(), v = html.match(/style\.css\?v=(\w+)/)[1];
+    assert.match(html, new RegExp(`client\\.mjs\\?v=${v}`));
+    const client = await (await fetch(`http://${base}/eldyn/client.mjs?v=${v}`)).text();
+    assert.match(client, new RegExp(`'\\./shared\\.mjs\\?v=${v}'`)); assert.match(client, new RegExp(`'\\./chunkworker\\.mjs\\?v=${v}'`));
+    const css = await fetch(`http://${base}/eldyn/style.css?v=${v}`);
+    assert.match(css.headers.get('cache-control'), /immutable/); assert.match(await css.text(), /\.relic \{/);
     const reg = await (await fetch(`http://${base}/eldyn/api/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Bram', password: 'castle99' }) })).json();
     const ws = new WebSocket(`ws://${base}/eldyn/ws`);
     const seen = new Set();
