@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Game, TICK } from './engine.mjs';
 import { accountService, defaultStore } from './accounts.mjs';
 
-const FILES = { '': 'index.html', 'index.html': 'index.html', 'client.mjs': 'client.mjs', 'shared.mjs': 'shared.mjs', 'sprites.mjs': 'sprites.mjs', 'terrain.mjs': 'terrain.mjs', 'chunkworker.mjs': 'chunkworker.mjs', 'style.css': 'style.css' };
+const FILES = { '': 'index.html', 'index.html': 'index.html', 'client.mjs': 'client.mjs', 'shared.mjs': 'shared.mjs', 'builds.mjs': 'builds.mjs', 'sprites.mjs': 'sprites.mjs', 'terrain.mjs': 'terrain.mjs', 'chunkworker.mjs': 'chunkworker.mjs', 'style.css': 'style.css' };
 const TYPES = { html: 'text/html; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' };
 const SAVE_EVERY = 15000;
 const readFile = (name) => fs.readFileSync(fileURLToPath(new URL(name, import.meta.url)), 'utf8');

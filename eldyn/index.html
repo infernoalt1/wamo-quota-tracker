@@ -14,10 +14,11 @@
     <div class="namerow"><span id="pname"></span><span id="prank"></span></div>
     <div class="bar"><i id="valbar" class="valor"></i><span id="valtxt"></span></div>
     <div class="bar"><i id="somabar" class="soma"></i><span id="somatxt"></span></div>
+    <div class="bar"><i id="mastbar" class="mast"></i><span id="masttxt"></span></div>
     <div id="goldrow"></div>
     <div id="ptsrow"></div>
     <div id="facrow"></div>
-    <div id="passives" title="Passive skills"></div>
+    <div id="passives" title="Passive talents"></div>
   </div>
   <div id="bl" class="abs">
     <div id="chatlog"></div>
@@ -34,7 +35,7 @@
     <canvas id="mini" width="236" height="157"></canvas>
     <div id="regionlbl"></div>
     <div class="menu">
-      <button data-open="skills" data-label="Skills" title="Skill trees">K Skills</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="inv" data-label="Relics" title="Relics and the merchant">I Relics</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
+      <button data-open="skills" data-label="Talents" title="Talents and weapon mastery">K Talents</button><button data-open="armory" data-label="Armory" title="Weapons and the blacksmith">G Armory</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="inv" data-label="Relics" title="Relics and the merchant">I Relics</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
     </div>
   </div>
   <div id="capture" class="abs box"><div id="captxt"></div><div class="bar"><i id="capbar" class="cap"></i></div></div>
@@ -44,10 +45,11 @@
 </div>
 
 <div id="skills" class="panel">
-  <h2><span>Skill Trees <small id="skpts"></small></span><span><button id="resetBtn" class="small" title="Refund every skill point. Only works in Hanbin Haven.">Reset skill points</button> <span class="x" data-close>✕</span></span></h2>
+  <h2><span>Talents &amp; Mastery <small id="skpts"></small></span><span><button id="resetBtn" class="small" title="Refund the points in this tree. Only works in Hanbin Haven.">Reset talents</button> <span class="x" data-close>✕</span></span></h2>
   <div id="treetabs"></div>
   <div class="skillwrap"><div id="treeview"></div><div id="skinfo"></div></div>
 </div>
+<div id="armory" class="panel"><h2><span>Armory</span><span class="x" data-close>✕</span></h2><div id="armorybody"></div></div>
 <div id="factions" class="panel"><h2><span>Factions</span><span class="x" data-close>✕</span></h2><div id="facbody"></div></div>
 <div id="board" class="panel"><h2><span>Ranks &amp; Leaderboard</span><span class="x" data-close>✕</span></h2><div id="boardbody"></div></div>
 <div id="inv" class="panel"><h2><span>Relics</span><span class="x" data-close>✕</span></h2><div id="invbody"></div></div>
@@ -55,20 +57,25 @@
 <div id="map" class="panel"><h2><span>Map of Hanbin Island</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas><p id="maphint" class="dim"></p></div>
 <div id="help" class="panel">
   <h2><span>How to play</span><span class="x" data-close>✕</span></h2>
-  <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Use skills</b> <kbd>1</kbd>–<kbd>0</kbd>, <kbd>Left click</kbd> = slot 1, <kbd>Right click</kbd> = slot 2 (hold to repeat)</p>
-  <p><kbd>K</kbd> skills · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> leaderboard · <kbd>Enter</kbd> chat (<code>/f message</code> for faction chat) · <kbd>Esc</kbd> close</p>
-  <p>These are the default keys. Change any of them under <b>Keybinds</b> (<kbd>O</kbd>). You can reset your skill points for free in the Skill Trees panel, but only while standing in Hanbin Haven.</p>
-  <p><b>Soma</b> is permanent and never capped. Every soma tier gives a skill point, every 4 tiers another relic slot (up to 6), and every 5 tiers another hotbar slot (up to 10). Each tier costs more soma than the last, so this is a long climb.</p>
+  <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Attack</b>: hold <kbd>Left click</kbd> · <b>Dodge roll</b> <kbd>Space</kbd> · <b>Switch weapon</b> <kbd>X</kbd> · <b>Abilities</b> <kbd>1</kbd>–<kbd>6</kbd> (<kbd>Right click</kbd> = ability 1)</p>
+  <p><kbd>K</kbd> talents · <kbd>G</kbd> armory · <kbd>I</kbd> relics · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> leaderboard · <kbd>Enter</kbd> chat (<code>/f message</code> for faction chat) · <kbd>Esc</kbd> close</p>
+  <p>These are the default keys. Change any of them under <b>Keybinds</b> (<kbd>O</kbd>).</p>
+  <h3>Fighting</h3>
+  <p><b>Your weapon does most of the work.</b> Hold left click to keep attacking. The Longsword's third swing is a heavy cleave; the Greataxe is slow and shoves foes back; Twin Daggers stab fast and hit harder from behind; the War Spear pierces a whole line; the Longbow shoots from afar; the Runestaff fires bolts that burst. You carry two weapons and swap with <kbd>X</kbd>. Change which two in the <b>Armory</b> (<kbd>G</kbd>) in the Haven or your castle.</p>
+  <p><b>Energy</b> comes back mostly by landing weapon hits, and abilities spend it, so fighting feeds your abilities. The <b>dodge roll</b> slips past every attack while you roll: use it on red warning circles and big hits.</p>
+  <p><b>Talents</b> (<kbd>K</kbd>): five trees (Warfare, Precision, Arcana, Command, Finesse), mostly passives that change how your attacks work, with a few abilities. Every soma tier gives one talent point. Many talents take several ranks, each row needs 2 more points in that tree, and there are far more talents than points, so choose.</p>
+  <p><b>Weapon mastery</b>: soma you earn also trains the weapon in your hands. Each mastery level is a point for that weapon's own tree, with its passives and two or three weapon abilities. Mastery talents only work while that weapon is in hand. The <b>blacksmith</b> in the Haven forges weapons for banked gold (+6% weapon damage per level, up to +10).</p>
+  <p>You can reset talents or any weapon's mastery for free in the Talents panel while standing in Hanbin Haven.</p>
+  <p><b>Soma</b> is permanent and never capped. Every soma tier gives a talent point, and every 4 tiers another relic slot (up to 6). Each tier costs more soma than the last, so this is a long climb.</p>
   <p><b>Season 2</b>: everyone started fresh with the new island. Players from before wear a ★ Veteran badge and began with a small head start. Until soma tier 5, everyone earns <b>double soma</b> so new players catch up fast.</p>
   <p><b>Relics</b> (<kbd>I</kbd>) are your build. They change every attack you make: splash, lifesteal, pulling enemies in, burning, crits, chain lightning, exploding corpses and more. Stack relics that feed each other. They drop from elites (gold names), bosses and occasionally any monster, or come from crates sold in the Haven. Two of the same relic and level fuse into a stronger one.</p>
   <p><b>Gold</b> buys crates, pays for fusing and fortifies your faction's castles. Gold you are <i>carrying</i> is at risk: dying drops half of it for anyone to grab. It is banked automatically when you walk into Hanbin Haven or a castle your faction holds.</p>
   <p><b>Dungeons</b>: cave mouths (◉ on the map) lead to multi-room dungeons shared with everyone. Each ends in a boss with telegraphed attacks: get out of the red circles. Bosses drop the best relics and come back 8 minutes after they die.</p>
   <p><b>Valor</b> is capped and sets your rank, from Peasant to King. Your armour improves with rank. You lose 75% of your valor when you die.</p>
   <p>Earn both by slaying monsters and players and by conquering castles. Danger (◆) rises toward the coasts, and so do the rewards.</p>
-  <p><b>Skill trees</b>: Blade, Marksman, Alchemy &amp; Sorcery, Command and Technique. Each tree branches, and some skills are passives. Skills have long cooldowns, so mix trees to build your own kit.</p>
   <p><b>Factions</b>: found or join one. Faction members and the soldiers of your faction's castles are your allies.</p>
   <p><b>Conquest</b>: every region has a fort, castle or moated citadel; the deadlier the region, the bigger the fortress. Castles pay taxes to their faction every minute, can be fortified with gold, and let you bank gold and swap relics inside. Enter its courtyard, defeat every defender (its guards and any players of the owning faction), then hold the courtyard to claim it. You need a faction. Hanbin Haven, the village at the centre, is a safe zone.</p>
-  <p><b>Parry</b> a hit to stun and weaken the attacker, then <b>Riposte</b> for a double-damage lunge.</p>
+  <p><b>Parry</b> (Finesse) a hit to stun and Expose the attacker, then <b>Riposte</b> for a double-damage lunge.</p>
   <p><b>Rank rewards</b>: higher ranks give more health and damage, and unlock Recall (Knight, <kbd>B</kbd>), travel between your faction's castles from the map (Baron), a damage aura for allies (Duke) and faster teleports (Prince). See the full list in the Ranks panel (<kbd>Tab</kbd>).</p>
   <h3>Combos</h3>
   <ul id="combolist"></ul>

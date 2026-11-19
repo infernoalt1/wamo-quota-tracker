@@ -1,18 +1,21 @@
 // Hanbin Island: the authoritative game simulation. It knows nothing about sockets or databases;
 // the server feeds it players and messages and persists what it reports.
 import {
-  WORLD, VILLAGE, REGIONS, CASTLES, CASTLE_TYPES, SANCTUARY, REGION_CELLS, RC, GW, SKILLS, MOBS, WILD_BY_BIOME, ELITE_AFFIXES, VALOR_CAP, FREE_SKILLS, TREE_OF,
+  WORLD, VILLAGE, REGIONS, CASTLES, CASTLE_TYPES, SANCTUARY, REGION_CELLS, RC, GW, MOBS, WILD_BY_BIOME, ELITE_AFFIXES, VALOR_CAP,
   DUNGEONS, CAVES, RELICS, RELIC_LIST, RARITIES, MAX_RELIC_LV, MAX_STASH, CRATES, CASTLE_LEVEL_COST, CASTLE_TAX,
-  rankOf, tierOf, slotsForTier, relicSlotsForTier, relicValue, garrisonFor, inCastle, inCastleWalls, moveBody, freeAt, shotBlocked, losClear,
+  rankOf, tierOf, relicSlotsForTier, relicValue, garrisonFor, inCastle, inCastleWalls, moveBody, freeAt, shotBlocked, losClear,
   rankBonus, RECALL_RANK, TRAVEL_RANK, AURA_RANK, ISLAND_REGIONS, dungeonAt, somaForTier,
 } from './shared.mjs';
+import {
+  WEAPONS, WEAPON_IDS, DEFAULT_WSET, TALENTS, HOTBAR_SLOTS, ROLL_CD, ROLL_DIST, ROLL_MS, PVP_MUL, FORGE_MAX, FORGE_BONUS,
+  masteryOf, forgeCost, learnCheck, sanitizeTalents, talentPoints, masteryPoints, treeSpent,
+} from './builds.mjs';
 
 const { W } = WORLD;
 export const TICK = 50, DT = TICK / 1000;
 export const CAPTURE_TIME = 10;
 const VIEW_W = 1100, VIEW_H = 700;
 const FAC_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ff6fae', '#c8d6e5', '#8e44ad', '#16a085', '#d35400'];
-const WEAPON_OF = { blade: 'sword', marksman: 'bow', sorcery: 'staff', command: 'sword', technique: 'rapier' };
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -41,6 +44,18 @@ export function migrateProgress(pr) {
   progress.vet = 1;
   progress.legacy = { season: pr.season || 1, soma: oldSoma, valor: pr.valor | 0, skills: pr.skills || [], hotbar: pr.hotbar || [] };
   return { progress, note: `Season ${SEASON} has begun and everyone starts fresh. As a veteran you keep the ★ badge, a head start of ${progress.soma} soma and 300 gold for relic crates. Your old record (${oldSoma} soma) is saved.` };
+}
+
+// ---------------------------------------------------------------- the combat rework
+// Build version 3 replaced the old skill list with weapons, talents and weapon mastery. Everyone's
+// talents are refunded once, and each weapon starts with mastery worth a quarter of the player's soma,
+// so nobody has to grind back to where they were.
+export const BUILD_VERSION = 3;
+export function migrateBuild(pr) {
+  if ((pr.bv | 0) >= BUILD_VERSION) return { tal: pr.tal, wx: pr.wx, hotbar: pr.hotbar, note: null };
+  const soma = Math.max(0, pr.soma | 0), wx = Object.fromEntries(WEAPON_IDS.map((w) => [w, Math.round(soma * 0.25)]));
+  const played = soma > 0 || (pr.skills && pr.skills.length > 2);
+  return { tal: {}, wx, hotbar: [], note: played ? 'Combat has been rebuilt around weapons. Hold the left mouse button to attack, press Space to roll and X to switch weapons. Your talent points have been refunded and every weapon starts with some mastery. Open K to spend them and G for the armory.' : null };
 }
 
 export class Game {
@@ -96,6 +111,7 @@ export class Game {
     if (this.T < e.weakUntil) m *= 0.6;
     if (this.T < e.buffUntil) m *= 1.3;
     if (this.T < e.auraUntil) m *= 1.1;
+    if (this.T < e.leadUntil) m *= 1 + e.leadBuff;
     if (e.elite === 'frenzied' && e.hp < e.maxhp * 0.5) m *= 1.5;
     if (e.enraged) m *= 1.3;
     return m;
@@ -107,20 +123,27 @@ export class Game {
     if (this.T < e.buffUntil) s *= 1.2;
     return s;
   }
-  stun(e, ms) { if (e.stunUntil !== undefined && e.kind !== 'banner') e.stunUntil = Math.max(e.stunUntil, this.T + (e.def && e.def.boss ? ms * 0.35 : ms)); }
+  stun(e, ms) {
+    if (e.stunUntil === undefined || e.kind === 'banner') return;
+    if (e.def && e.def.boss) ms *= 0.35;
+    if (e.isPlayer && e.st.ccr) ms *= 1 - e.st.ccr;
+    e.stunUntil = Math.max(e.stunUntil, this.T + ms);
+  }
   weaken(e, ms) { if (e.weakUntil !== undefined) e.weakUntil = Math.max(e.weakUntil, this.T + ms); }
-  slow(e, f, ms) { if (e.slowUntil === undefined) return; if (e.def && e.def.boss) f = 1 - (1 - f) * 0.5; e.slowF = this.T < e.slowUntil ? Math.min(e.slowF, f) : f; e.slowUntil = Math.max(e.slowUntil, this.T + ms); }
+  slow(e, f, ms) { if (e.slowUntil === undefined) return; if (e.def && e.def.boss) f = 1 - (1 - f) * 0.5; if (e.isPlayer && e.st.ccr) ms *= 1 - e.st.ccr; e.slowF = this.T < e.slowUntil ? Math.min(e.slowF, f) : f; e.slowUntil = Math.max(e.slowUntil, this.T + ms); }
   // Knockback (or pull, with a negative-facing angle). A foe stopped short by a wall or rock takes a Wall Slam.
   knock(e, ang, d, src) {
     if (e.kind === 'banner' || e.dead || e.hp <= 0 || d <= 0) return;
     if (e.def && e.def.boss) d *= 0.25;
+    const brute = src && src.isPlayer && src.st.brute;
+    if (brute) d *= 1.5;
     const ox = e.x, oy = e.y;
     [e.x, e.y] = moveBody(e.x, e.y, e.r, Math.cos(ang) * d, Math.sin(ang) * d);
     if (e.isPlayer) e.tp++;
     if (src && d >= 40 && Math.hypot(e.x - ox, e.y - oy) < d * 0.6) {
       this.combo(e, 'WALL SLAM');
       this.stun(e, 1000);
-      this.dealDamage(src, e, 20 + d * 0.15, { parryable: false });
+      this.dealDamage(src, e, (20 + d * 0.15) * (brute ? 3 : 1), { parryable: false });
     }
   }
   combo(e, txt) {
@@ -162,42 +185,68 @@ export class Game {
   alliesNear(p, x, y, r) { return this.near(x, y, r).filter((e) => this.teamOf(e) === this.teamOf(p) && e.kind !== 'banner'); }
 
   // ---------------------------------------------------------------- damage
-  // o: premul (already scaled), parryable, melee, ranged, el ('fire' | 'blast' | 'burn'), secondary (splash/chain/burn: no further procs)
+  // o: premul (already scaled), parryable, melee, ranged, el (fire | frost | arcane | shock | poison | blast | burn),
+  //    secondary (splash/chain/dots: no crits or further procs), dot, basic (a weapon attack), coef (proc weight),
+  //    crit (extra crit chance), forceCrit, back (bonus when striking a foe that is not facing you)
   dealDamage(src, tgt, amt, o = {}) {
     const T = this.T;
     if (!src || tgt.dead || tgt.hp <= 0) return 0;
     if (inSafe(tgt) || (!src.isStub && inSafe(src))) return 0;
     if (!this.hostile(src, tgt)) return 0;
     if (!o.premul) amt *= this.dmgMulOf(src);
+    // A dodge roll slips past everything but damage over time.
+    if (tgt.isPlayer && T < tgt.iframeUntil && !o.dot) { this.combo(tgt, 'DODGE'); if (tgt.st.counter) tgt.counterHitUntil = T + 2000; return 0; }
     if (o.parryable !== false && !o.secondary && (T < tgt.parryUntil || T < tgt.counterUntil)) {
       if (T < tgt.parryUntil) tgt.parryUntil = 0;
       const atk = src.isStub ? this.getEnt(src.from) : src;
       if (atk && atk.stunUntil !== undefined && dist(atk, tgt) < 400) { this.stun(atk, 1000); this.weaken(atk, 4000); }
       tgt.riposteUntil = T + 2500;
+      if (tgt.isPlayer && tgt.st.retaliate) tgt.nextCrit = true;
+      if (tgt.isPlayer && tgt.st.counter) tgt.counterHitUntil = T + 2000;
       this.fx({ t: 'parry', x: tgt.x, y: tgt.y });
       return 0;
     }
-    const atk = this.relicOwner(src), rel = atk && atk.rel;
+    const atk = this.relicOwner(src), rel = atk && atk.rel, st = atk && atk.st;
     let crit = false;
-    if (rel && !o.secondary) {
+    if (atk) {
       const d = Math.hypot(tgt.x - atk.x, tgt.y - atk.y);
-      if (rel.close && d <= 130 + tgt.r) amt *= 1 + rel.close;
-      if (rel.far && d >= 320) amt *= 1 + rel.far;
-      if (rel.execute && tgt.hp < tgt.maxhp * 0.3) amt *= 1 + rel.execute;
-      if (rel.berserk) amt *= 1 + rel.berserk * (1 - atk.hp / atk.maxhp);
-      if (rel.momentum) amt *= 1 + Math.min(rel.momentum, atk.moveTime * 0.04);
-      if (rel.chill && T < tgt.slowUntil) amt *= 1 + rel.chill;
-      if (rel.crit && Math.random() < rel.crit) { amt *= 1.75; crit = true; }
+      if (!o.secondary) {
+        if (rel.close && d <= 130 + tgt.r) amt *= 1 + rel.close;
+        if (rel.far && d >= 320) amt *= 1 + rel.far;
+        if (rel.execute && tgt.hp < tgt.maxhp * 0.3) amt *= 1 + rel.execute;
+        if (rel.berserk) amt *= 1 + rel.berserk * (1 - atk.hp / atk.maxhp);
+        if (rel.momentum) amt *= 1 + Math.min(rel.momentum, atk.moveTime * 0.04);
+        if (rel.chill && T < tgt.slowUntil) amt *= 1 + rel.chill;
+      }
+      // Talents add together into one multiplier.
+      let m = 1;
+      if (o.melee) m += st.melee || 0;
+      if (o.ranged) m += st.ranged || 0;
+      if (o.el) { m += st.elem || 0; if (st.conflux && (tgt.burn || tgt.venom || T < tgt.chillUntil || T < tgt.poisonUntil)) m += st.conflux; }
+      if (st.execute && tgt.hp < tgt.maxhp * 0.35) m += st.execute;
+      if (st.far && d >= 300) m += st.far;
+      if (st.opportunist && (T < tgt.stunUntil || T < tgt.slowUntil || T < tgt.rootUntil)) m += st.opportunist;
+      if (st.focus && T - atk.lastMoveAt > 1000) m += st.focus;
+      if (st.tactic) m += st.tactic * atk.allies;
+      if (!o.secondary && T < atk.tumbleUntil) { m += st.tumble; atk.tumbleUntil = 0; }
+      if (!o.secondary && T < atk.counterHitUntil) { m += st.counter; atk.counterHitUntil = 0; this.combo(tgt, 'COUNTER'); }
+      if (st.overflow && atk.en >= atk.maxen - 0.5) m += st.overflow;
+      if (o.back && (T < tgt.stunUntil || angDiff(tgt.ang, Math.atan2(atk.y - tgt.y, atk.x - tgt.x)) > 1.7)) { m += o.back + (st.back || 0); this.combo(tgt, 'BACKSTAB'); }
+      amt *= m;
+      if (!o.secondary) {
+        const chance = (rel.crit || 0) + (st.crit || 0) + (o.crit || 0);
+        if (o.forceCrit || (st.assassin && tgt.hp >= tgt.maxhp * 0.9) || Math.random() < chance) { amt *= 1.75 + (st.critDmg || 0); crit = true; }
+      }
     }
     const summonOwner = src.isNpc && src.owner ? this.players.get(src.owner) : null;
     if (summonOwner && summonOwner.rel.summon) amt *= 1 + summonOwner.rel.summon;
-    // skill combos
+    // status combos
     if (o.el === 'fire' && T < tgt.chillUntil) { amt *= 1.6; tgt.chillUntil = 0; this.combo(tgt, 'SHATTER'); }
     if (o.el === 'fire' && T < tgt.poisonUntil) {
       tgt.poisonUntil = 0; this.combo(tgt, 'IGNITE'); amt += 30;
-      const st = src.isStub ? src : this.mkStub(src);
+      const sb = src.isStub ? src : this.mkStub(src);
       this.fx({ t: 'boom', x: tgt.x, y: tgt.y, r: 110 });
-      for (const e of this.near(tgt.x, tgt.y, 110)) if (e !== tgt && this.teamOf(e) !== st.team) this.dealDamage(st, e, 30, { parryable: false, premul: true, el: 'blast', secondary: true });
+      for (const e of this.near(tgt.x, tgt.y, 110)) if (e !== tgt && this.teamOf(e) !== sb.team) this.dealDamage(sb, e, 30, { parryable: false, premul: true, el: 'blast', secondary: true });
       if (tgt.dead || tgt.hp <= 0) return 0;
     }
     if (o.melee && T < tgt.stunUntil) { amt *= 1.35; this.combo(tgt, 'CRUSH'); }
@@ -207,12 +256,22 @@ export class Game {
     // defences
     if (tgt.isPlayer) {
       if (tgt.channel) this.cancelChannel(tgt, 'Teleport interrupted!');
-      if (tgt.rel.dr) amt *= 1 - Math.min(0.5, tgt.rel.dr);
-      if (tgt.mods.lastStand && tgt.hp < tgt.maxhp * 0.3) amt *= 0.65;
+      if (!o.secondary && tgt.st.evade && Math.random() < tgt.st.evade) { this.combo(tgt, 'EVADE'); if (tgt.st.counter) tgt.counterHitUntil = T + 2000; return 0; }
+      if (!o.secondary && tgt.st.block && tgt.wp === 'sword' && Math.random() < tgt.st.block) {
+        this.combo(tgt, 'BLOCK');
+        if (tgt.st.retaliate) tgt.nextCrit = true;
+        if (tgt.st.counter) tgt.counterHitUntil = T + 2000;
+        return 0;
+      }
+      amt *= 1 - tgt.dr;
+      if (tgt.st.lastStand && tgt.hp < tgt.maxhp * 0.3) amt *= 0.65;
+      if (this.rootOwner(src)) amt *= PVP_MUL;
     } else {
       if (tgt.def.armor) amt *= 1 - tgt.def.armor;
       if (tgt.elite === 'armored') amt *= 0.6;
     }
+    if (T < tgt.formUntil) amt *= 1 - tgt.formDr;
+    if (T < tgt.wallUntil) amt *= 1 - tgt.wallDr;
     if (T < tgt.shieldUntil) amt *= 0.4;
     amt = Math.round(amt);
     if (amt <= 0) return 0;
@@ -233,7 +292,10 @@ export class Game {
       if (src.def.onHit === 'poison') this.applyDot(tgt, 'venom', src.def.dmg * 0.9, this.mkStub(src));
       if (src.def.onHit === 'slow') this.slow(tgt, 0.6, 1500);
     }
-    if (rel) this.onHitRelics(atk, tgt, amt, o.secondary ? rel.echo || 0 : 1, !!o.secondary);
+    if (atk) {
+      if (!o.secondary) this.onHitTalents(atk, tgt, amt, o, crit);
+      this.onHitRelics(atk, tgt, amt, o.secondary ? rel.echo || 0 : 1, !!o.secondary, o.coef ?? 1);
+    }
     if (summonOwner && summonOwner.rel.summon) {
       if (summonOwner.rel.lifesteal) src.hp = Math.min(src.maxhp, src.hp + amt * summonOwner.rel.lifesteal);
       if (summonOwner.rel.burn) this.applyDot(tgt, 'burn', amt * summonOwner.rel.burn, this.mkStub(src));
@@ -242,9 +304,35 @@ export class Game {
     if (tgt.hp <= 0) (tgt.isPlayer ? this.killPlayer(tgt, T - tgt.lastHitAt < 8000 ? tgt.lastHit : null) : this.killNpc(tgt, tgt.lastHit));
     return amt;
   }
+  // Talent effects on a direct hit. k weighs chances so fast weapons do not proc far more often per second.
+  onHitTalents(p, tgt, amt, o, crit) {
+    const st = p.st, T = this.T, k = o.coef ?? 1, alive = () => !tgt.dead && tgt.hp > 0;
+    if (o.basic) p.en = Math.min(p.maxen, p.en + (3 + (st.enHit || 0)) * k);
+    if (o.melee && st.lifesteal) p.hp = Math.min(p.maxhp, p.hp + amt * st.lifesteal * (st.berserk && p.hp < p.maxhp * 0.5 ? 2 : 1));
+    if (!alive()) return;
+    const stub = () => this.mkStub(p);
+    if (st.burnCh && Math.random() < st.burnCh * Math.min(1.5, k)) this.applyDot(tgt, 'burn', amt * 0.4, stub());
+    if (st.chillCh && Math.random() < st.chillCh * Math.min(1.5, k)) { this.slow(tgt, 0.65, 2500); tgt.chillUntil = T + 2500; }
+    if (st.venomCh && Math.random() < st.venomCh) { this.applyDot(tgt, 'venom', amt * 0.8, stub()); tgt.poisonUntil = T + 3000; }
+    if (o.basic && o.melee && st.rend) this.applyDot(tgt, 'bleed', amt * st.rend, stub());
+    if (o.basic && o.ranged && st.bleedArrow) this.applyDot(tgt, 'bleed', amt * st.bleedArrow, stub());
+    if (crit && st.lacerate) this.applyDot(tgt, 'bleed', amt * st.lacerate, stub());
+    if (crit && st.huntMark) { tgt.markUntil = T + 4000; tgt.markTeam = this.teamOf(p); }
+    if (o.melee && st.concuss && ++p.concussN >= 5) { p.concussN = 0; this.stun(tgt, 600); }
+    if (st.static && ++p.staticN >= (st.static >= 2 ? 5 : 6)) {
+      p.staticN = 0;
+      const arcs = this.hostileNear(p, tgt.x, tgt.y, 240).filter((e) => e !== tgt).sort((a, b) => dist(a, tgt) - dist(b, tgt)).slice(0, 3);
+      if (arcs.length) this.fx({ t: 'bolt', x: tgt.x, y: tgt.y, pts: [[rd(tgt.x), rd(tgt.y)], ...arcs.map((e) => [rd(e.x), rd(e.y)])] });
+      for (const e of arcs) this.dealDamage(stub(), e, amt * 0.6, { parryable: false, premul: true, secondary: true, el: 'shock' });
+    }
+    if (o.basic && st.thousand && ++p.thousandN >= 10) {
+      p.thousandN = 0; this.combo(tgt, 'THOUSAND CUTS');
+      for (let i = 0; i < 4 && alive(); i++) this.dealDamage(p, tgt, amt * 0.8, { premul: true, parryable: false, secondary: true, melee: true });
+    }
+  }
   // Relic effects that fire on each hit. Secondary hits (splash, chain, burn...) only do so with Prism of Echoes,
   // and never set off further splash, chain or novas, so nothing can cascade forever.
-  onHitRelics(p, tgt, amt, k, secondary) {
+  onHitRelics(p, tgt, amt, k, secondary, coef = 1) {
     const rel = p.rel;
     if (k <= 0) return;
     if (rel.lifesteal) p.hp = Math.min(p.maxhp, p.hp + amt * rel.lifesteal * k);
@@ -261,7 +349,7 @@ export class Game {
       if (others.length) this.fx({ t: 'ring', x: tgt.x, y: tgt.y, r: 95, c: '#ffb070' });
       for (const e of others) this.dealDamage(st, e, amt * rel.splash, { parryable: false, premul: true, secondary: true });
     }
-    if (rel.chain && Math.random() < rel.chain) {
+    if (rel.chain && Math.random() < rel.chain * Math.min(1.5, coef)) {
       const arcs = this.hostileNear(p, tgt.x, tgt.y, 230).filter((e) => e !== tgt).sort((a, b) => dist(a, tgt) - dist(b, tgt)).slice(0, 2);
       if (arcs.length) this.fx({ t: 'bolt', x: tgt.x, y: tgt.y, pts: [[rd(tgt.x), rd(tgt.y)], ...arcs.map((e) => [rd(e.x), rd(e.y)])] });
       for (const e of arcs) this.dealDamage(st, e, amt * 0.5, { parryable: false, premul: true, secondary: true });
@@ -281,11 +369,11 @@ export class Game {
   tickStatus(e) {
     const T = this.T;
     if (T < e.regenUntil) e.hp = Math.min(e.maxhp, e.hp + e.regenRate * DT);
-    for (const kind of ['burn', 'venom']) {
+    for (const kind of ['burn', 'venom', 'bleed']) {
       const d = e[kind];
       if (!d) continue;
       if (T >= d.until) { e[kind] = null; continue; }
-      if (T >= d.next) { d.next += 500; this.dealDamage(d.stub, e, d.dps * 0.5, { parryable: false, premul: true, secondary: true, el: 'burn' }); if (e.dead) return; }
+      if (T >= d.next) { d.next += 500; this.dealDamage(d.stub, e, d.dps * 0.5, { parryable: false, premul: true, secondary: true, dot: true, el: kind === 'bleed' ? null : kind === 'venom' ? 'poison' : 'burn' }); if (e.dead) return; }
     }
   }
 
@@ -297,13 +385,20 @@ export class Game {
     if (p.tier < FRESH_TIERS) s *= 2; // newcomers earn double soma until tier 5
     p.soma += s; p.gold += g; p.dirty = true;
     if (v || s || g) this.send(p, { t: 'gain', v, s, g });
+    // Soma earned also trains the weapon in your hands.
+    if (s > 0) {
+      const w = p.wp, before = p.mlv[w];
+      p.wx[w] = (p.wx[w] || 0) + s;
+      const after = masteryOf(p.wx[w]);
+      if (after > before) { this.recalc(p); this.send(p, { t: 'toast', m: `${WEAPONS[w].name} mastery ${after}! +1 mastery point (K)` }); this.sendProf(p); }
+    }
     const nt = tierOf(p.soma);
     if (nt !== p.tier) {
       p.tier = nt; this.recalc(p);
       if (nt > oldTier) {
         p.hp = p.maxhp;
-        const extra = [slotsForTier(nt) > slotsForTier(oldTier) ? 'a new hotbar slot' : '', relicSlotsForTier(nt) > relicSlotsForTier(oldTier) ? 'a new relic slot' : ''].filter(Boolean).join(' and ');
-        this.send(p, { t: 'toast', m: `Soma tier ${nt}! +1 skill point${extra ? ' and ' + extra : ''}.` });
+        const extra = relicSlotsForTier(nt) > relicSlotsForTier(oldTier) ? ' and a new relic slot' : '';
+        this.send(p, { t: 'toast', m: `Soma tier ${nt}! +1 talent point${extra}.` });
       }
       this.sendProf(p);
     }
@@ -342,6 +437,8 @@ export class Game {
     const mul = n.elite ? 3 : 1;
     this.award(killer, Math.ceil(n.def.valor * n.sc * mul), Math.ceil(n.def.soma * n.sc * mul), Math.ceil(n.def.gold * n.sc * (n.elite ? 4 : 1)));
     if (killer.rel.healOnKill) this.heal(null, killer, killer.maxhp * killer.rel.healOnKill);
+    if (killer.st.killHeal) this.heal(null, killer, killer.maxhp * killer.st.killHeal);
+    if (killer.st.rampage) { killer.rampStacks = this.T < killer.rampUntil ? Math.min(3, killer.rampStacks + 1) : 1; killer.rampUntil = this.T + 5000; }
     if (killer.rel.explode) {
       this.fx({ t: 'boom', x: n.x, y: n.y, r: 120 });
       const st = this.mkStub(killer);
@@ -357,7 +454,7 @@ export class Game {
   killPlayer(p, killer) {
     if (p.dead) return;
     const T = this.T;
-    p.dead = true; p.respawnAt = T + 5000; p.spin = null; p.channel = null; p.burn = null; p.venom = null;
+    p.dead = true; p.respawnAt = T + 5000; p.spin = null; p.channel = null; p.burn = null; p.venom = null; p.bleed = null; p.rampStacks = 0;
     const wasRank = rankOf(p.valor);
     const lost = Math.floor(p.valor * 0.75);
     p.valor -= lost; p.dirty = true;
@@ -378,7 +475,7 @@ export class Game {
   }
   respawn(p) {
     p.dead = false; p.hp = p.maxhp; p.en = p.maxen;
-    for (const k of ['stunUntil', 'slowUntil', 'weakUntil', 'buffUntil', 'shieldUntil', 'parryUntil', 'counterUntil', 'regenUntil']) p[k] = 0;
+    for (const k of ['stunUntil', 'slowUntil', 'weakUntil', 'buffUntil', 'shieldUntil', 'parryUntil', 'counterUntil', 'regenUntil', 'iframeUntil', 'rollUntil', 'cryUntil', 'rampUntil', 'moUntil']) p[k] = 0;
     let sp = null, bd = Infinity;
     if (p.fac) for (const c of this.castles) if (c.owner === p.fac) { const d = Math.hypot(c.x - p.x, c.y - p.y); if (d < bd) { bd = d; sp = c; } }
     const pos = sp ? this.freeSpot(sp.x, sp.y, 100) : this.villageSpot();
@@ -424,25 +521,36 @@ export class Game {
     return r;
   }
   recalc(p) {
-    const has = (id) => p.skills.includes(id);
     p.rank = rankOf(p.valor).idx;
     p.equip = p.equip.slice(0, relicSlotsForTier(p.tier));
     const rb = rankBonus(p.rank), rel = p.rel = this.relicStats(p);
+    // Talent stats; weapon mastery talents only count for the weapon in your hands.
+    const st = {};
+    for (const id in p.tal) {
+      const n = TALENTS[id];
+      if (!n || !n.mods || (n.weapon && n.weapon !== p.wp)) continue;
+      for (const k in n.mods) st[k] = (st[k] || 0) + n.mods[k] * p.tal[id];
+    }
+    p.st = st;
     p.mods = {
-      melee: has('heavy_blade') ? 1.15 : 1, ranged: has('eagle_eye') ? 1.15 : 1, range: (has('eagle_eye') ? 1.25 : 1) * (1 + (rel.range || 0)),
-      heal: has('alchemist') ? 1.35 : 1, en: (has('alchemist') ? 1.2 : 1) * (has('second_wind') ? 1.15 : 1) * rb.en * (1 + (rel.en || 0)),
-      speed: (has('second_wind') ? 1.1 : 1) * rb.speed * (1 + (rel.speed || 0)), lifesteal: has('bloodlust') ? 0.08 : 0, summon: has('inspire') ? 0.3 : 0,
-      rally: has('inspire') ? 12000 : 8000, lastStand: has('last_stand'), channel: rb.channel, cd: 1 - Math.min(0.4, rel.cdr || 0), titan: 1 + (rel.titan || 0),
+      range: 1 + (rel.range || 0) + (st.range || 0), heal: 1, en: rb.en * (1 + (rel.en || 0)) * (1 + (st.enRegen || 0)),
+      speed: rb.speed * (1 + (rel.speed || 0) + (st.speed || 0)), channel: rb.channel, cd: 1 - Math.min(0.4, rel.cdr || 0), titan: 1 + (rel.titan || 0), rally: 8000,
     };
-    p.maxhp = Math.round((100 + 6 * p.tier) * rb.hp * (1 + (rel.maxhp || 0))); p.maxen = 100 + 2 * p.tier;
+    p.dr = Math.min(0.6, (rel.dr || 0) + (st.dr || 0));
+    p.maxhp = Math.round((100 + 6 * p.tier) * rb.hp * Math.max(0.5, 1 + (rel.maxhp || 0) + (st.maxhp || 0))); p.maxen = 100 + 2 * p.tier;
     p.dmgMul = (1 + 0.02 * p.tier) * rb.dmg * (1 + (rel.dmg || 0));
-    p.slots = slotsForTier(p.tier); p.rslots = relicSlotsForTier(p.tier);
-    p.pts = p.tier + 1 - p.skills.filter((s) => !SKILLS[s].free).length;
+    p.rslots = relicSlotsForTier(p.tier);
+    p.mlv = Object.fromEntries(WEAPON_IDS.map((w) => [w, masteryOf(p.wx[w] || 0)]));
+    p.pts = talentPoints(p.tier, p.tal);
+    p.mpts = Object.fromEntries(WEAPON_IDS.map((w) => [w, masteryPoints(p.mlv[w], p.tal, w)]));
     p.hp = Math.min(p.hp, p.maxhp); p.en = Math.min(p.en, p.maxen);
   }
   sendProf(p) {
     this.recalc(p);
-    this.send(p, { t: 'prof', skills: p.skills, hotbar: p.hotbar, pts: p.pts, slots: p.slots, tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, dmg: +p.dmgMul.toFixed(2), relics: p.relics, equip: p.equip, rslots: p.rslots, vet: p.vet });
+    this.send(p, {
+      t: 'prof', tal: p.tal, hotbar: p.hotbar, pts: p.pts, mpts: p.mpts, mlv: p.mlv, wx: p.wx, forge: p.forge, wset: p.wset, wi: p.wi, wp: p.wp,
+      tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, dmg: +p.dmgMul.toFixed(2), relics: p.relics, equip: p.equip, rslots: p.rslots, vet: p.vet,
+    });
   }
   send(p, obj) { if (p.out) p.out(typeof obj === 'string' ? obj : JSON.stringify(obj)); }
   broadcast(obj) { const s = JSON.stringify(obj); for (const p of this.players.values()) this.send(p, s); }
@@ -451,39 +559,44 @@ export class Game {
   join(account, out) {
     for (const o of this.players.values()) if (o.accountId === account.id) { this.send(o, { t: 'kicked', m: 'You signed in somewhere else.' }); if (o.onKick) o.onKick(); this.leave(o); }
     const { progress: pr, note } = migrateProgress(account.progress || {});
+    const build = migrateBuild(pr);
     const fac = pr.fac && this.factions[pr.fac] && this.factions[pr.fac].members.includes(account.id) ? +pr.fac : 0;
-    const skills = [...new Set([...FREE_SKILLS, ...(Array.isArray(pr.skills) ? pr.skills : []).filter((s) => SKILLS[s])])];
-    let hotbar = Array.isArray(pr.hotbar) ? pr.hotbar.slice(0, 10) : ['slash', 'arrow'];
-    while (hotbar.length < 10) hotbar.push(null);
-    hotbar = hotbar.map((s) => (s && skills.includes(s) && !SKILLS[s].passive ? s : null));
     let nu = Math.max(1, pr.nu | 0);
     const relics = (Array.isArray(pr.relics) ? pr.relics : []).filter((r) => r && RELICS[r.k]).slice(0, MAX_STASH).map((r) => ({ u: r.u | 0 || nu++, k: r.k, lv: clamp(r.lv | 0, 1, MAX_RELIC_LV) }));
     const seenU = new Set(); for (const r of relics) { if (seenU.has(r.u)) r.u = nu++; seenU.add(r.u); nu = Math.max(nu, r.u + 1); }
     const kinds = new Set(), equip = [];
     for (const u of Array.isArray(pr.equip) ? pr.equip : []) { const it = relics.find((r) => r.u === u); if (it && !kinds.has(it.k)) { kinds.add(it.k); equip.push(u); } }
+    const wx = Object.fromEntries(WEAPON_IDS.map((w) => [w, Math.max(0, (build.wx && build.wx[w]) | 0)]));
+    const forge = Object.fromEntries(WEAPON_IDS.map((w) => [w, clamp((pr.forge && pr.forge[w]) | 0, 0, FORGE_MAX)]));
+    let wset = Array.isArray(pr.wset) ? pr.wset.filter((w) => WEAPONS[w]).slice(0, 2) : [];
+    if (wset.length < 2 || wset[0] === wset[1]) wset = [...DEFAULT_WSET];
+    const wi = pr.wi === 1 ? 1 : 0;
     const pos = this.villageSpot();
     const p = {
       id: this.nid(), isPlayer: true, kind: 'player', accountId: account.id, name: account.username, out,
-      x: pos.x, y: pos.y, r: 14, ang: 0, wp: 'sword', tp: 0, moveBudget: 0, channel: null,
-      valor: clamp(pr.valor | 0, 0, VALOR_CAP), soma: Math.max(0, pr.soma | 0), skills, hotbar, fac,
-      gold: Math.max(0, pr.gold | 0), bank: Math.max(0, pr.bank | 0), relics, equip, nu, rel: {},
+      x: pos.x, y: pos.y, r: 14, ang: 0, tp: 0, moveBudget: 0, channel: null,
+      valor: clamp(pr.valor | 0, 0, VALOR_CAP), soma: Math.max(0, pr.soma | 0), fac,
+      gold: Math.max(0, pr.gold | 0), bank: Math.max(0, pr.bank | 0), relics, equip, nu, rel: {}, st: {},
+      wset, wi, wp: wset[wi], wx, forge, tal: {}, hotbar: [], mlv: {},
       tier: 0, hp: 100, en: 100, dead: false, respawnAt: 0, cds: {}, spin: null, hitCount: 0, moveTime: 0, lastMoveAt: 0, pulseAt: 0, portalCd: 0,
+      atkHeld: false, nextAtk: 0, swings: 0, concussN: 0, staticN: 0, thousandN: 0, rampStacks: 0, rampUntil: 0, moStacks: 0, moUntil: 0, cryUntil: 0,
+      iframeUntil: 0, rollUntil: 0, tumbleUntil: 0, nextCrit: false, allies: 0, leadUntil: 0, leadBuff: 0, formUntil: 0, formDr: 0, swapAt: 0,
       stunUntil: 0, slowUntil: 0, slowF: 1, weakUntil: 0, buffUntil: 0, shieldUntil: 0, parryUntil: 0, counterUntil: 0, riposteUntil: 0, regenUntil: 0, regenRate: 0,
-      lastHit: null, lastHitAt: 0, lastChat: 0, dirty: !!note, vet: pr.vet ? 1 : 0, legacy: pr.legacy,
+      lastHit: null, lastHitAt: 0, lastChat: 0, dirty: !!(note || build.note), vet: pr.vet ? 1 : 0, legacy: pr.legacy,
     };
     p.tier = tierOf(p.soma);
+    // Talents beyond what this tier and mastery allow (e.g. after a rebalance) are refunded.
+    p.tal = sanitizeTalents(build.tal, { tier: p.tier, mastery: Object.fromEntries(WEAPON_IDS.map((w) => [w, masteryOf(wx[w])])) });
+    p.hotbar = Array.from({ length: HOTBAR_SLOTS }, (_, i) => { const id = Array.isArray(build.hotbar) ? build.hotbar[i] : null; return id && TALENTS[id] && TALENTS[id].active && p.tal[id] ? id : null; });
     this.recalc(p);
-    // Skills beyond the points this tier allows (e.g. after a rebalance) are refunded.
-    while (p.pts < 0) { const i = p.skills.findLastIndex((s) => !SKILLS[s].free); p.skills.splice(i, 1); this.recalc(p); }
-    p.hotbar = p.hotbar.map((s) => (s && p.skills.includes(s) ? s : null));
-    if (p.hotbar[0]) p.wp = WEAPON_OF[TREE_OF[p.hotbar[0]]];
     p.hp = p.maxhp; p.en = p.maxen;
     this.players.set(p.id, p);
     this.send(p, { t: 'welcome', id: p.id });
     this.sendProf(p);
     this.send(p, { t: 'meta', ...this.metaObj() });
-    this.send(p, { t: 'msg', m: 'Welcome to Hanbin Island! Press H for help, K for skills, I for relics, F for factions.', c: '#e0b84f' });
+    this.send(p, { t: 'msg', m: 'Welcome to Hanbin Island! Hold the left mouse button to attack, Space to roll, X to switch weapons. H for help, K for talents, G for the armory.', c: '#e0b84f' });
     if (note) { this.send(p, { t: 'msg', m: note, c: '#ffd070' }); this.send(p, { t: 'toast', m: `Season ${SEASON} has begun!` }); }
+    if (build.note) { this.send(p, { t: 'msg', m: build.note, c: '#ffd070' }); if (!note) this.send(p, { t: 'toast', m: 'Combat has been rebuilt around weapons!' }); }
     return p;
   }
   leave(p) {
@@ -493,7 +606,7 @@ export class Game {
     for (const z of this.zones) if (z.owner === p.id && z.type === 'trap') z.until = 0;
   }
   progressOf(p) {
-    return { season: SEASON, valor: p.valor, soma: p.soma, skills: p.skills, hotbar: p.hotbar, fac: p.fac || 0, gold: p.gold, bank: p.bank, relics: p.relics, equip: p.equip, nu: p.nu, vet: p.vet, legacy: p.legacy };
+    return { season: SEASON, bv: BUILD_VERSION, valor: p.valor, soma: p.soma, tal: p.tal, wx: p.wx, forge: p.forge, wset: p.wset, wi: p.wi, hotbar: p.hotbar, fac: p.fac || 0, gold: p.gold, bank: p.bank, relics: p.relics, equip: p.equip, nu: p.nu, vet: p.vet, legacy: p.legacy };
   }
   worldState() {
     const castles = {};
@@ -771,7 +884,7 @@ export class Game {
     if (n.dead) return;
     if (n.def.regen) n.hp = Math.min(n.maxhp, n.hp + n.maxhp * n.def.regen * DT);
     if (n.kind === 'banner') {
-      for (const e of this.near(n.x, n.y, 200)) if (e !== n && this.teamOf(e) === this.teamOf(n)) { e.hp = Math.min(e.maxhp, e.hp + 6 * DT); if (e.buffUntil !== undefined) e.buffUntil = Math.max(e.buffUntil, T + 1200); }
+      for (const e of this.near(n.x, n.y, n.aura || 200)) if (e !== n && this.teamOf(e) === this.teamOf(n)) { e.hp = Math.min(e.maxhp, e.hp + 6 * DT); if (e.buffUntil !== undefined) e.buffUntil = Math.max(e.buffUntil, T + 1200); }
       return;
     }
     const own = n.owner ? this.players.get(n.owner) : null;
@@ -875,45 +988,63 @@ export class Game {
     const root = this.rootOwner(src);
     return { isStub: true, id: -1, from: src.id, x: src.x, y: src.y, team: this.teamOf(src), dmgMul: 1, credit: root ? root.id : null, hp: 1, r: 0 };
   }
+  // o: speed, dmg, life, kind, aoe, aoeDmg, aoeSec, pierce, knock, slow, mark, root, chill, el, basic, coef, ricochet, zap, player
   fireProj(src, ang, o) {
-    const mods = src.isPlayer ? src.mods : null;
-    const rangedMul = mods && o.player ? mods.ranged : 1, lifeMul = mods ? mods.range : 1;
-    const mul = this.dmgMulOf(src) * rangedMul;
+    const lifeMul = src.isPlayer ? src.mods.range : 1, mul = this.dmgMulOf(src);
+    const el = o.el !== undefined ? o.el : o.kind === 'fire' ? 'fire' : null;
     this.projs.push({
       x: src.x + Math.cos(ang) * (src.r + 4), y: src.y + Math.sin(ang) * (src.r + 4),
       vx: Math.cos(ang) * o.speed, vy: Math.sin(ang) * o.speed, ang, life: o.life * lifeMul, kind: o.kind || 'arrow',
-      dmg: o.dmg * mul, aoe: o.aoe || 0, aoeDmg: (o.aoeDmg || 0) * mul, pierce: o.pierce || 0, knock: o.knock || 0, slow: o.slow || 0, mark: o.mark || 0,
-      el: o.kind === 'fire' ? 'fire' : null, ranged: o.kind !== 'dark' && o.kind !== 'frost' && (o.kind !== 'fire' || !!o.player),
+      dmg: o.dmg * mul, aoe: o.aoe || 0, aoeDmg: (o.aoeDmg || 0) * mul, aoeSec: !!o.aoeSec, pierce: o.pierce || 0, knock: o.knock || 0, slow: o.slow || 0, mark: o.mark || 0,
+      root: o.root || 0, chill: !!o.chill, el, ranged: src.isPlayer || (o.kind !== 'dark' && o.kind !== 'frost' && o.kind !== 'fire'),
+      basic: !!o.basic, coef: o.coef ?? 1, forceCrit: !!o.forceCrit, ricochet: o.ricochet || 0, zap: o.zap ? { ...o.zap, dmg: o.zap.dmg * mul, next: 0 } : null,
       hit: new Set(), stub: this.mkStub(src), team: this.teamOf(src),
     });
   }
   updateProjs() {
-    const keep = [];
+    const keep = [], T = this.T;
     for (const p of this.projs) {
       p.life -= DT;
       let dead = p.life <= 0;
+      if (p.zap && !dead && T >= p.zap.next) {
+        p.zap.next = T + p.zap.every;
+        const foes = this.near(p.x, p.y, p.zap.r).filter((e) => this.teamOf(e) !== p.team && e.kind !== 'banner');
+        if (foes.length) this.fx({ t: 'bolt', x: p.x, y: p.y, pts: foes.slice(0, 4).flatMap((e) => [[rd(p.x), rd(p.y)], [rd(e.x), rd(e.y)]]) });
+        for (const e of foes) this.dealDamage(p.stub, e, p.zap.dmg, { parryable: false, premul: true, secondary: true, el: 'arcane' });
+      }
       for (let s = 0; s < 3 && !dead; s++) {
         p.x += (p.vx * DT) / 3; p.y += (p.vy * DT) / 3;
         if (p.x < 0 || p.y < 0 || p.x > W || p.y > WORLD.H || shotBlocked(p.x, p.y)) { dead = true; if (p.aoe) this.explode(p, null); else this.fx({ t: 'spark', x: p.x, y: p.y }); break; }
+        if (p.zap) continue;
         for (const e of this.near(p.x, p.y, 8)) {
           if (p.hit.has(e.id) || this.teamOf(e) === p.team || (e.kind === 'banner' && !p.aoe)) continue;
           p.hit.add(e.id);
-          if (p.dmg > 0) this.dealDamage(p.stub, e, p.dmg, { premul: true, el: p.el, ranged: p.ranged });
+          if (p.dmg > 0) this.dealDamage(p.stub, e, p.dmg, { premul: true, el: p.el, ranged: p.ranged, basic: p.basic, coef: p.coef, forceCrit: p.forceCrit });
           if (p.kind === 'frost') this.slow(e, 0.6, 1500);
+          if (p.chill) { this.slow(e, 0.7, 2000); e.chillUntil = T + 2500; }
           if (p.slow) this.slow(e, 0.45, p.slow);
-          if (p.mark) { e.markUntil = this.T + p.mark; e.markTeam = p.team; this.combo(e, 'MARKED'); }
+          if (p.mark) { e.markUntil = T + p.mark; e.markTeam = p.team; this.combo(e, 'MARKED'); }
+          if (p.root) { this.stun(e, p.root); e.rootUntil = T + p.root; }
           if (p.knock) this.knock(e, p.ang, p.knock, p.stub);
           if (p.aoe) this.explode(p, e);
+          if (p.ricochet > 0) this.ricochet(p, e);
           if (p.pierce-- <= 0) { dead = true; break; }
         }
       }
       if (!dead) keep.push(p);
     }
-    this.projs = keep;
+    this.projs = keep.concat(this.bounced || []); this.bounced = null;
+  }
+  // An arrow that bounces on to the nearest other foe with 60% of its damage.
+  ricochet(p, from) {
+    const next = this.near(from.x, from.y, 260).filter((e) => !p.hit.has(e.id) && this.teamOf(e) !== p.team && e.kind !== 'banner').sort((a, b) => dist(a, from) - dist(b, from))[0];
+    if (!next) return;
+    const ang = Math.atan2(next.y - from.y, next.x - from.x), sp = Math.hypot(p.vx, p.vy);
+    (this.bounced ||= []).push({ ...p, x: from.x, y: from.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, ang, life: 0.5, dmg: p.dmg * 0.6, ricochet: p.ricochet - 1, pierce: 0, hit: new Set([...p.hit]) });
   }
   explode(p, except) {
     this.fx({ t: 'boom', x: p.x, y: p.y, r: p.aoe });
-    for (const o of this.near(p.x, p.y, p.aoe)) if (o !== except && this.teamOf(o) !== p.team) this.dealDamage(p.stub, o, p.aoeDmg, { parryable: false, premul: true, el: p.el });
+    for (const o of this.near(p.x, p.y, p.aoe)) if (o !== except && this.teamOf(o) !== p.team) this.dealDamage(p.stub, o, p.aoeDmg, { parryable: false, premul: true, el: p.el, secondary: p.aoeSec });
   }
   updateZones() {
     const T = this.T, keep = [];
@@ -940,7 +1071,11 @@ export class Game {
             if (this.teamOf(e) === z.team) continue;
             if (z.type === 'smoke') { this.slow(e, 0.6, 700); this.weaken(e, 700); }
             else if (z.type === 'web') this.slow(e, 0.4, 600);
-            else { if (z.type === 'poison') e.poisonUntil = T + 1500; this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true, ranged: z.type === 'rain' }); }
+            else {
+              if (z.type === 'poison') e.poisonUntil = T + 1500;
+              if (z.type === 'blizzard') { this.slow(e, 0.6, 600); e.chillUntil = T + 1500; }
+              this.dealDamage(z.stub, e, z.dmg, { parryable: false, premul: true, ranged: z.type === 'rain', secondary: z.type !== 'rain', el: z.type === 'poison' ? 'poison' : z.type === 'blizzard' ? 'frost' : null });
+            }
           }
         }
       }
@@ -954,27 +1089,47 @@ export class Game {
     return z;
   }
 
-  // ---------------------------------------------------------------- skills
+  // ---------------------------------------------------------------- weapons & abilities
+  // o: stun, slow, knock, execute, c (colour) plus any dealDamage options (basic, coef, crit, back, forceCrit)
   meleeArc(p, range, arc, dmg, o = {}) {
-    if (p.mods) { range *= p.mods.titan; if (p.mods.titan > 1) o = { ...o, knock: Math.max(o.knock || 0, 50) }; }
-    this.fx({ t: 'arc', x: p.x, y: p.y, a: p.ang, r: range, w: arc, c: o.c });
+    const { stun, slow, knock, execute, c, ...hit } = o;
+    let kb = knock || 0;
+    if (p.mods) { range *= p.mods.titan; if (p.mods.titan > 1) kb = Math.max(kb, 50); }
+    this.fx({ t: 'arc', x: p.x, y: p.y, a: p.ang, r: range, w: arc, c });
     let hits = 0;
     for (const e of this.near(p.x, p.y, range)) {
       if (!this.hostile(p, e)) continue;
       if (arc < 6.2 && angDiff(Math.atan2(e.y - p.y, e.x - p.x), p.ang) > arc / 2) continue;
       if (!losClear(p.x, p.y, e.x, e.y)) continue;
-      let d = dmg * (p.mods ? p.mods.melee : 1);
-      if (o.execute && e.hp < e.maxhp * 0.35) d *= 2;
-      const dealt = this.dealDamage(p, e, d, { melee: true });
+      const dealt = this.dealDamage(p, e, execute && e.hp < e.maxhp * 0.35 ? dmg * 2 : dmg, { melee: true, ...hit });
       if (dealt > 0) {
         hits++;
-        if (p.mods && p.mods.lifesteal) p.hp = Math.min(p.maxhp, p.hp + dealt * p.mods.lifesteal);
-        if (o.stun) this.stun(e, o.stun);
-        if (o.slow) this.slow(e, o.slow, 3000);
-        if (o.knock) this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), o.knock, p);
+        if (stun) this.stun(e, stun);
+        if (slow) this.slow(e, slow, 3000);
+        if (kb) this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), kb, p);
       }
     }
     return hits;
+  }
+  // A spear thrust: hits every foe along a line, nearest first.
+  thrust(p, ang, range, width, dmg, o = {}) {
+    const { knock, skewer, ...hit } = o, cos = Math.cos(ang), sin = Math.sin(ang);
+    this.fx({ t: 'line', x: p.x + cos * 16, y: p.y + sin * 16, x2: p.x + cos * range, y2: p.y + sin * range, c: 'rgba(235,240,255,.8)', w: 5 });
+    const hits = [];
+    for (const e of this.near(p.x + cos * range / 2, p.y + sin * range / 2, range / 2 + width)) {
+      if (!this.hostile(p, e)) continue;
+      const dx = e.x - p.x, dy = e.y - p.y, t = dx * cos + dy * sin;
+      if (t < -e.r || t > range + e.r || Math.abs(-dx * sin + dy * cos) > width + e.r) continue;
+      if (!losClear(p.x, p.y, e.x, e.y)) continue;
+      hits.push([t, e]);
+    }
+    hits.sort((a, b) => a[0] - b[0]);
+    let mul = 1;
+    for (const [, e] of hits) {
+      if (this.dealDamage(p, e, dmg * mul, { melee: true, ...hit }) > 0 && knock) this.knock(e, ang, knock, p);
+      mul += skewer || 0;
+    }
+    return hits.length;
   }
   summon(p, kinds, ttl, cap) {
     const mine = [...this.npcs.values()].filter((n) => n.owner === p.id && n.kind !== 'banner');
@@ -982,7 +1137,7 @@ export class Game {
     for (let i = 0; i < over && i < mine.length; i++) this.killNpc(mine[i], null, true);
     for (const k of kinds) {
       const s = this.freeSpot(p.x, p.y, 70, 30);
-      this.mkNpc(k, s.x, s.y, { owner: p.id, ttl: this.T + ttl, sc: 1 + p.tier * 0.04 + p.mods.summon, leash: 99999 });
+      this.mkNpc(k, s.x, s.y, { owner: p.id, ttl: this.T + ttl * (1 + (p.st.summonTtl || 0)), sc: 1 + p.tier * 0.04 + (p.st.summon || 0), leash: 99999 });
     }
     this.fx({ t: 'ring', x: p.x, y: p.y, r: 90, c: '#e0b84f' });
   }
@@ -991,20 +1146,74 @@ export class Game {
     const d = Math.min(max, Math.hypot(tx - p.x, ty - p.y));
     return { x: clamp(p.x + Math.cos(ang) * d, 0, W), y: clamp(p.y + Math.sin(ang) * d, 0, WORLD.H) };
   }
+  // Base damage of the weapon in hand: forging and weapon mastery talents raise it.
+  wdmg(p) { return WEAPONS[p.wp].dmg * (1 + FORGE_BONUS * (p.forge[p.wp] || 0)) * (1 + (p.st.wdmg || 0)); }
+  aspd(p) {
+    const st = p.st, T = this.T, w = WEAPONS[p.wp];
+    let a = 1 + (st.aspd || 0) + (w.type === 'shot' || w.type === 'bolt' ? st.raspd || 0 : 0);
+    if (T < p.rampUntil) a += (st.rampage || 0) * p.rampStacks;
+    if (T < p.cryUntil) a += 0.25;
+    if (st.berserk && p.hp < p.maxhp * 0.5) a += 0.3;
+    if (st.axeMo && T < p.moUntil) a += st.axeMo * p.moStacks;
+    return Math.min(2.5, a);
+  }
+  // One swing, thrust or shot of the weapon in hand (the left mouse button).
+  attack(p) {
+    const T = this.T, w = WEAPONS[p.wp], st = p.st, ang = p.ang;
+    const every = w.every / this.aspd(p);
+    p.nextAtk = T + every; p.atkAt = T; p.swings++;
+    this.cancelChannel(p, 'Teleport cancelled.');
+    const coef = every / 500, base = this.wdmg(p);
+    const o = { basic: true, coef, forceCrit: p.nextCrit };
+    p.nextCrit = false;
+    let landed = 0;
+    if (w.type === 'melee') {
+      let range = w.range * (1 + (st.reach || 0)), arc = w.arc * (1 + (st.arc || 0)), dmg = base, c;
+      const extra = { knock: w.knock || 0 };
+      if (p.wp === 'daggers') { extra.crit = w.crit; extra.back = w.back; }
+      if (p.wp === 'sword' && p.swings % 3 === 0) {
+        arc *= 1.6; range *= 1.1; dmg *= 1.8 * (1 + (st.combo || 0)); extra.knock = 45; c = 'rgba(255,220,150,.75)';
+        if (st.wave) this.fireProj(p, ang, { speed: 720, dmg: dmg * 0.6, life: 0.55, kind: 'wave', pierce: 99, player: 1 });
+      }
+      landed = this.meleeArc(p, range, arc, dmg, { ...o, ...extra, c });
+    } else if (w.type === 'thrust') {
+      const range = w.range * (1 + (st.reach || 0));
+      if (st.sweep && p.swings % 3 === 0) landed = this.meleeArc(p, range * 0.75, 6.4, base * 1.1, { ...o, c: 'rgba(225,235,255,.7)', knock: st.keepAway || 0 });
+      else landed = this.thrust(p, ang, range, w.width, base, { ...o, knock: st.keepAway || 0, skewer: st.skewer || 0 });
+      if (st.gale && p.swings % 4 === 0) this.fireProj(p, ang, { speed: 820, dmg: base, life: 0.5, kind: 'gale', pierce: 99, player: 1 });
+    } else {
+      const bolt = w.type === 'bolt', kind = bolt ? (st.pyro ? 'fire' : st.cryo ? 'frostbolt' : 'arcane') : 'arrow';
+      const shots = bolt && st.twin ? [[-0.07, 0.65], [0.07, 0.65]] : [[0, 1]];
+      if (st.split) shots.push([-0.17, 0.35], [0.17, 0.35]);
+      for (const [da, f] of shots) {
+        const po = { speed: w.speed, dmg: base * f, life: w.life, kind, player: 1, basic: true, coef: coef * f, pierce: st.pierce || 0 };
+        if (bolt) Object.assign(po, { aoe: w.aoe * (1 + (st.burst || 0)), aoeDmg: base * f * w.splash, aoeSec: true, el: st.pyro ? 'fire' : st.cryo ? 'frost' : 'arcane', chill: !!st.cryo });
+        else po.ricochet = st.ricochet || 0;
+        if (o.forceCrit && f === 1) po.forceCrit = true;
+        this.fireProj(p, ang + da, po);
+      }
+      landed = 1;
+    }
+    if (landed && st.axeMo) { p.moStacks = T < p.moUntil ? Math.min(4, p.moStacks + 1) : 1; p.moUntil = T + 2000; }
+  }
   runSkill(p, id, ang) {
-    const T = this.T, cos = Math.cos(ang), sin = Math.sin(ang);
+    const T = this.T, cos = Math.cos(ang), sin = Math.sin(ang), W = this.wdmg(p);
     switch (id) {
-      case 'slash': return this.meleeArc(p, 80, 1.7, 18);
-      case 'cleave': return this.meleeArc(p, 100, 2.8, 44, { knock: 70, c: '#ff9a7a' });
-      case 'shield_bash': return this.meleeArc(p, 72, 1.4, 22, { stun: 1300, c: '#cfd8e8' });
-      case 'whirlwind': p.spin = { left: 3, next: T }; return;
-      case 'ground_slam': this.fx({ t: 'ring', x: p.x, y: p.y, r: 170, c: '#b08a5a' }); return this.meleeArc(p, 170, 6.4, 45, { slow: 0.5, stun: 600 });
-      case 'executioner': return this.meleeArc(p, 95, 1.4, 90, { execute: true, c: '#ff4040' });
-      case 'titan_strike': return this.meleeArc(p, 140, 2.2, 130, { stun: 1800, knock: 80, c: '#ffd070' });
-      case 'arrow': return this.fireProj(p, ang, { speed: 650, dmg: 14, life: 0.85, player: 1 });
-      case 'power_shot': return this.fireProj(p, ang, { speed: 900, dmg: 50, life: 0.95, kind: 'power', pierce: 3, player: 1 });
-      case 'crippling_shot': return this.fireProj(p, ang, { speed: 700, dmg: 20, life: 0.85, slow: 3500, mark: 6000, kind: 'power', player: 1 });
-      case 'volley': for (let i = -3; i <= 3; i++) this.fireProj(p, ang + i * 0.12, { speed: 650, dmg: 17, life: 0.85, player: 1 }); return;
+      // ---- Warfare
+      case 'war_cry':
+        this.fx({ t: 'ring', x: p.x, y: p.y, r: 220, c: '#e05040', fill: 1 });
+        for (const e of this.hostileNear(p, p.x, p.y, 220)) this.weaken(e, 5000);
+        p.cryUntil = T + 6000; return;
+      case 'leap_slam': {
+        const pt = this.aimPoint(p, ang, 280);
+        for (let k = 0; k < 12; k++) {
+          const f = 1 - k / 12, x = p.x + (pt.x - p.x) * f, y = p.y + (pt.y - p.y) * f;
+          if (freeAt(x, y, p.r) && losClear(p.x, p.y, x, y)) { this.fx({ t: 'line', x: p.x, y: p.y, x2: x, y2: y, c: 'rgba(255,200,150,.5)' }); p.x = x; p.y = y; p.tp++; break; }
+        }
+        this.fx({ t: 'ring', x: p.x, y: p.y, r: 120, c: '#c89a5a', fill: 1 });
+        return this.meleeArc(p, 120, 6.4, 50, { slow: 0.6 });
+      }
+      // ---- Precision
       case 'snare_trap': {
         const mine = this.zones.filter((z) => z.owner === p.id && z.type === 'trap');
         if (mine.length >= 2) mine[0].until = 0;
@@ -1012,42 +1221,25 @@ export class Game {
         this.addZone(p, 'trap', pt.x, pt.y, 34, 30000, { dmg: 25 * this.dmgMulOf(p) });
         return;
       }
-      case 'explosive_arrow': return this.fireProj(p, ang, { speed: 620, dmg: 35, life: 0.95, kind: 'fire', aoe: 120, aoeDmg: 55, player: 1 });
-      case 'rain_of_arrows': { const pt = this.aimPoint(p, ang, 420); this.addZone(p, 'rain', pt.x, pt.y, 150, 2000, { dmg: 15 * this.dmgMulOf(p) * p.mods.ranged, every: 250 }); return; }
-      case 'piercing_gale': return this.fireProj(p, ang, { speed: 1000, dmg: 100, life: 0.9, kind: 'gale', pierce: 99, knock: 120, player: 1 });
-      case 'firebolt': return this.fireProj(p, ang, { speed: 540, dmg: 30, life: 1.0, kind: 'fire', aoe: 60, aoeDmg: 18 });
+      case 'volley': for (let i = -3; i <= 3; i++) this.fireProj(p, ang + i * 0.12, { speed: 650, dmg: 18, life: 0.85, player: 1 }); return;
+      case 'rain_of_arrows': { const pt = this.aimPoint(p, ang, 420); this.addZone(p, 'rain', pt.x, pt.y, 150, 2000, { dmg: 15 * this.dmgMulOf(p), every: 250 }); return; }
+      // ---- Arcana
+      case 'fireball': return this.fireProj(p, ang, { speed: 540, dmg: 40, life: 1.0, kind: 'fire', aoe: 70, aoeDmg: 25, player: 1 });
       case 'healing_draught':
         for (const e of this.alliesNear(p, p.x, p.y, 150)) this.heal(p, e, e === p ? 70 : 40);
         return this.fx({ t: 'ring', x: p.x, y: p.y, r: 150, c: '#5fe08a' });
       case 'frost_nova':
         this.fx({ t: 'ring', x: p.x, y: p.y, r: 170, c: '#8fd8ff', fill: 1 });
-        for (const e of this.hostileNear(p, p.x, p.y, 170)) { this.dealDamage(p, e, 28, { parryable: false }); this.slow(e, 0.5, 3000); e.chillUntil = T + 3500; }
+        for (const e of this.hostileNear(p, p.x, p.y, 170)) { this.dealDamage(p, e, 30, { parryable: false, el: 'frost' }); this.slow(e, 0.5, 3000); e.chillUntil = T + 3500; }
         return;
       case 'poison_flask': { const pt = this.aimPoint(p, ang, 300); this.addZone(p, 'poison', pt.x, pt.y, 110, 6000, { dmg: 7 * this.dmgMulOf(p) }); return this.fx({ t: 'ring', x: pt.x, y: pt.y, r: 110, c: '#7ad04a' }); }
-      case 'chain_lightning': {
-        const pt = this.aimPoint(p, ang, 380);
-        let cur = this.hostileNear(p, pt.x, pt.y, 160).sort((a, b) => dist(a, pt) - dist(b, pt))[0];
-        const pts = [[rd(p.x), rd(p.y)]], hit = new Set();
-        let dmg = 50;
-        while (cur && hit.size < 4) {
-          hit.add(cur.id); pts.push([rd(cur.x), rd(cur.y)]);
-          this.dealDamage(p, cur, dmg, { parryable: false }); this.stun(cur, 250);
-          dmg *= 0.8;
-          const from = cur;
-          cur = this.hostileNear(p, from.x, from.y, 230).filter((e) => !hit.has(e.id)).sort((a, b) => dist(a, from) - dist(b, from))[0];
-        }
-        if (pts.length === 1) pts.push([rd(pt.x), rd(pt.y)]);
-        return this.fx({ t: 'bolt', x: p.x, y: p.y, pts });
-      }
-      case 'arcane_ward':
-        for (const e of this.alliesNear(p, p.x, p.y, 180)) if (e.shieldUntil !== undefined) e.shieldUntil = Math.max(e.shieldUntil, T + 4000);
-        return this.fx({ t: 'ring', x: p.x, y: p.y, r: 180, c: '#b88cff' });
-      case 'meteor': { const pt = this.aimPoint(p, ang, 400); this.zones.push({ type: 'meteor', x: pt.x, y: pt.y, r: 160, at: T + 1200, d: 1200, dmg: 170 * this.dmgMulOf(p), team: this.teamOf(p), stub: this.mkStub(p), owner: p.id }); return; }
-      case 'rejuvenation':
-        for (const e of this.alliesNear(p, p.x, p.y, 200)) { e.regenUntil = T + 6000; e.regenRate = 12 * p.mods.heal; }
-        return this.fx({ t: 'ring', x: p.x, y: p.y, r: 200, c: '#7ff0a0', fill: 1 });
+      case 'meteor': { const pt = this.aimPoint(p, ang, 400); this.zones.push({ type: 'meteor', x: pt.x, y: pt.y, r: 160, at: T + 1200, d: 1200, dmg: 180 * this.dmgMulOf(p), team: this.teamOf(p), stub: this.mkStub(p), owner: p.id }); return; }
+      // ---- Command
       case 'rally':
-        for (const e of this.alliesNear(p, p.x, p.y, 320)) if (e.buffUntil !== undefined) e.buffUntil = T + p.mods.rally;
+        for (const e of this.alliesNear(p, p.x, p.y, 320)) {
+          if (e.buffUntil !== undefined) e.buffUntil = T + p.mods.rally;
+          if (p.st.shieldWall) { e.wallUntil = T + p.mods.rally; e.wallDr = p.st.shieldWall; }
+        }
         return this.fx({ t: 'ring', x: p.x, y: p.y, r: 320, c: '#e0b84f' });
       case 'summon_footmen': return this.summon(p, ['footman', 'footman'], 45000, 8);
       case 'summon_archers': return this.summon(p, ['summoned_archer', 'summoned_archer', 'summoned_archer'], 50000, 8);
@@ -1055,32 +1247,16 @@ export class Game {
       case 'legion_call': return this.summon(p, ['knight', 'knight', 'knight', 'knight', 'summoned_archer', 'summoned_archer', 'summoned_archer', 'summoned_archer'], 60000, 12);
       case 'war_banner': {
         for (const n of this.npcs.values()) if (n.owner === p.id && n.kind === 'banner') this.killNpc(n, null, true);
-        this.mkNpc('banner', p.x, p.y, { owner: p.id, ttl: T + 12000, leash: 99999 });
-        return this.fx({ t: 'ring', x: p.x, y: p.y, r: 200, c: '#ffffff' });
+        const b = this.mkNpc('banner', p.x, p.y, { owner: p.id, ttl: T + (p.st.standard ? 20000 : 12000), leash: 99999 });
+        b.aura = p.st.standard ? 300 : 200;
+        return this.fx({ t: 'ring', x: p.x, y: p.y, r: b.aura, c: '#ffffff' });
       }
-      case 'war_horn':
-        this.fx({ t: 'ring', x: p.x, y: p.y, r: 260, c: '#ffcf70', fill: 1 });
-        for (const e of this.hostileNear(p, p.x, p.y, 260)) { this.weaken(e, 5000); this.knock(e, Math.atan2(e.y - p.y, e.x - p.x), 140, p); }
-        return;
-      case 'fortify':
-        for (const e of this.alliesNear(p, p.x, p.y, 260)) if (e.shieldUntil !== undefined) e.shieldUntil = Math.max(e.shieldUntil, T + 5000);
-        return this.fx({ t: 'ring', x: p.x, y: p.y, r: 260, c: '#9aa4b8' });
+      // ---- Finesse
       case 'parry': p.parryUntil = T + 650; return this.fx({ t: 'ring', x: p.x, y: p.y, r: 30, c: '#4fc3e0' });
-      case 'dash': { const ox = p.x, oy = p.y; [p.x, p.y] = moveBody(p.x, p.y, p.r, cos * 190, sin * 190); p.tp++; return this.fx({ t: 'line', x: ox, y: oy, x2: p.x, y2: p.y, c: '#bfefff' }); }
       case 'riposte': {
         const win = T < p.riposteUntil; p.riposteUntil = 0;
-        const ox = p.x, oy = p.y;
-        const [ex, ey] = moveBody(p.x, p.y, p.r, cos * 140, sin * 140);
-        const sx = ex - ox, sy = ey - oy, len2 = sx * sx + sy * sy || 1;
-        for (const e of this.near((ox + ex) / 2, (oy + ey) / 2, 110)) {
-          if (!this.hostile(p, e)) continue;
-          const t = clamp(((e.x - ox) * sx + (e.y - oy) * sy) / len2, 0, 1);
-          if (Math.hypot(e.x - (ox + sx * t), e.y - (oy + sy * t)) > 34 + e.r) continue;
-          this.dealDamage(p, e, (win ? 62 : 28) * p.mods.melee, { melee: true, parryable: !win });
-          this.weaken(e, 5000);
-        }
-        p.x = ex; p.y = ey; p.tp++;
-        return this.fx({ t: 'line', x: ox, y: oy, x2: ex, y2: ey, c: win ? '#ffe070' : '#ffffff' });
+        this.dash(p, ang, 140, (win ? 62 : 28), { parryable: !win }, win ? '#ffe070' : '#ffffff', (e) => this.weaken(e, 5000));
+        return;
       }
       case 'shadowstep': {
         const pt = this.aimPoint(p, ang, 300);
@@ -1090,27 +1266,86 @@ export class Game {
         }
         return;
       }
-      case 'intimidate':
-        this.fx({ t: 'ring', x: p.x, y: p.y, r: 230, c: '#c04040' });
-        for (const e of this.hostileNear(p, p.x, p.y, 230)) { this.weaken(e, 6000); this.slow(e, 0.75, 4000); }
-        return;
       case 'smoke_bomb': this.addZone(p, 'smoke', p.x, p.y, 140, 4000, { every: 250 }); return;
       case 'iron_skin': p.shieldUntil = T + 5000; return this.fx({ t: 'ring', x: p.x, y: p.y, r: 40, c: '#8890a0' });
-      case 'counter_stance': p.counterUntil = T + 2200; return this.fx({ t: 'ring', x: p.x, y: p.y, r: 36, c: '#4fc3e0' });
+      // ---- Longsword
+      case 'shield_bash': return this.meleeArc(p, 80, 1.5, W * 1.5, { stun: 1300, c: 'rgba(210,220,235,.8)' });
+      case 'whirlwind': p.spin = { left: 3, next: T, dmg: W * 1.3 }; return;
+      case 'judgement': this.meleeArc(p, 125, 1.7, W * 3, { c: 'rgba(255,240,150,.85)' }); return this.heal(null, p, p.maxhp * 0.15);
+      // ---- Greataxe
+      case 'ground_slam': this.fx({ t: 'ring', x: p.x, y: p.y, r: 170, c: '#b08a5a' }); return this.meleeArc(p, 170, 6.4, W * 2, { slow: 0.5, stun: 600 });
+      case 'execute': return this.meleeArc(p, 110, 1.5, W * 2.5, { execute: true, c: 'rgba(255,60,60,.8)' });
+      case 'titan_strike': return this.meleeArc(p, 150, 2.2, W * 3.5, { stun: 1800, knock: 80, c: 'rgba(255,210,110,.85)' });
+      // ---- Twin Daggers
+      case 'fan_of_knives': for (let i = 0; i < 10; i++) this.fireProj(p, ang + (i / 10) * Math.PI * 2, { speed: 620, dmg: W * 2.5, life: 0.5, kind: 'knife', pierce: 1, player: 1 }); return;
+      case 'ambush': {
+        const pt = this.aimPoint(p, ang, 320), tgt = this.hostileNear(p, pt.x, pt.y, 180).filter((e) => dist(e, p) < 360).sort((a, b) => dist(a, pt) - dist(b, pt))[0];
+        if (!tgt) { this.say(p, 'No foe near the cursor to ambush.'); return false; }
+        for (const side of [Math.PI, Math.PI * 0.6, -Math.PI * 0.6, 0]) {
+          const a = tgt.ang + side, x = tgt.x + Math.cos(a) * (tgt.r + p.r + 6), y = tgt.y + Math.sin(a) * (tgt.r + p.r + 6);
+          if (freeAt(x, y, p.r)) { this.fx({ t: 'poof', x: p.x, y: p.y, c: '#402060' }); p.x = x; p.y = y; p.tp++; break; }
+        }
+        p.ang = Math.atan2(tgt.y - p.y, tgt.x - p.x);
+        this.fx({ t: 'arc', x: p.x, y: p.y, a: p.ang, r: 70, w: 1.2, c: 'rgba(200,120,255,.8)' });
+        this.dealDamage(p, tgt, W * 4, { melee: true, forceCrit: true });
+        return;
+      }
+      // ---- War Spear
+      case 'lunge': return this.dash(p, ang, 200, W * 1.8, {}, '#dfe8ff');
+      case 'javelin': return this.fireProj(p, ang, { speed: 900, dmg: W * 2.2, life: 0.7, kind: 'javelin', pierce: 99, root: 800, player: 1 });
+      // ---- Longbow
+      case 'power_shot': return this.fireProj(p, ang, { speed: 900, dmg: W * 3, life: 0.95, kind: 'power', pierce: 3, player: 1 });
+      case 'crippling_shot': return this.fireProj(p, ang, { speed: 700, dmg: W * 1.2, life: 0.85, slow: 3500, mark: 6000, kind: 'power', player: 1 });
+      case 'explosive_arrow': return this.fireProj(p, ang, { speed: 620, dmg: W * 2, life: 0.95, kind: 'fire', aoe: 120, aoeDmg: W * 3, player: 1 });
+      case 'piercing_gale': return this.fireProj(p, ang, { speed: 1000, dmg: W * 5, life: 0.9, kind: 'gale', pierce: 99, knock: 120, player: 1 });
+      // ---- Runestaff
+      case 'chain_lightning': {
+        const pt = this.aimPoint(p, ang, 380);
+        let cur = this.hostileNear(p, pt.x, pt.y, 160).sort((a, b) => dist(a, pt) - dist(b, pt))[0];
+        const pts = [[rd(p.x), rd(p.y)]], hit = new Set();
+        let dmg = W * 2.5;
+        while (cur && hit.size < 5) {
+          hit.add(cur.id); pts.push([rd(cur.x), rd(cur.y)]);
+          this.dealDamage(p, cur, dmg, { parryable: false, el: 'shock' }); this.stun(cur, 250);
+          dmg *= 0.8;
+          const from = cur;
+          cur = this.hostileNear(p, from.x, from.y, 230).filter((e) => !hit.has(e.id)).sort((a, b) => dist(a, from) - dist(b, from))[0];
+        }
+        if (pts.length === 1) pts.push([rd(pt.x), rd(pt.y)]);
+        return this.fx({ t: 'bolt', x: p.x, y: p.y, pts });
+      }
+      case 'blizzard': { const pt = this.aimPoint(p, ang, 380); this.addZone(p, 'blizzard', pt.x, pt.y, 150, 4000, { dmg: W * 0.5 * this.dmgMulOf(p), every: 250 }); return; }
+      case 'arcane_orb': return this.fireProj(p, ang, { speed: 220, dmg: 0, life: 2.4, kind: 'orb', pierce: 99, zap: { r: 120, dmg: W * 0.6, every: 250 }, player: 1 });
     }
+  }
+  // A forward dash that hits every foe it passes through.
+  dash(p, ang, len, dmg, o, color, each) {
+    const ox = p.x, oy = p.y, cos = Math.cos(ang), sin = Math.sin(ang);
+    const [ex, ey] = moveBody(p.x, p.y, p.r, cos * len, sin * len);
+    const sx = ex - ox, sy = ey - oy, len2 = sx * sx + sy * sy || 1;
+    for (const e of this.near((ox + ex) / 2, (oy + ey) / 2, len / 2 + 40)) {
+      if (!this.hostile(p, e)) continue;
+      const t = clamp(((e.x - ox) * sx + (e.y - oy) * sy) / len2, 0, 1);
+      if (Math.hypot(e.x - (ox + sx * t), e.y - (oy + sy * t)) > 34 + e.r) continue;
+      this.dealDamage(p, e, dmg, { melee: true, ...o });
+      if (each) each(e);
+    }
+    p.x = ex; p.y = ey; p.tp++;
+    this.fx({ t: 'line', x: ox, y: oy, x2: ex, y2: ey, c: color });
   }
   cast(p, slot, ang, ax, ay) {
     if (p.dead || this.T < p.stunUntil || !Number.isFinite(ang)) return;
     slot = slot | 0;
-    if (slot < 0 || slot >= p.slots) return;
-    const id = p.hotbar[slot], sk = id && SKILLS[id];
-    if (!sk || sk.passive || !p.skills.includes(id)) return;
-    if ((p.cds[id] || 0) > this.T || p.en < sk.en) return;
+    if (slot < 0 || slot >= HOTBAR_SLOTS) return;
+    const id = p.hotbar[slot], n = id && TALENTS[id];
+    if (!n || !n.active || !p.tal[id]) return;
+    if (n.weapon && n.weapon !== p.wp) { if (this.T > (p.wrongWeaponAt || 0)) { p.wrongWeaponAt = this.T + 1500; this.say(p, `${n.name} needs your ${WEAPONS[n.weapon].name} in hand (X switches weapons).`); } return; }
+    if ((p.cds[id] || 0) > this.T || p.en < n.active.en) return;
     this.cancelChannel(p, 'Teleport cancelled.');
-    p.en -= sk.en; p.cds[id] = this.T + sk.cd * p.mods.cd; p.ang = ang;
+    p.en -= n.active.en; p.cds[id] = this.T + n.active.cd * p.mods.cd; p.ang = ang;
     p.aimX = Number.isFinite(ax) ? ax : null; p.aimY = Number.isFinite(ay) ? ay : null;
-    p.wp = WEAPON_OF[sk.tree]; p.atkAt = this.T;
-    this.runSkill(p, id, ang);
+    p.atkAt = this.T;
+    if (this.runSkill(p, id, ang) === false) { p.en += n.active.en; p.cds[id] = 0; }
   }
 
   // ---------------------------------------------------------------- per-tick updates
@@ -1119,23 +1354,39 @@ export class Game {
     if (p.dead) { if (T >= p.respawnAt) this.respawn(p); return; }
     this.tickStatus(p);
     if (p.dead) return;
-    p.en = Math.min(p.maxen, p.en + (6 + p.tier * 0.15) * p.mods.en * DT);
+    p.en = Math.min(p.maxen, p.en + (3 + p.tier * 0.1) * p.mods.en * DT);
     if (inSafe(p)) p.hp = Math.min(p.maxhp, p.hp + p.maxhp * 0.08 * DT);
     else if (T - p.lastHitAt > 5000) p.hp = Math.min(p.maxhp, p.hp + (1 + p.maxhp * 0.01) * DT);
     if (p.spin && T >= p.spin.next) {
-      this.meleeArc(p, 120, 6.4, 26, { c: '#ffb0a0' });
+      this.meleeArc(p, 120, 6.4, p.spin.dmg, { c: 'rgba(255,176,160,.8)' });
       p.spin.next = T + 300;
       if (--p.spin.left <= 0) p.spin = null;
     }
+    // Holding the attack button swings the weapon in hand as fast as it allows.
+    if (p.atkHeld && !p.spin && T >= p.nextAtk && T >= p.stunUntil && T >= p.swapAt) this.attack(p);
     // The client moves itself; the server only grants it a speed budget to spend (see clientMove).
     const spd = this.speedOf(p);
-    p.moveBudget = Math.min(spd * 0.5, p.moveBudget + spd * DT * 1.2);
+    p.moveBudget = Math.min(spd * 0.5 + (T < p.rollUntil + 400 ? ROLL_DIST : 0), p.moveBudget + spd * DT * 1.2);
     p.moveTime = T - p.lastMoveAt < 250 ? p.moveTime + DT : 0;
     if (p.channel) {
       if (Math.hypot(p.x - p.channel.x, p.y - p.channel.y) > 12) this.cancelChannel(p, 'Teleport cancelled: you moved.');
       else if (T >= p.channel.until) this.finishChannel(p);
     }
-    if (p.rank >= AURA_RANK && p.fac && this.tickNo % 5 === 0) for (const o of this.near(p.x, p.y, 320)) if (o !== p && o.isPlayer && o.fac === p.fac) o.auraUntil = T + 400;
+    // Auras: the Duke's commander aura, Leadership, Formation, and the ally count Tactician uses.
+    if (this.tickNo % 5 === 0) {
+      const st = p.st, cmd = p.rank >= AURA_RANK && p.fac;
+      let allies = 0;
+      if (cmd || st.lead || st.formation || st.tactic) for (const o of this.near(p.x, p.y, 320)) {
+        if (o === p || o.kind === 'banner' || this.teamOf(o) !== this.teamOf(p)) continue;
+        const d = dist(o, p);
+        if (d < 300) allies++;
+        if (cmd && o.isPlayer) o.auraUntil = T + 400;
+        if (st.lead && d < 300) { o.leadBuff = Math.max(T < o.leadUntil ? o.leadBuff : 0, st.lead); o.leadUntil = T + 400; }
+        if (st.formation && d < 200) { o.formDr = Math.max(T < o.formUntil ? o.formDr : 0, st.formation); o.formUntil = T + 400; }
+      }
+      if (st.formation) { p.formDr = Math.max(T < p.formUntil ? p.formDr : 0, st.formation); p.formUntil = T + 400; }
+      p.allies = Math.min(4, allies);
+    }
     // Gravity Lodestone pulse.
     if (p.rel.pull && T >= p.pulseAt) {
       const foes = this.hostileNear(p, p.x, p.y, 260).filter((e) => losClear(p.x, p.y, e.x, e.y));
@@ -1234,6 +1485,7 @@ export class Game {
     if (T < e.stunUntil) f |= 1; if (T < e.parryUntil || T < e.counterUntil) f |= 2; if (T < e.slowUntil) f |= 4;
     if (T < e.weakUntil) f |= 8; if (T < e.buffUntil) f |= 16; if (T < e.shieldUntil) f |= 32; if (T < e.riposteUntil) f |= 64;
     if (T < e.regenUntil) f |= 128; if (e.burn) f |= 256; if (e.venom) f |= 512; if (T < (e.windUntil || 0) || e.fuse) f |= 1024;
+    if (T < (e.rollUntil || 0)) f |= 2048; if (e.bleed) f |= 4096;
     return f;
   }
   snapshot(p) {
@@ -1304,32 +1556,75 @@ export class Game {
         this.startChannel(p, c.id, `Travelling to ${c.name}`);
         break;
       }
-      case 'learn': {
-        const sk = SKILLS[m.id];
-        if (!sk || sk.free || p.skills.includes(sk.id) || p.tier < sk.tier || p.pts <= 0) break;
-        if (sk.req && !p.skills.includes(sk.req)) break;
-        p.skills.push(sk.id);
-        if (!sk.passive) { const slot = p.hotbar.findIndex((s, i) => !s && i < p.slots); if (slot >= 0) p.hotbar[slot] = sk.id; }
+      case 'atk': p.atkHeld = !!m.on; if (Number.isFinite(m.a)) p.ang = m.a; break;
+      case 'roll': {
+        const T = this.T;
+        if (p.dead || T < p.stunUntil || (p.cds.roll || 0) > T) break;
+        p.cds.roll = T + Math.max(1200, ROLL_CD - (p.st.dodgeCd || 0));
+        p.rollUntil = T + ROLL_MS; p.iframeUntil = T + ROLL_MS + 40; p.moveBudget += ROLL_DIST;
+        if (p.st.tumble) p.tumbleUntil = T + ROLL_MS + 1500;
+        p.spin = null;
+        this.cancelChannel(p, 'Teleport cancelled.');
+        break;
+      }
+      case 'swap': {
+        if (p.dead || this.T < p.swapAt - 600) break;
+        p.wi = 1 - p.wi; p.wp = p.wset[p.wi]; p.spin = null;
+        p.swapAt = this.T + 400; p.nextAtk = Math.max(p.nextAtk, this.T + 400);
+        this.sendProf(p);
+        break;
+      }
+      case 'wset': {
+        const s = m.s === 1 ? 1 : 0;
+        if (!WEAPONS[m.w]) break;
+        if (!this.canManage(p)) { this.say(p, 'Change your weapons in Hanbin Haven or a castle your faction holds.'); break; }
+        const other = p.wset.indexOf(m.w);
+        if (other >= 0 && other !== s) p.wset[other] = p.wset[s];
+        p.wset[s] = m.w; p.wp = p.wset[p.wi];
         p.dirty = true; this.sendProf(p);
-        this.send(p, { t: 'toast', m: `Learned ${sk.name}` });
+        break;
+      }
+      case 'forge': {
+        const w = m.w;
+        if (!WEAPONS[w]) break;
+        if (!inSafe(p)) { this.say(p, 'The blacksmith works in Hanbin Haven.'); break; }
+        const lv = p.forge[w] || 0;
+        if (lv >= FORGE_MAX) { this.say(p, 'That weapon is already fully forged.'); break; }
+        const cost = forgeCost(lv + 1);
+        if (p.bank < cost) { this.say(p, `Forging costs ${cost} banked gold.`); break; }
+        p.bank -= cost; p.forge[w] = lv + 1; p.dirty = true; this.sendProf(p);
+        this.send(p, { t: 'toast', m: `${WEAPONS[w].name} forged to +${lv + 1}!` });
+        break;
+      }
+      case 'learn': {
+        const n = TALENTS[m.id];
+        if (!n) break;
+        const why = learnCheck(p.tal, n.id, { tier: p.tier, mastery: p.mlv });
+        if (why) { this.say(p, why); break; }
+        p.tal[n.id] = (p.tal[n.id] || 0) + 1;
+        if (n.active && p.tal[n.id] === 1) { const slot = p.hotbar.findIndex((s) => !s); if (slot >= 0) p.hotbar[slot] = n.id; }
+        p.dirty = true; this.sendProf(p);
+        this.send(p, { t: 'toast', m: n.max > 1 ? `${n.name} ${p.tal[n.id]}/${n.max}` : `Learned ${n.name}` });
         break;
       }
       case 'reset': {
-        if (p.dead || !inSafe(p)) { this.say(p, 'You can only reset your skills inside Hanbin Haven, the safe village.'); break; }
-        const n = p.skills.filter((s) => !SKILLS[s].free).length;
+        if (p.dead || !inSafe(p)) { this.say(p, 'You can only reset talents inside Hanbin Haven, the safe village.'); break; }
+        const w = WEAPONS[m.w] ? m.w : null;
+        const drop = Object.keys(p.tal).filter((id) => TALENTS[id] && (w ? TALENTS[id].weapon === w : !TALENTS[id].weapon));
+        const n = drop.reduce((a, id) => a + p.tal[id], 0);
         if (!n) break;
-        p.skills = [...FREE_SKILLS];
-        p.hotbar = p.hotbar.map((s) => (s && SKILLS[s].free ? s : null));
-        this.removeSummonsOf(p.id);
+        for (const id of drop) delete p.tal[id];
+        p.hotbar = p.hotbar.map((s) => (s && p.tal[s] ? s : null));
+        if (!w) this.removeSummonsOf(p.id);
         p.dirty = true; this.sendProf(p);
-        this.send(p, { t: 'toast', m: `Skills reset: ${n} point${n === 1 ? '' : 's'} refunded` });
+        this.send(p, { t: 'toast', m: `${w ? WEAPONS[w].name + ' mastery' : 'Talents'} reset: ${n} point${n === 1 ? '' : 's'} refunded` });
         break;
       }
       case 'hb': {
         const s = m.s | 0;
-        if (s < 0 || s >= p.slots) break;
+        if (s < 0 || s >= HOTBAR_SLOTS) break;
         if (m.id === null) p.hotbar[s] = null;
-        else if (typeof m.id === 'string' && p.skills.includes(m.id) && !SKILLS[m.id].passive) { const prev = p.hotbar.indexOf(m.id); if (prev >= 0) p.hotbar[prev] = p.hotbar[s]; p.hotbar[s] = m.id; }
+        else if (typeof m.id === 'string' && p.tal[m.id] && TALENTS[m.id].active) { const prev = p.hotbar.indexOf(m.id); if (prev >= 0) p.hotbar[prev] = p.hotbar[s]; p.hotbar[s] = m.id; }
         else break;
         p.dirty = true; this.sendProf(p); break;
       }

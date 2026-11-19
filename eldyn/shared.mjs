@@ -432,13 +432,14 @@ export function rankBonus(idx) {
 }
 // Status combos, shown in the help and on the skills that set them up.
 export const COMBOS = [
-  ['Shatter', 'Fire damage on a chilled foe (Frost Nova) deals +60% and breaks the chill.'],
-  ['Ignite', 'Fire damage on a poisoned foe bursts into flame, hitting everything nearby.'],
-  ['Crush', 'Melee hits on a stunned foe deal +35%.'],
-  ['Pinned', 'Arrows deal double damage to a foe caught in a Snare Trap.'],
+  ['Shatter', 'Fire on a Chilled foe (Frost Nova, Frostbite, Cryomancy, Blizzard) deals +60% and breaks the chill.'],
+  ['Ignite', 'Fire on a poisoned foe (Poison Flask, Venom Blades) bursts into flame, hitting everything nearby.'],
+  ['Crush', 'Melee hits on a stunned foe deal +35% (Shield Bash, Concussion, Ground Slam).'],
+  ['Pinned', 'Ranged hits deal double damage to a rooted foe (Snare Trap, Javelin).'],
   ['Wall Slam', 'Knocking a foe into a wall, tower or rock stuns it for 1s and deals extra damage.'],
-  ['Marked', 'Crippling Shot marks a foe: you and your allies deal +20% damage to it.'],
-  ['Exposed', 'Weakened foes (Parry, Riposte, Intimidate, War Horn) take +15% damage.'],
+  ['Marked', "Crippling Shot and Hunter's Mark: you and your allies deal +20% damage to the foe."],
+  ['Exposed', 'Exposed foes (Parry, Riposte, War Cry, Smoke Bomb) take +15% damage and deal 40% less.'],
+  ['Backstab', 'Daggers deal +30% to foes that are not facing you, so let a friend or a summon hold their attention.'],
 ];
 export function rankOf(valor) {
   let idx = 0;
@@ -457,76 +458,8 @@ export function tierOf(soma) {
   while (t > 0 && somaForTier(t) > soma) t--;
   return t;
 }
-export const slotsForTier = (t) => Math.min(10, 5 + Math.floor(t / 5));
 // Relic (inventory) slots: one to start, another every 4 tiers, up to 6.
 export const relicSlotsForTier = (t) => Math.min(6, 1 + Math.floor(t / 4));
-
-// ------------------------------------------------------------------ skill trees
-export const TREES = [
-  { id: 'blade', name: 'Blade', color: '#e0584f', blurb: 'Close-range steel: wide arcs, stuns and executions.' },
-  { id: 'marksman', name: 'Marksman', color: '#6fbf5a', blurb: 'Bows and traps: pierce, slow and rain arrows from afar.' },
-  { id: 'sorcery', name: 'Alchemy & Sorcery', color: '#a56ae0', blurb: 'Fire, frost, lightning, poison and healing brews.' },
-  { id: 'command', name: 'Command', color: '#e0b84f', blurb: 'Lead the field: buffs, banners and summoned troops.' },
-  { id: 'technique', name: 'Technique', color: '#4fc3e0', blurb: 'Footwork and counters: parry, riposte, dash and vanish.' },
-];
-// at = [column, row] in the tree diagram. Passive skills cannot go on the hotbar.
-const S = (id, name, tree, tier, req, cd, en, icon, desc, at, extra) => ({ id, name, tree, tier, req: req || null, cd, en, icon, desc, at, passive: false, free: false, ...extra });
-const P = (id, name, tree, tier, req, icon, desc, at) => S(id, name, tree, tier, req, 0, 0, icon, desc, at, { passive: true });
-export const SKILL_LIST = [
-  S('slash', 'Slash', 'blade', 0, null, 500, 0, '⚔️', 'Quick sword arc in front of you.', [1, 0], { free: true }),
-  S('cleave', 'Cleave', 'blade', 1, 'slash', 6000, 15, '🪓', 'Heavy, wide arc that knocks foes back (Wall Slam).', [0, 1]),
-  S('shield_bash', 'Shield Bash', 'blade', 2, 'slash', 9000, 15, '🛡️', 'Short bash that stuns for 1.3s. Follow up with melee to Crush.', [2, 1]),
-  P('heavy_blade', 'Heavy Blade', 'blade', 3, 'cleave', '🗡️', 'Passive: melee skills deal 15% more damage.', [0, 2]),
-  S('whirlwind', 'Whirlwind', 'blade', 5, 'cleave', 14000, 30, '🌀', 'Spin three times, hitting everything around you.', [1, 2]),
-  S('ground_slam', 'Ground Slam', 'blade', 6, 'shield_bash', 18000, 30, '💢', 'Slam the ground: damage, slow and stun everything nearby for 0.6s.', [2, 3]),
-  P('bloodlust', 'Bloodlust', 'blade', 8, 'whirlwind', '🩸', 'Passive: melee hits heal you for 8% of damage dealt.', [1, 3]),
-  S('executioner', 'Executioner', 'blade', 10, 'heavy_blade', 20000, 35, '⚰️', 'Brutal strike. Double damage to foes under 35% health.', [0, 4]),
-  S('titan_strike', 'Titan Strike', 'blade', 14, 'ground_slam', 30000, 50, '🔨', 'Crushing cone that stuns for 1.8s and knocks foes back (Wall Slam).', [2, 5]),
-
-  S('arrow', 'Arrow', 'marksman', 0, null, 650, 0, '🏹', 'Fire an arrow toward the cursor.', [1, 0], { free: true }),
-  S('power_shot', 'Power Shot', 'marksman', 1, 'arrow', 7000, 15, '🎯', 'Fast shot that pierces up to three foes.', [0, 1]),
-  S('crippling_shot', 'Crippling Shot', 'marksman', 2, 'arrow', 9000, 12, '🦵', 'Slows the target by 55% and Marks it for 6s: your side deals +20% to it.', [2, 1]),
-  S('volley', 'Volley', 'marksman', 3, 'power_shot', 12000, 25, '🌠', 'Fan of seven arrows.', [0, 2]),
-  P('eagle_eye', 'Eagle Eye', 'marksman', 4, 'crippling_shot', '🦅', 'Passive: ranged damage +15%, arrows fly 25% farther.', [1, 2]),
-  S('snare_trap', 'Snare Trap', 'marksman', 5, 'crippling_shot', 16000, 20, '🪤', 'Hidden trap that roots the first enemy for 2.2s. Arrows deal double to it (Pinned).', [2, 3]),
-  S('explosive_arrow', 'Explosive Arrow', 'marksman', 6, 'volley', 15000, 35, '💥', 'Arrow that bursts on impact.', [0, 3]),
-  S('rain_of_arrows', 'Rain of Arrows', 'marksman', 10, 'explosive_arrow', 26000, 45, '🌧️', 'Arrows pour onto the target area for 2 seconds.', [0, 4]),
-  S('piercing_gale', 'Piercing Gale', 'marksman', 13, 'eagle_eye', 28000, 45, '🌪️', 'A great bolt that pierces everything and hurls foes back (Wall Slam).', [1, 5]),
-
-  S('firebolt', 'Firebolt', 'sorcery', 1, null, 2500, 12, '🔥', 'Fireball with a splash. Shatters chilled foes and Ignites poisoned ones.', [0, 1]),
-  S('healing_draught', 'Healing Draught', 'sorcery', 1, null, 12000, 20, '🧪', 'Heal yourself and nearby allies.', [2, 1]),
-  S('frost_nova', 'Frost Nova', 'sorcery', 3, 'firebolt', 14000, 28, '❄️', 'Burst of frost: damages, slows and chills enemies around you. Hit them with fire to Shatter.', [0, 2]),
-  S('poison_flask', 'Poison Flask', 'sorcery', 4, 'healing_draught', 12000, 25, '☠️', 'Throw a flask that leaves a poison cloud for 6s. Fire on poisoned foes Ignites.', [2, 2]),
-  P('alchemist', 'Alchemist', 'sorcery', 5, 'healing_draught', '⚗️', 'Passive: healing +35%, energy regenerates 20% faster.', [1, 2]),
-  S('chain_lightning', 'Chain Lightning', 'sorcery', 6, 'frost_nova', 15000, 32, '⚡', 'Lightning that leaps between up to four foes.', [0, 3]),
-  S('arcane_ward', 'Arcane Ward', 'sorcery', 7, 'alchemist', 22000, 30, '🔮', 'You and nearby allies take 60% less damage for 4s.', [1, 3]),
-  S('meteor', 'Meteor', 'sorcery', 11, 'chain_lightning', 32000, 60, '☄️', 'Call down a fiery meteor on the target area after a short delay.', [0, 4]),
-  S('rejuvenation', 'Rejuvenation', 'sorcery', 12, 'arcane_ward', 30000, 40, '🌿', 'You and nearby allies regenerate health for 6s.', [1, 4]),
-
-  S('rally', 'Rally', 'command', 2, null, 25000, 30, '📯', 'Allies nearby: +30% damage and +20% speed for 8s.', [1, 1]),
-  S('summon_footmen', 'Summon Footmen', 'command', 3, 'rally', 30000, 35, '🪖', 'Call two footmen to fight for you.', [0, 2]),
-  P('inspire', 'Inspire', 'command', 4, 'rally', '🎖️', 'Passive: summons are 30% stronger; Rally lasts 12s.', [1, 2]),
-  S('war_banner', 'War Banner', 'command', 5, 'rally', 40000, 40, '🚩', 'Plant a banner that heals and empowers allies.', [2, 2]),
-  S('summon_archers', 'Summon Archers', 'command', 7, 'summon_footmen', 40000, 45, '🏹', 'Call three archers to fight for you.', [0, 3]),
-  S('war_horn', 'War Horn', 'command', 7, 'war_banner', 28000, 30, '📢', 'Blast that hurls enemies back (Wall Slam) and weakens them (Exposed).', [2, 3]),
-  S('fortify', 'Fortify', 'command', 9, 'war_banner', 35000, 40, '🏰', 'You and nearby allies take 60% less damage for 5s.', [1, 4]),
-  S('summon_knights', 'Summon Knights', 'command', 10, 'summon_archers', 50000, 60, '🐴', 'Call three armoured knights.', [0, 4]),
-  S('legion_call', 'Legion Call', 'command', 16, 'summon_knights', 100000, 90, '👑', 'Summon a legion of knights and archers.', [0, 5]),
-
-  S('parry', 'Parry', 'technique', 1, null, 4000, 8, '🤺', 'Brief guard. Blocks the next hit, stuns and weakens the attacker.', [0, 1]),
-  S('dash', 'Dash', 'technique', 1, null, 7000, 12, '💨', 'Quick dash toward the cursor.', [2, 1]),
-  S('riposte', 'Riposte', 'technique', 3, 'parry', 6000, 15, '🗡️', 'Lunge forward and weaken foes (Exposed). Double damage right after a parry.', [0, 2]),
-  P('second_wind', 'Second Wind', 'technique', 4, 'dash', '🍃', 'Passive: +10% move speed, energy regenerates 15% faster.', [1, 2]),
-  S('shadowstep', 'Shadowstep', 'technique', 5, 'dash', 12000, 18, '👤', 'Vanish and reappear at the cursor.', [2, 2]),
-  S('intimidate', 'Intimidate', 'technique', 6, 'riposte', 18000, 25, '😠', 'Weaken (Exposed) and slow every enemy nearby.', [0, 3]),
-  S('smoke_bomb', 'Smoke Bomb', 'technique', 8, 'shadowstep', 20000, 25, '🌫️', 'Smoke cloud that slows and weakens enemies inside it.', [2, 3]),
-  S('iron_skin', 'Iron Skin', 'technique', 9, 'intimidate', 24000, 30, '🪨', 'Take 60% less damage for 5 seconds.', [0, 4]),
-  S('counter_stance', 'Counter Stance', 'technique', 12, 'iron_skin', 28000, 30, '♞', 'For 2.2s, parry every hit that lands on you.', [0, 5]),
-  P('last_stand', 'Last Stand', 'technique', 15, 'counter_stance', '🔥', 'Passive: below 30% health you take 35% less damage.', [1, 5]),
-];
-export const SKILLS = Object.fromEntries(SKILL_LIST.map((s) => [s.id, s]));
-export const FREE_SKILLS = SKILL_LIST.filter((s) => s.free).map((s) => s.id);
-export const TREE_OF = Object.fromEntries(SKILL_LIST.map((s) => [s.id, s.tree]));
 
 // ------------------------------------------------------------------ creatures
 // ai: melee | kite (keeps its distance) | charger (winds up, then rushes) | leaper | caster (bolts + ground blasts)
@@ -631,7 +564,7 @@ export const RELIC_LIST = [
   RL('keen_edge', 'Keen Edge', 'rare', '🗡️', 'crit', 0.1, 0.02, '{v}% chance to critically strike for 175% damage.'),
   RL('storm_coil', 'Storm Coil', 'rare', '⚡', 'chain', 0.15, 0.03, '{v}% chance on hit to arc lightning to 2 more foes for half damage.'),
   RL('bloodthirst', 'Bloodthirst Charm', 'rare', '🩸', 'healOnKill', 0.06, 0.015, 'Kills heal you for {v}% of your max health.'),
-  RL('hourglass', 'Sand Hourglass', 'rare', '⏳', 'cdr', 0.08, 0.02, 'Skill cooldowns are {v}% shorter.'),
+  RL('hourglass', 'Sand Hourglass', 'rare', '⏳', 'cdr', 0.08, 0.02, 'Ability cooldowns are {v}% shorter.'),
   RL('bulwark', 'Bulwark Plate', 'rare', '🛡️', 'dr', 0.08, 0.02, 'Take {v}% less damage.'),
   RL('lodestone', 'Gravity Lodestone', 'epic', '🧲', 'pull', 35, 6, 'Your hits drag foes {v} closer, and every 5s a pulse pulls in foes within 260.'),
   RL('corpse_bloom', 'Corpse Bloom', 'epic', '🌺', 'explode', 0.25, 0.05, 'Foes you kill burst for {v}% of their max health, hitting those nearby. Bursts can chain.'),
@@ -641,7 +574,7 @@ export const RELIC_LIST = [
   RL('headsman_seal', "Headsman's Seal", 'epic', '🪓', 'execute', 0.4, 0.08, '+{v}% damage to foes under 30% health.'),
   RL('maelstrom_heart', 'Heart of the Maelstrom', 'legendary', '🌀', 'nova', 60, 12, 'Every 8th hit releases a storm nova dealing {v} damage around the target.'),
   RL('phoenix_feather', 'Phoenix Feather', 'legendary', '🪶', 'phoenix', 0.3, 0.05, 'Once every 3 minutes, a killing blow instead leaves you at {v}% health and erupts in flame.'),
-  RL('titan_grip', "Titan's Grip", 'legendary', '🦾', 'titan', 0.3, 0.06, 'Melee skills reach {v}% farther and knock foes back.'),
+  RL('titan_grip', "Titan's Grip", 'legendary', '🦾', 'titan', 0.3, 0.06, 'Melee attacks reach {v}% farther and knock foes back.'),
   RL('prism_echoes', 'Prism of Echoes', 'legendary', '🔮', 'echo', 0.5, 0.1, 'Splash, lightning, nova, burst and burn damage also trigger your on-hit relics at {v}% strength.'),
 ];
 export const RELICS = Object.fromEntries(RELIC_LIST.map((r) => [r.id, r]));
@@ -652,14 +585,16 @@ export function relicText(id, lv) {
 }
 // Suggested builds, shown in the inventory so players can see what feeds what.
 export const SYNERGIES = [
-  ['Black Hole Brawler', 'Gravity Lodestone + Brawler\'s Knuckles + Leech Fang, with Whirlwind or Cleave. Pull everything in, then shred it up close while healing.'],
-  ['Chain Reaction', 'Corpse Bloom + Shrapnel Core + Prism of Echoes, with Volley or Rain of Arrows. One kill sets off the whole pack.'],
-  ['Inferno', 'Ember Sigil + Shrapnel Core, with Firebolt and Poison Flask. Splash spreads the burn, and fire on poison Ignites.'],
-  ['Deadeye', "Hunter's Lens + Keen Edge + Headsman's Seal, with Power Shot and Piercing Gale. Huge crits from long range."],
-  ['Iron Fortress', 'Bulwark Plate + Thorn Shard + Iron Band, with Iron Skin and Counter Stance. Let them hit you.'],
-  ['Warlord', "Warlord's Standard + Leech Fang + Ember Sigil, with the Command tree. Your troops burn and drain for you."],
-  ['Storm Caller', 'Storm Coil + Heart of the Maelstrom + Prism of Echoes, with Chain Lightning. Lightning that keeps setting off more lightning.'],
-  ['Berserker', "Berserker's Mark + Leech Fang + Bloodthirst Charm, with Last Stand. Strongest when nearly dead."],
+  ['Black Hole Brawler', "Gravity Lodestone + Brawler's Knuckles + Leech Fang on a Greataxe with Wide Swings and Bloodlust. Pull everything in, then cleave it all while healing."],
+  ['Chain Reaction', 'Corpse Bloom + Shrapnel Core + Prism of Echoes on a Runestaff with Wide Burst. One kill sets off the whole pack.'],
+  ['Inferno', 'Ember Sigil + Shrapnel Core with Pyromancy, Kindling and Poison Flask. Splash spreads the burn, and fire on poison Ignites.'],
+  ['Deadeye', "Hunter's Lens + Keen Edge + Headsman's Seal on a Longbow with Far Sight, Deadly Strikes and Assassin. Huge crits from long range."],
+  ['Shadow Dancer', 'Keen Edge + Storm Coil on Twin Daggers with Backstab, Lacerate and Tumble. Roll behind a foe, then shred it.'],
+  ['Phalanx', 'Frost Shard + Iron Band on a War Spear with Keep Away, Skewer and Formation. Hold a whole line of foes at the tip of your spear.'],
+  ['Iron Fortress', 'Bulwark Plate + Thorn Shard + Iron Band on a Longsword with Shield Block, Retaliation and Thick Skin. Let them hit you.'],
+  ['Warlord', "Warlord's Standard + Leech Fang + Ember Sigil with the Command tree. Your troops burn and drain for you."],
+  ['Storm Caller', 'Storm Coil + Heart of the Maelstrom + Prism of Echoes with Static Charge and Chain Lightning. Lightning that keeps setting off more lightning.'],
+  ['Berserker', "Berserker's Mark + Leech Fang + Bloodthirst Charm with Berserker and Rampage. Strongest when nearly dead."],
 ];
 export const CRATES = {
   crate: { name: 'Relic Crate', price: 150, odds: [['common', 0.7], ['rare', 0.26], ['epic', 0.04]] },

@@ -35,6 +35,20 @@ function weapon(x, kind, swing) {
     x.rotate(swing ? -0.1 : -0.8);
     x.fillStyle = '#6b4523'; x.fillRect(-4, -1.5, 22, 3);
     x.fillStyle = '#b8c0c8'; x.beginPath(); x.moveTo(14, -1.5); x.quadraticCurveTo(20, -10, 23, -9); x.lineTo(21, 1.5); x.closePath(); x.fill(); x.strokeStyle = OUT; x.lineWidth = 0.8; x.stroke();
+  } else if (kind === 'greataxe') {
+    x.rotate(swing ? 0.1 : -0.9);
+    x.fillStyle = '#5a3a1e'; x.fillRect(-6, -1.8, 32, 3.6);
+    const g = x.createLinearGradient(20, -14, 20, 14); g.addColorStop(0, '#eef2f6'); g.addColorStop(1, '#8a94a2');
+    x.fillStyle = g; x.beginPath(); x.moveTo(19, -2); x.quadraticCurveTo(24, -15, 32, -14); x.quadraticCurveTo(29, 0, 32, 14); x.quadraticCurveTo(24, 15, 19, 2); x.closePath(); x.fill();
+    x.strokeStyle = OUT; x.lineWidth = 0.9; x.stroke();
+    x.fillStyle = '#c9a43a'; x.fillRect(17, -2.5, 3, 5);
+  } else if (kind === 'dagger') {
+    x.rotate(swing ? 0.15 : -0.5);
+    x.fillStyle = '#4a2e14'; x.fillRect(-3, -1.3, 5, 2.6);
+    x.fillStyle = '#9a8a5a'; x.fillRect(2, -3, 1.6, 6);
+    const g = x.createLinearGradient(0, -1.5, 0, 1.5); g.addColorStop(0, '#f4f7fb'); g.addColorStop(1, '#8d97a6');
+    x.fillStyle = g; x.beginPath(); x.moveTo(3.6, -1.6); x.lineTo(13, -0.6); x.lineTo(15, 0); x.lineTo(13, 0.6); x.lineTo(3.6, 1.6); x.closePath(); x.fill();
+    x.strokeStyle = OUT; x.lineWidth = 0.7; x.stroke();
   } else if (kind === 'club') {
     x.rotate(swing ? 0 : -0.7);
     x.fillStyle = '#7a5230'; x.beginPath(); x.moveTo(-3, -2); x.lineTo(24, -5.5); x.quadraticCurveTo(30, 0, 24, 5.5); x.lineTo(-3, 2); x.closePath(); x.fill(); x.strokeStyle = OUT; x.lineWidth = 1; x.stroke();
@@ -110,6 +124,7 @@ function humanoid(o, step, atk) {
   // hands & main weapon
   const skin = o.skin;
   const hx = atk ? 13 : 9, hy = atk ? 7 : 11;
+  if (o.weapon === 'dagger') { x.save(); x.translate(atk ? 8 : 10, atk ? -12 : -10); weapon(x, 'dagger', !atk); x.restore(); }
   if (o.weapon !== 'bow') blob(x, 7, -11, 3.2, 3.2, o.armor === 'plate' ? '#9aa3b2' : skin, OUT, 1);
   x.save(); x.translate(hx, hy);
   if (o.weapon && o.weapon !== 'bow') weapon(x, o.weapon, atk);
@@ -300,13 +315,15 @@ const SKINS = ['#f1c9a5', '#e0ac7e', '#c68b5e', '#8d5a3b', '#f6d7bd'];
 const HAIRS = ['#3a2416', '#6b4423', '#c49a4a', '#1d1a18', '#8a3b1e', '#d8d0c0'];
 const nameHash = (s) => { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
 
+// The sprite each weapon is drawn with in a player's hands.
+const PLAYER_WEAPON = { sword: 'sword', greataxe: 'greataxe', daggers: 'dagger', spear: 'spear', bow: 'bow', staff: 'staff' };
 export function playerLook(name, rank, color, wp) {
   const h = nameHash(name);
   const armor = rank >= 3 ? 'plate' : rank === 2 ? 'chain' : rank === 1 ? 'leather' : 'cloth';
   const head = rank >= 8 ? 'crown' : rank === 7 ? 'circlet' : rank >= 3 && rank <= 6 ? (rank >= 5 ? 'plume' : 'helm') : 'hair';
   return {
     skin: SKINS[h % SKINS.length], hair: HAIRS[(h >> 4) % HAIRS.length], tunic: color || '#9a8a68', armor, head, plume: color || '#c0392b',
-    weapon: wp || 'sword', shield: wp === 'sword' && rank >= 2 ? (color || '#7a6a50') : null, cape: rank >= 4 ? (color || '#7a2a2a') : null,
+    weapon: PLAYER_WEAPON[wp] || 'sword', shield: (wp || 'sword') === 'sword' ? (color || '#7a6a50') : null, cape: rank >= 4 ? (color || '#7a2a2a') : null,
   };
 }
 const MOB_LOOK = {

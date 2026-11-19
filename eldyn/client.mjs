@@ -1,9 +1,13 @@
 // Hanbin Island browser client: sign-in, rendering, HUD and input.
 import {
-  WORLD, REGIONS, CASTLES, VILLAGE, SKILLS, SKILL_LIST, TREES, MOBS, RANKS, ROADS, LAND_GRID, REGION_GRID, GW, GH, RC,
+  WORLD, REGIONS, CASTLES, VILLAGE, MOBS, RANKS, ROADS, LAND_GRID, REGION_GRID, GW, GH, RC,
   rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng, rankBonus, RECALL_RANK, TRAVEL_RANK, COMBOS,
   CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, RELICS, RARITIES, CRATES, SYNERGIES, ELITE_AFFIXES, CASTLE_LEVEL_COST, MAX_RELIC_LV, MAX_STASH, relicText, dungeonAt,
 } from './shared.mjs';
+import {
+  WEAPONS, WEAPON_IDS, TREES, TREE, TALENTS, TALENT_LIST, HOTBAR_SLOTS, MAX_MASTERY, FORGE_MAX, FORGE_BONUS, ROLL_CD, ROLL_DIST, ROLL_MS,
+  masteryXp, forgeCost, learnCheck, treeSpent,
+} from './builds.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
 import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE } from './sprites.mjs';
 
@@ -33,13 +37,13 @@ function getVignette(hurt) {
 addEventListener('resize', resize); resize();
 
 const BIOME_NAME = { grass: 'Meadows', forest: 'Forest', darkforest: 'Deep forest', snow: 'Tundra', rock: 'Highlands', ash: 'Ashlands', swamp: 'Marsh', desert: 'Dunes', heath: 'Heath' };
-const STATUS = [[1, '💫', 'Stunned'], [4, '🐌', 'Slowed'], [8, '📉', 'Weakened'], [16, '⬆️', 'Rallied'], [32, '🛡️', 'Shielded'], [128, '🌿', 'Regenerating']];
+const STATUS = [[1, '💫', 'Stunned'], [4, '🐌', 'Slowed'], [8, '📉', 'Exposed'], [16, '⬆️', 'Rallied'], [32, '🛡️', 'Shielded'], [128, '🌿', 'Regenerating'], [256, '🔥', 'Burning'], [512, '☠️', 'Poisoned'], [4096, '🩸', 'Bleeding']];
 const TALL = new Set(['tree', 'pine', 'dead', 'cactus']);
 
 // ------------------------------------------------------------------ state
 let ws = null, myId = null, started = false, chatOpen = false, connected = false;
 const me = { x: VILLAGE.x, y: VILLAGE.y, sx: 0, sy: 0, h: 100, mh: 100, en: 100, me: 100, v: 0, s: 0, sp: 190, fl: 0, dead: 0, rs: 0, cz: -1, cp: 0, cdf: 0, ph: 0, init: false };
-let prof = { skills: [], hotbar: [], pts: 0, slots: 5, tier: 0, fac: 0, name: '' };
+let prof = { tal: {}, hotbar: [], pts: 0, mpts: {}, mlv: {}, wx: {}, forge: {}, wset: ['sword', 'bow'], wi: 0, wp: 'sword', tier: 0, fac: 0, name: '', relics: [], equip: [], rslots: 1 };
 const ents = new Map();
 let projs = [], zones = [], fxs = [], floaters = [];
 let meta = { c: [], f: [], lb: [], on: 0, bosses: [] };
@@ -111,7 +115,7 @@ function handle(m) {
   switch (m.t) {
     case 's': onSnap(m); break;
     case 'welcome': myId = m.id; connected = true; me.init = false; ents.clear(); $('login').style.display = 'none'; if (!started) { started = true; requestAnimationFrame(frame); } break;
-    case 'prof': prof = m; buildHotbar(); buildPassives(); if (panelOpen('skills')) renderSkills(); if (panelOpen('factions')) renderFactions(); if (panelOpen('inv')) renderInv(); break;
+    case 'prof': prof = m; buildHotbar(); buildPassives(); if (panelOpen('skills')) renderSkills(); if (panelOpen('armory')) renderArmory(); if (panelOpen('factions')) renderFactions(); if (panelOpen('inv')) renderInv(); break;
     case 'meta': {
       meta = m; facInfo.clear(); m.f.forEach((f) => facInfo.set(f.id, f));
       let changed = false;
@@ -159,18 +163,26 @@ function onSnap(m) {
 }
 
 // ------------------------------------------------------------------ hotbar / HUD
+// Left: the two weapons you carry (the lit one is in hand). Middle: six ability slots. Right: the dodge roll.
 function buildHotbar() {
   const hb = $('hotbar'); hb.innerHTML = '';
-  for (let i = 0; i < 10; i++) {
-    const d = document.createElement('div');
-    const locked = i >= prof.slots, id = prof.hotbar[i], sk = id && SKILLS[id];
-    d.className = 'slot' + (locked ? ' locked' : '') + (i === slotSel ? ' sel' : '');
-    if (sk) d.style.setProperty('--tc', TREES.find((t) => t.id === sk.tree).color);
-    d.innerHTML = `<span class="key">${keyName(binds['slot' + i])}</span><div class="ico">${locked ? '' : (sk ? sk.icon : '')}</div><div class="cd"></div><span class="cdt"></span>${sk && sk.en ? `<span class="en">${sk.en}</span>` : ''}${locked ? `<div class="lk">🔒<br>T${(i - 4) * 5}</div>` : ''}`;
-    d.title = locked ? `Unlocks at soma tier ${(i - 4) * 5}` : sk ? `${sk.name}: ${sk.desc}\n${sk.en} energy · ${sk.cd / 1000}s cooldown\nRight-click to clear` : 'Empty slot. Click it, then click a learned skill in the skill tree (K).';
+  const ws = el('div', 'wset');
+  prof.wset.forEach((w, i) => {
+    const on = i === prof.wi, d = el('div', 'wbox' + (on ? ' on' : ''));
+    d.innerHTML = `<span class="key">${on ? 'LMB' : keyName(binds.swap)}</span><div class="ico">${WEAPONS[w].icon}</div>${prof.forge[w] ? `<span class="wl">+${prof.forge[w]}</span>` : ''}`;
+    d.title = `${WEAPONS[w].name}${prof.forge[w] ? ' +' + prof.forge[w] : ''} · mastery ${prof.mlv[w] || 0}\n${on ? 'In hand: hold left click to attack.' : 'Press ' + keyName(binds.swap) + ' (or click) to switch to it.'}`;
+    d.addEventListener('mousedown', (e) => { e.stopPropagation(); if (!on) send({ t: 'swap' }); });
+    ws.appendChild(d);
+  });
+  hb.appendChild(ws);
+  for (let i = 0; i < HOTBAR_SLOTS; i++) {
+    const id = prof.hotbar[i], n = id && TALENTS[id];
+    const d = el('div', 'slot ability' + (i === slotSel ? ' sel' : ''));
+    if (n) d.style.setProperty('--tc', n.weapon ? '#d8c8a0' : TREE[n.tree].color);
+    d.innerHTML = `<span class="key">${i === 0 ? 'RMB·' : ''}${keyName(binds['slot' + i])}</span><div class="ico">${n ? n.icon : ''}</div><div class="cd"></div><span class="cdt"></span>${n ? `<span class="en">${n.active.en}</span>` : ''}`;
+    d.title = n ? `${n.name}: ${n.desc}\n${n.active.en} energy · ${n.active.cd / 1000}s cooldown${n.weapon ? '\nNeeds your ' + WEAPONS[n.weapon].name + ' in hand' : ''}\nRight-click to clear` : 'Empty ability slot. Click it, then pick an ability in your talents (K).';
     d.addEventListener('mousedown', (e) => {
       e.stopPropagation();
-      if (locked) return;
       if (e.button === 2) { send({ t: 'hb', s: i, id: null }); return; }
       slotSel = slotSel === i ? -1 : i; buildHotbar();
       if (slotSel >= 0 && !panelOpen('skills')) togglePanel('skills');
@@ -178,10 +190,19 @@ function buildHotbar() {
     d.addEventListener('contextmenu', (e) => e.preventDefault());
     hb.appendChild(d);
   }
+  const r = el('div', 'slot roll');
+  r.innerHTML = `<span class="key">${keyName(binds.roll)}</span><div class="ico">🤸</div><div class="cd"></div><span class="cdt"></span>`;
+  r.title = 'Dodge roll: a quick dash that slips past every attack while you roll.';
+  hb.appendChild(r);
 }
+const rollCd = () => Math.max(1200, ROLL_CD - 400 * (prof.tal.footwork || 0));
 function buildPassives() {
   const box = $('passives'); box.innerHTML = '';
-  for (const id of prof.skills) { const sk = SKILLS[id]; if (!sk.passive) continue; const d = document.createElement('span'); d.textContent = sk.icon; d.title = `${sk.name}: ${sk.desc}`; box.appendChild(d); }
+  for (const id in prof.tal) {
+    const n = TALENTS[id];
+    if (!n || n.active || (n.weapon && n.weapon !== prof.wp)) continue;
+    const d = document.createElement('span'); d.textContent = n.icon; d.title = `${n.name}${n.max > 1 ? ' ' + prof.tal[id] + '/' + n.max : ''}: ${n.desc}`; box.appendChild(d);
+  }
 }
 function updateHud() {
   const r = rankOf(me.v);
@@ -193,22 +214,29 @@ function updateHud() {
   const t = prof.tier, a = somaForTier(t), b = somaForTier(t + 1);
   $('somabar').style.width = ((me.s - a) / (b - a)) * 100 + '%';
   $('somatxt').textContent = `Soma tier ${t} · ${me.s} / ${b}`;
-  $('ptsrow').textContent = prof.pts > 0 ? `★ ${prof.pts} skill point${prof.pts > 1 ? 's' : ''} to spend (K)` : '';
+  const w = prof.wp, ml = prof.mlv[w] || 0, x0 = masteryXp(ml), x1 = masteryXp(ml + 1);
+  $('mastbar').style.width = (ml >= MAX_MASTERY ? 1 : ((prof.wx[w] || 0) - x0) / (x1 - x0)) * 100 + '%';
+  $('masttxt').textContent = `${WEAPONS[w].name} mastery ${ml}${ml >= MAX_MASTERY ? ' (max)' : ''}`;
+  const spare = WEAPON_IDS.filter((k) => (prof.mpts[k] || 0) > 0);
+  $('ptsrow').textContent = [prof.pts > 0 ? `★ ${prof.pts} talent point${prof.pts > 1 ? 's' : ''}` : '', spare.length ? `mastery points: ${spare.map((k) => WEAPONS[k].icon).join(' ')}` : ''].filter(Boolean).join(' · ') + (prof.pts > 0 || spare.length ? ' (K)' : '');
   $('goldrow').innerHTML = `🪙 <b>${me.b || 0}</b> banked${me.g ? ` · <span class="carry">${me.g} carried (bank it in the Haven or your castle)</span>` : ''}`;
   const f = facInfo.get(prof.fac);
   $('facrow').textContent = f ? `⚑ ${f.name}` : 'No faction (F)';
   $('facrow').style.color = f ? f.color : '#a99';
   $('hpbar').style.width = (me.h / me.mh) * 100 + '%'; $('hptxt').textContent = `${me.h} / ${me.mh}`;
   $('enbar').style.width = (me.en / me.me) * 100 + '%'; $('entxt').textContent = `Energy ${me.en} / ${me.me}`;
-  const now = performance.now(), slots = $('hotbar').children;
+  const now = performance.now(), slots = $('hotbar').querySelectorAll('.ability');
   for (let i = 0; i < slots.length; i++) {
-    const id = prof.hotbar[i], sk = id && SKILLS[id], cdEl = slots[i].querySelector('.cd'), cdt = slots[i].querySelector('.cdt');
-    if (!sk) { cdEl.style.height = '0'; cdt.textContent = ''; continue; }
+    const id = prof.hotbar[i], n = id && TALENTS[id], cdEl = slots[i].querySelector('.cd'), cdt = slots[i].querySelector('.cdt');
+    if (!n) { cdEl.style.height = '0'; cdt.textContent = ''; continue; }
     const rem = (cdReady[id] || 0) - now;
-    cdEl.style.height = rem > 0 ? Math.min(100, (rem / sk.cd) * 100) + '%' : '0';
+    cdEl.style.height = rem > 0 ? Math.min(100, (rem / n.active.cd) * 100) + '%' : '0';
     cdt.textContent = rem > 1000 ? Math.ceil(rem / 1000) : '';
-    slots[i].classList.toggle('noen', me.en < sk.en);
+    slots[i].classList.toggle('noen', me.en < n.active.en);
+    slots[i].classList.toggle('off', !!n.weapon && n.weapon !== prof.wp);
   }
+  const roll = $('hotbar').querySelector('.roll');
+  if (roll) { const rem = (cdReady.roll || 0) - now; roll.querySelector('.cd').style.height = rem > 0 ? Math.min(100, (rem / rollCd()) * 100) + '%' : '0'; roll.querySelector('.cdt').textContent = rem > 1000 ? Math.ceil(rem / 1000) : ''; }
   const ri = regionAt(me.x, me.y), reg = REGIONS[ri], own = owners.get(ri), of = own && facInfo.get(own);
   const dg = reg.dungeon !== undefined ? DUNGEONS[reg.dungeon] : null, bossWait = dg && meta.bosses ? meta.bosses[dg.id] : 0;
   $('regionlbl').innerHTML = dg ? `<b>${reg.name}</b> <span class="dim">· dungeon · danger ${'◆'.repeat(reg.danger)}</span><br><span class="dim">${bossWait ? 'Boss returns in ' + Math.ceil(bossWait / 60000) + ' min' : 'The boss waits in the deepest room'}</span>`
@@ -221,7 +249,7 @@ function updateHud() {
     $('capbar').style.width = me.cp * 100 + '%';
   } else cap.style.display = 'none';
   $('death').style.display = me.dead ? 'flex' : 'none';
-  if (me.dead && lastDeath) $('deathtxt').textContent = `You lost ${lastDeath.lost} valor${lastDeath.gold ? ' and dropped ' + lastDeath.gold + ' gold' : ''}${lastDeath.by ? ' to ' + lastDeath.by : ''}. Your soma and relics are safe. Respawning in ${Math.ceil(me.rs / 1000)}...`;
+  if (me.dead && lastDeath) $('deathtxt').textContent = `You lost ${lastDeath.lost} valor${lastDeath.gold ? ' and dropped ' + lastDeath.gold + ' gold' : ''}${lastDeath.by ? ' to ' + lastDeath.by : ''}. Your soma, mastery and relics are safe. Respawning in ${Math.ceil(me.rs / 1000)}...`;
 }
 let lastMg = null;
 setInterval(() => {
@@ -242,76 +270,130 @@ let toastT = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = '1'; clearTimeout(toastT); toastT = setTimeout(() => (t.style.opacity = '0'), 3000); }
 
 // ------------------------------------------------------------------ panels
-const PANELS = ['skills', 'factions', 'board', 'help', 'map', 'keys', 'inv'];
+const PANELS = ['skills', 'armory', 'factions', 'board', 'help', 'map', 'keys', 'inv'];
 const panelOpen = (id) => $(id).style.display === 'block';
 function togglePanel(id) {
   const open = panelOpen(id);
   for (const p of PANELS) $(p).style.display = 'none';
   if (!open) {
     $(id).style.display = 'block';
-    if (id === 'skills') renderSkills(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap(); if (id === 'keys') renderKeys(); if (id === 'inv') renderInv();
+    if (id === 'skills') renderSkills(); if (id === 'armory') renderArmory(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap(); if (id === 'keys') renderKeys(); if (id === 'inv') renderInv();
   } else if (id === 'keys') rebinding = null;
 }
 document.querySelectorAll('[data-close]').forEach((x) => x.addEventListener('click', () => togglePanel(x.closest('.panel').id)));
 document.querySelectorAll('[data-open]').forEach((x) => x.addEventListener('click', () => togglePanel(x.dataset.open)));
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
-let treeTab = 'blade', skillSel = null;
-function skillState(sk) {
-  const owned = prof.skills.includes(sk.id), reqOk = !sk.req || prof.skills.includes(sk.req);
-  const can = !owned && !sk.free && reqOk && prof.tier >= sk.tier && prof.pts > 0;
-  return { owned, reqOk, can, tierOk: prof.tier >= sk.tier };
+// ------------------------------------------------------------------ talents & mastery panel
+let treeTab = 'warfare', skillSel = null;
+const learnCtx = () => ({ tier: prof.tier, mastery: prof.mlv || {} });
+const nodeWhy = (n) => learnCheck(prof.tal, n.id, learnCtx());
+function treeTabButton(tr, label) {
+  const list = TALENT_LIST.filter((n) => n.tree === tr.id), got = treeSpent(prof.tal, tr.id);
+  const b = el('button', 'treetab' + (tr.id === treeTab ? ' on' : ''), `${label} ${got}`);
+  b.style.setProperty('--tc', tr.color);
+  b.title = tr.weapon ? `${WEAPONS[tr.weapon].name}: mastery ${prof.mlv[tr.weapon] || 0}, ${prof.mpts[tr.weapon] || 0} point(s) to spend` : `${tr.name}: ${got} point(s) spent`;
+  if (list.some((n) => !nodeWhy(n))) b.classList.add('glow');
+  b.onclick = () => { treeTab = tr.id; skillSel = null; renderSkills(); };
+  return b;
 }
 function renderSkills() {
-  $('skpts').textContent = `${prof.pts} point${prof.pts === 1 ? '' : 's'} to spend · soma tier ${prof.tier}`;
+  const tr = TREE[treeTab], w = tr.weapon;
+  $('skpts').textContent = `${prof.pts} talent point${prof.pts === 1 ? '' : 's'} · soma tier ${prof.tier}`;
+  $('resetBtn').textContent = w ? `Reset ${WEAPONS[w].name} mastery` : 'Reset talents';
   const tabs = $('treetabs'); tabs.innerHTML = '';
-  for (const tr of TREES) {
-    const n = SKILL_LIST.filter((s) => s.tree === tr.id && prof.skills.includes(s.id)).length, tot = SKILL_LIST.filter((s) => s.tree === tr.id).length;
-    const b = el('button', 'treetab' + (tr.id === treeTab ? ' on' : ''), `${tr.name} ${n}/${tot}`);
-    b.style.setProperty('--tc', tr.color);
-    if (SKILL_LIST.some((s) => s.tree === tr.id && skillState(s).can)) b.classList.add('glow');
-    b.onclick = () => { treeTab = tr.id; skillSel = null; renderSkills(); };
-    tabs.appendChild(b);
-  }
-  const tr = TREES.find((t) => t.id === treeTab), list = SKILL_LIST.filter((s) => s.tree === treeTab);
+  const g1 = el('div', 'tabgroup'); g1.appendChild(el('span', 'tabl', 'Talents'));
+  for (const t of TREES) if (!t.weapon) g1.appendChild(treeTabButton(t, t.name));
+  const g2 = el('div', 'tabgroup'); g2.appendChild(el('span', 'tabl', 'Weapon mastery'));
+  for (const t of TREES) if (t.weapon) g2.appendChild(treeTabButton(t, `${WEAPONS[t.weapon].icon} ${t.name}`));
+  tabs.appendChild(g1); tabs.appendChild(g2);
+  const list = TALENT_LIST.filter((n) => n.tree === treeTab);
   const box = $('treeview'); box.innerHTML = ''; box.style.setProperty('--tc', tr.color);
-  const CW = 150, RH = 84, ox = 20, oy = 16;
+  const rows = Math.max(...list.map((n) => n.at[1])) + 1;
+  const CW = 150, RH = 82, ox = 20, oy = 14;
+  box.style.height = rows * RH + 24 + 'px';
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', CW * 3 + 40); svg.setAttribute('height', RH * 6 + 30); box.appendChild(svg);
-  const pos = (s) => [ox + s.at[0] * CW + 60, oy + s.at[1] * RH + 26];
-  for (const s of list) if (s.req) {
-    const [x1, y1] = pos(SKILLS[s.req]), [x2, y2] = pos(s), line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  svg.setAttribute('width', CW * 3 + 40); svg.setAttribute('height', rows * RH + 24); box.appendChild(svg);
+  const pos = (n) => [ox + n.at[0] * CW + 60, oy + n.at[1] * RH + 26];
+  // Row gates: each row needs 2 points per row above it already spent in this tree.
+  const spent = treeSpent(prof.tal, treeTab);
+  for (let r = 1; r < rows; r++) {
+    const y = oy + r * RH - 4, txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', 6); txt.setAttribute('y', y + 4); txt.setAttribute('class', 'gate' + (spent >= r * 2 ? ' open' : ''));
+    txt.textContent = spent >= r * 2 ? '' : `${r * 2}`;
+    svg.appendChild(txt);
+  }
+  for (const n of list) if (n.req) {
+    const [x1, y1] = pos(TALENTS[n.req]), [x2, y2] = pos(n), line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     line.setAttribute('d', `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}`);
-    line.setAttribute('class', 'edge' + (prof.skills.includes(s.req) ? ' lit' : ''));
+    line.setAttribute('class', 'edge' + (prof.tal[n.req] ? ' lit' : ''));
     svg.appendChild(line);
   }
-  for (const s of list) {
-    const st = skillState(s), [x, y] = pos(s);
-    const d = el('div', 'node ' + (st.owned ? 'owned' : st.can ? 'avail' : 'locked') + (s.passive ? ' passive' : '') + (skillSel === s.id ? ' sel' : ''));
+  for (const n of list) {
+    const r = prof.tal[n.id] || 0, why = nodeWhy(n), [x, y] = pos(n);
+    const d = el('div', 'node ' + (r ? 'owned' : !why ? 'avail' : 'locked') + (n.active ? ' active' : ' passive') + (skillSel === n.id ? ' sel' : '') + (r && r < n.max && !why ? ' avail' : ''));
     d.style.left = x - 60 + 'px'; d.style.top = y - 26 + 'px';
-    d.innerHTML = `<span class="ni">${s.icon}</span><span class="nn">${s.name}</span><span class="nt">${st.owned ? (s.passive ? 'passive ✓' : '✓ learned') : 'tier ' + s.tier}</span>`;
-    d.onclick = () => { skillSel = s.id; renderSkills(); };
-    d.ondblclick = () => { if (st.can) send({ t: 'learn', id: s.id }); };
+    d.innerHTML = `<span class="ni">${n.icon}</span><span class="nn">${n.name}</span><span class="nt">${n.active ? 'ability' : 'passive'}${n.lvl ? ' · ' + (w ? 'M' : 'T') + n.lvl : ''}</span><span class="nr">${r}/${n.max}</span>`;
+    d.onclick = () => { skillSel = n.id; renderSkills(); };
+    d.ondblclick = () => { if (!nodeWhy(n)) send({ t: 'learn', id: n.id }); };
     box.appendChild(d);
   }
   const info = $('skinfo'); info.innerHTML = '';
-  const s = skillSel && SKILLS[skillSel];
-  if (!s) { info.innerHTML = `<h3 style="color:${tr.color}">${tr.name}</h3><p>${tr.blurb}</p><p class="dim">Click a skill to see what it does. Each soma tier gives one skill point. Skills need the one above them in the tree. Mix trees to build your own playstyle.</p>`; return; }
-  const st = skillState(s);
-  info.innerHTML = `<h3 style="color:${tr.color}">${s.icon} ${s.name}</h3><p>${s.desc}</p><p class="dim">${s.passive ? 'Passive · always active once learned' : `${s.en} energy · ${s.cd / 1000}s cooldown`}<br>Needs soma tier ${s.tier}${s.req ? ` and ${SKILLS[s.req].name}` : ''}</p>`;
-  if (st.can) { const b = el('button', 'primary', 'Learn (1 point)'); b.onclick = () => send({ t: 'learn', id: s.id }); info.appendChild(b); }
-  else if (!st.owned && !s.free) info.appendChild(el('p', 'warn', !st.tierOk ? `Reach soma tier ${s.tier} first.` : !st.reqOk ? `Learn ${SKILLS[s.req].name} first.` : 'No skill points left.'));
-  if (st.owned && !s.passive) {
-    info.appendChild(el('p', 'dim', 'Put on hotbar slot:'));
+  if (w) {
+    const ml = prof.mlv[w] || 0, xp = prof.wx[w] || 0, nx = masteryXp(ml + 1), cx = masteryXp(ml);
+    info.innerHTML = `<div class="mast"><b>${WEAPONS[w].icon} ${WEAPONS[w].name}</b> · mastery ${ml}/${MAX_MASTERY} · <span class="ok">${prof.mpts[w] || 0} point${prof.mpts[w] === 1 ? '' : 's'} to spend</span><div class="bar"><i class="soma" style="width:${ml >= MAX_MASTERY ? 100 : ((xp - cx) / (nx - cx)) * 100}%"></i><span>${ml >= MAX_MASTERY ? 'Mastered' : `${xp - cx} / ${nx - cx} soma to the next level`}</span></div></div>`;
+  }
+  const n = skillSel && TALENTS[skillSel];
+  if (!n) {
+    info.insertAdjacentHTML('beforeend', `<h3 style="color:${tr.color}">${tr.name}</h3><p>${tr.blurb}</p><p class="dim">${w ? 'Weapon mastery points come from soma earned while this weapon is in your hands. These talents only work while you wield it.' : 'Every soma tier gives one talent point. Ranked talents take several points.'} Each row needs 2 more points spent in this tree, and every talent needs the one it hangs from. Double-click to learn.</p>`);
+    return;
+  }
+  const r = prof.tal[n.id] || 0, why = nodeWhy(n);
+  info.insertAdjacentHTML('beforeend', `<h3 style="color:${tr.color}">${n.icon} ${n.name} <small>${r}/${n.max}</small></h3><p>${n.desc}</p><p class="dim">${n.active ? `Ability · ${n.active.en} energy · ${n.active.cd / 1000}s cooldown${n.weapon ? ' · needs your ' + WEAPONS[n.weapon].name + ' in hand' : ''}` : 'Passive · always on once learned'}${n.req ? `<br>Hangs from ${TALENTS[n.req].name}` : ''}${n.lvl ? `<br>Needs ${w ? 'mastery' : 'soma tier'} ${n.lvl}` : ''}${n.at[1] ? `<br>Needs ${n.at[1] * 2} points in this tree` : ''}</p>`);
+  if (!why) { const b = el('button', 'primary', r ? `Learn rank ${r + 1} (1 point)` : 'Learn (1 point)'); b.onclick = () => send({ t: 'learn', id: n.id }); info.appendChild(b); }
+  else if (r < n.max) info.appendChild(el('p', 'warn', why));
+  if (r && n.active) {
+    info.appendChild(el('p', 'dim', 'Put it in an ability slot:'));
     const row = el('div', 'slotpick');
-    for (let i = 0; i < prof.slots; i++) {
-      const cur = prof.hotbar[i], b = el('button', cur === s.id ? 'on' : '', `${(i + 1) % 10}${cur && SKILLS[cur] ? ' ' + SKILLS[cur].icon : ''}`);
-      b.onclick = () => { send({ t: 'hb', s: i, id: s.id }); slotSel = -1; };
+    for (let i = 0; i < HOTBAR_SLOTS; i++) {
+      const cur = prof.hotbar[i], b = el('button', cur === n.id ? 'on' : '', `${keyName(binds['slot' + i])}${cur && TALENTS[cur] ? ' ' + TALENTS[cur].icon : ''}`);
+      b.onclick = () => { send({ t: 'hb', s: i, id: n.id }); slotSel = -1; };
       row.appendChild(b);
     }
     info.appendChild(row);
-    if (slotSel >= 0 && slotSel < prof.slots && prof.hotbar[slotSel] !== s.id) { send({ t: 'hb', s: slotSel, id: s.id }); slotSel = -1; buildHotbar(); }
+    if (slotSel >= 0 && prof.hotbar[slotSel] !== n.id) { send({ t: 'hb', s: slotSel, id: n.id }); slotSel = -1; buildHotbar(); }
   }
+}
+
+// ------------------------------------------------------------------ armory panel
+const WTYPE = { melee: 'Melee arc', thrust: 'Piercing thrust', shot: 'Arrows', bolt: 'Bursting bolts' };
+function renderArmory() {
+  const b = $('armorybody'); b.innerHTML = '';
+  const manage = !!me.mg, inHaven = Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) < VILLAGE.r;
+  b.appendChild(el('p', 'dim', `You carry two weapons. Hold left click to attack with the one in hand and press ${keyName(binds.swap)} to switch. Weapons do most of your damage; abilities are for the big moments.`));
+  if (!manage) b.appendChild(el('p', 'warn', 'You can change your pair of weapons only in Hanbin Haven or a castle your faction holds.'));
+  const grid = el('div', 'armory');
+  for (const w of WEAPON_IDS) {
+    const W = WEAPONS[w], lv = prof.forge[w] || 0, ml = prof.mlv[w] || 0, slot = prof.wset.indexOf(w);
+    const per = (W.dmg * (1 + FORGE_BONUS * lv) * (prof.dmg || 1)).toFixed(0), aps = (1000 / W.every).toFixed(1);
+    const c = el('div', 'wcard' + (slot >= 0 ? ' carried' : '') + (w === prof.wp ? ' inhand' : ''));
+    c.innerHTML = `<div class="wh"><span class="wi">${W.icon}</span><div><b>${W.name}</b>${lv ? ` <span class="ok">+${lv}</span>` : ''}<br><span class="dim">${WTYPE[W.type]} · ${per} damage · ${aps} attacks/s</span></div></div><p>${W.desc}</p><div class="dim">Mastery ${ml}/${MAX_MASTERY}${prof.mpts[w] ? ` · <span class="ok">${prof.mpts[w]} point${prof.mpts[w] > 1 ? 's' : ''} to spend</span>` : ''}${slot >= 0 ? ` · ${slot === prof.wi ? 'in hand' : 'carried'}` : ''}</div>`;
+    const row = el('div', 'slotpick');
+    for (const s of [0, 1]) {
+      const bt = el('button', prof.wset[s] === w ? 'on' : '', s === 0 ? 'Carry as 1st' : 'Carry as 2nd');
+      bt.disabled = !manage || prof.wset[s] === w; bt.onclick = () => send({ t: 'wset', s, w }); row.appendChild(bt);
+    }
+    if (lv < FORGE_MAX) {
+      const cost = forgeCost(lv + 1), fb = el('button', 'primary', `Forge +${lv + 1} (${cost}g)`);
+      fb.title = `+${Math.round(FORGE_BONUS * 100)}% weapon damage per level, paid from banked gold. The blacksmith is in Hanbin Haven.`;
+      fb.disabled = !inHaven || (me.b || 0) < cost; fb.onclick = () => send({ t: 'forge', w }); row.appendChild(fb);
+    } else row.appendChild(el('span', 'ok', 'Fully forged'));
+    const tb = el('button', '', 'Mastery tree'); tb.onclick = () => { treeTab = 'w_' + w; skillSel = null; togglePanel('skills'); }; row.appendChild(tb);
+    c.appendChild(row);
+    grid.appendChild(c);
+  }
+  b.appendChild(grid);
+  if (!inHaven) b.appendChild(el('p', 'dim', 'The blacksmith forges weapons only in Hanbin Haven.'));
 }
 // The panel is split so the name box is only rebuilt when your faction changes, not on every
 // once-a-second update (rebuilding it used to wipe whatever you were typing).
@@ -495,19 +577,31 @@ function aimAngle() { return Math.atan2(mouseY - VH / 2, mouseX - VW / 2); }
 // Rebindable keys, stored per browser as KeyboardEvent.code values (layout-independent).
 const ACTIONS = [
   ['up', 'Move up', 'KeyW'], ['down', 'Move down', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
-  ...Array.from({ length: 10 }, (_, i) => ['slot' + i, `Hotbar slot ${i + 1}`, 'Digit' + ((i + 1) % 10)]),
-  ['skills', 'Skill trees', 'KeyK'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Leaderboard', 'Tab'],
-  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['recall', 'Recall to Haven (Knight)', 'KeyB'], ['inv', 'Relics & shop', 'KeyI'],
+  ['roll', 'Dodge roll', 'Space'], ['swap', 'Switch weapon', 'KeyX'],
+  ...Array.from({ length: HOTBAR_SLOTS }, (_, i) => ['slot' + i, `Ability ${i + 1}`, 'Digit' + (i + 1)]),
+  ['skills', 'Talents', 'KeyK'], ['armory', 'Armory', 'KeyG'], ['inv', 'Relics & shop', 'KeyI'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Leaderboard', 'Tab'],
+  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['recall', 'Recall to Haven (Knight)', 'KeyB'],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([id, , code]) => [id, code]));
 let binds = { ...DEFAULT_BINDS };
-try { Object.assign(binds, JSON.parse(store.get('hanbin_binds') || '{}')); } catch { /* ignore a corrupt save */ }
+try {
+  // Keep saved keys for actions that still exist; a saved key that now clashes with a new action's default gives way.
+  const saved = JSON.parse(store.get('hanbin_binds') || '{}');
+  for (const [k, v] of Object.entries(saved)) if (DEFAULT_BINDS[k] && typeof v === 'string') binds[k] = v;
+  const seen = new Map();
+  for (const [id] of ACTIONS) {
+    const c = binds[id];
+    if (!seen.has(c)) { seen.set(c, id); continue; }
+    const other = seen.get(c), loser = DEFAULT_BINDS[id] === c ? other : id;
+    binds[loser] = DEFAULT_BINDS[loser]; seen.set(c, loser === other ? id : other); seen.set(binds[loser], loser);
+  }
+} catch { /* ignore a corrupt save */ }
 let actionOf = new Map();
 function applyBinds() {
   actionOf = new Map(Object.entries(binds).map(([a, c]) => [c, a]));
   store.set('hanbin_binds', JSON.stringify(binds));
-  document.querySelectorAll('[data-open]').forEach((b) => { b.textContent = `${keyName(binds[b.dataset.open === 'board' ? 'board' : b.dataset.open])} ${b.dataset.label}`; });
-  if (started || prof.slots) buildHotbar();
+  document.querySelectorAll('[data-open]').forEach((b) => { b.textContent = `${keyName(binds[b.dataset.open])} ${b.dataset.label}`; });
+  if (started) buildHotbar();
 }
 function keyName(code) {
   if (!code) return '—';
@@ -535,12 +629,25 @@ function renderKeys() {
     grid.appendChild(btn);
   }
   b.appendChild(grid);
-  b.appendChild(el('p', 'dim', 'Click an action, then press the new key (Esc cancels). Picking a key that is already used swaps the two. Left click is always hotbar slot 1 and right click slot 2.'));
+  b.appendChild(el('p', 'dim', 'Click an action, then press the new key (Esc cancels). Picking a key that is already used swaps the two. Left click always attacks with your weapon, and right click always uses ability 1.'));
   const reset = el('button', '', 'Restore defaults');
   reset.onclick = () => { binds = { ...DEFAULT_BINDS }; rebinding = null; applyBinds(); renderKeys(); };
   b.appendChild(reset);
 }
 function castSlot(s) { const w = worldMouse(); send({ t: 'cast', s, a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }); }
+// Holding left click attacks: the server swings for as long as it is held, aimed where you point.
+let atkDown = false;
+function setAttack(on) { if (on === atkDown) return; atkDown = on; send({ t: 'atk', on: on ? 1 : 0, a: +aimAngle().toFixed(3) }); }
+// A dodge roll toward where you are moving (or where you aim when standing still), predicted locally.
+function doRoll() {
+  const now = performance.now();
+  if (me.dead || (me.fl & 1) || me.roll || (cdReady.roll || 0) > now) return;
+  const k = mask(), dx = ((k & 8) ? 1 : 0) - ((k & 4) ? 1 : 0), dy = ((k & 2) ? 1 : 0) - ((k & 1) ? 1 : 0);
+  const a = dx || dy ? Math.atan2(dy, dx) : aimAngle();
+  send({ t: 'roll', a: +a.toFixed(3) });
+  me.roll = { a, until: now + ROLL_MS };
+  cdReady.roll = now + 600; // until the server reports the real cooldown
+}
 // Send our predicted position 20 times a second while it differs from what the server last confirmed.
 let lastA = 0, lastSent = 0, lastX = 0, lastY = 0;
 setInterval(() => {
@@ -578,8 +685,9 @@ addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (!act || e.repeat) return;
   if (act === 'chat') return openChat();
-  if (act === 'board') return togglePanel('board');
   if (act === 'recall') return send({ t: 'recall' });
+  if (act === 'roll') return doRoll();
+  if (act === 'swap') return send({ t: 'swap' });
   if (PANELS.includes(act)) return togglePanel(act);
   if (act.startsWith('slot')) { const s = +act.slice(4); held.add(s); castSlot(s); }
 });
@@ -588,16 +696,17 @@ addEventListener('keyup', (e) => {
   const act = actionOf.get(e.code);
   if (act && act.startsWith('slot')) held.delete(+act.slice(4));
 });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; held.clear(); });
-function openChat() { chatOpen = true; const i = $('chatin'); i.style.display = 'block'; i.value = ''; i.focus(); }
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; held.clear(); setAttack(false); });
+function openChat() { chatOpen = true; setAttack(false); const i = $('chatin'); i.style.display = 'block'; i.value = ''; i.focus(); }
 function closeChat() { chatOpen = false; const i = $('chatin'); i.style.display = 'none'; i.blur(); }
 addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
 cv.addEventListener('mousedown', (e) => {
   if (!connected || chatOpen) return;
   for (const p of PANELS) if (panelOpen(p)) { $(p).style.display = 'none'; return; }
-  const s = e.button === 2 ? 1 : 0; held.add(s); castSlot(s);
+  if (e.button === 0) setAttack(true);
+  else if (e.button === 2) { held.add(0); castSlot(0); }
 });
-addEventListener('mouseup', (e) => held.delete(e.button === 2 ? 1 : 0));
+addEventListener('mouseup', (e) => { if (e.button === 0) setAttack(false); else if (e.button === 2) held.delete(0); });
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ------------------------------------------------------------------ ground chunks
@@ -667,10 +776,11 @@ function drawEnt(o, x, y, now) {
   if (o.fl & 2) { ctx.strokeStyle = 'rgba(80,200,240,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 8, 0, 7); ctx.stroke(); }
   if (o.fl & 16) { ctx.strokeStyle = 'rgba(240,190,70,.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 11, now / 300, now / 300 + 4.5); ctx.stroke(); }
   const step = Math.sin(o.ph || 0) * (o.moving ? 1 : 0);
-  const look = o.k === 'player' ? playerLook(o.n || prof.name, o.rk || 0, facColor(o.f), o.wp) : null;
+  const look = o.k === 'player' ? playerLook(o.n || prof.name, o.rk || 0, facColor(o.f), self ? prof.wp : o.wp) : null;
   const img = creature(o.k, creatureColor(o), step, o.at || o.sp, look);
-  const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
-  ctx.save(); ctx.translate(x, y); ctx.rotate(o.sp ? now / 60 : (self ? aimAngle() : o.a));
+  const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3, rolling = (o.fl & 2048) || (self && me.roll);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(o.sp ? now / 60 : rolling ? now / 40 : (self ? aimAngle() : o.a));
+  if (rolling) { ctx.globalAlpha = 0.6; ctx.scale(0.85, 0.85); }
   if (o.k === 'wraith' || o.k === 'hollow_prince') ctx.globalAlpha = 0.85;
   if (o.enr) { ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; }
   ctx.drawImage(img, -w / 2, -h / 2, w, h);
@@ -707,14 +817,30 @@ function drawLabels(o, x, y) {
 function drawProjs(now) {
   for (const [x, y, k, a] of projs) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-    if (k === 'fire' || k === 'dark' || k === 'frost') {
-      const c1 = k === 'fire' ? '255,140,40' : k === 'frost' ? '140,210,255' : '170,90,255';
+    if (k === 'fire' || k === 'dark' || k === 'frost' || k === 'frostbolt' || k === 'arcane') {
+      const c1 = k === 'fire' ? '255,140,40' : k === 'frost' || k === 'frostbolt' ? '140,210,255' : k === 'arcane' ? '120,170,255' : '170,90,255';
       const g = ctx.createRadialGradient(0, 0, 1, 0, 0, 14); g.addColorStop(0, '#fff'); g.addColorStop(0.3, `rgba(${c1},1)`); g.addColorStop(1, `rgba(${c1},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 14, 0, 7); ctx.fill();
       ctx.fillStyle = `rgba(${c1},.35)`; ctx.beginPath(); ctx.moveTo(-6, -5); ctx.lineTo(-26, 0); ctx.lineTo(-6, 5); ctx.fill();
-    } else if (k === 'gale') {
-      const g = ctx.createLinearGradient(-40, 0, 14, 0); g.addColorStop(0, 'rgba(200,240,255,0)'); g.addColorStop(1, 'rgba(230,250,255,.95)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-40, -12); ctx.lineTo(-30, 0); ctx.lineTo(-40, 12); ctx.closePath(); ctx.fill();
+    } else if (k === 'orb') {
+      const pr = 18 + Math.sin(now / 80) * 3, g = ctx.createRadialGradient(0, 0, 2, 0, 0, pr);
+      g.addColorStop(0, '#fff'); g.addColorStop(0.35, 'rgba(190,120,255,1)'); g.addColorStop(1, 'rgba(120,60,220,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, pr, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(200,160,255,.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, 0, 120, 0, 7); ctx.stroke();
+    } else if (k === 'gale' || k === 'wave') {
+      const c = k === 'wave' ? '255,235,190' : '230,250,255';
+      const g = ctx.createLinearGradient(-40, 0, 14, 0); g.addColorStop(0, `rgba(${c},0)`); g.addColorStop(1, `rgba(${c},.95)`);
+      ctx.fillStyle = g;
+      if (k === 'wave') { ctx.beginPath(); ctx.arc(-18, 0, 30, -1, 1); ctx.arc(-26, 0, 26, 0.95, -0.95, true); ctx.closePath(); ctx.fill(); }
+      else { ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-40, -12); ctx.lineTo(-30, 0); ctx.lineTo(-40, 12); ctx.closePath(); ctx.fill(); }
+    } else if (k === 'knife') {
+      ctx.rotate(now / 40);
+      ctx.fillStyle = '#dfe4ea'; ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(0, -2.5); ctx.lineTo(-4, 0); ctx.lineTo(0, 2.5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#5a3a1a'; ctx.fillRect(-8, -1.5, 4, 3);
+    } else if (k === 'javelin') {
+      ctx.strokeStyle = 'rgba(230,240,255,.35)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(0, 0); ctx.stroke();
+      ctx.strokeStyle = '#7a5530'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(8, 0); ctx.stroke();
+      ctx.fillStyle = '#e0e6ee'; ctx.beginPath(); ctx.moveTo(8, -3.5); ctx.lineTo(18, 0); ctx.lineTo(8, 3.5); ctx.fill();
     } else {
       if (k === 'power') { ctx.strokeStyle = 'rgba(255,240,150,.5)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(4, 0); ctx.stroke(); }
       ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(6, 0); ctx.stroke();
@@ -749,6 +875,11 @@ function drawZones(now) {
       const p = Math.min(1, 1 - z.l / z.d);
       ctx.strokeStyle = 'rgba(255,60,40,.9)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, 7); ctx.stroke();
       ctx.fillStyle = `rgba(255,50,30,${0.12 + 0.22 * p})`; ctx.beginPath(); ctx.arc(z.x, z.y, z.r * Math.max(0.05, p), 0, 7); ctx.fill();
+    } else if (z.t === 'blizzard') {
+      const fade = Math.min(1, z.l / 500);
+      ctx.fillStyle = `rgba(170,215,255,${0.16 * fade})`; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(240,250,255,${0.85 * fade})`;
+      for (let i = 0; i < 26; i++) { const a = i * 2.39 + now / 900, d = Math.sqrt((i * 0.618) % 1) * z.r, t = (now / 700 + i * 0.17) % 1; ctx.beginPath(); ctx.arc(z.x + Math.cos(a) * d + t * 14, z.y + Math.sin(a) * d + t * 20 - 10, 2.2, 0, 7); ctx.fill(); }
     } else if (z.t === 'web') {
       ctx.strokeStyle = 'rgba(235,235,245,.55)'; ctx.lineWidth = 1.2;
       for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(z.x, z.y); ctx.lineTo(z.x + Math.cos(a) * z.r, z.y + Math.sin(a) * z.r); ctx.stroke(); }
@@ -785,7 +916,7 @@ function drawFx(now) {
       ctx.strokeStyle = `rgba(255,240,140,${a})`; ctx.lineWidth = 3;
       for (let i = 0; i < 8; i++) { const an = i * 0.785 + t / 80; ctx.beginPath(); ctx.moveTo(f.x + Math.cos(an) * 10, f.y + Math.sin(an) * 10); ctx.lineTo(f.x + Math.cos(an) * (22 + t / 15), f.y + Math.sin(an) * (22 + t / 15)); ctx.stroke(); }
     } else if (f.t === 'line') {
-      ctx.globalAlpha = a; ctx.strokeStyle = f.c; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x2, f.y2); ctx.stroke(); ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+      ctx.globalAlpha = a; ctx.strokeStyle = f.c; ctx.lineWidth = f.w || 10; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x2, f.y2); ctx.stroke(); ctx.globalAlpha = 1; ctx.lineCap = 'butt';
     } else if (f.t === 'poof') {
       ctx.fillStyle = f.c ? `rgba(60,30,90,${0.5 * a})` : `rgba(210,205,195,${0.45 * a})`;
       for (let i = 0; i < 5; i++) { const an = i * 1.26 + f.seed; ctx.beginPath(); ctx.arc(f.x + Math.cos(an) * t / 22, f.y + Math.sin(an) * t / 22 - t / 40, 8 + t / 40, 0, 7); ctx.fill(); }
@@ -918,7 +1049,9 @@ function frame(now) {
   const k = mask();
   const dx = ((k & 8) ? 1 : 0) - ((k & 4) ? 1 : 0), dy = ((k & 2) ? 1 : 0) - ((k & 1) ? 1 : 0), len = Math.hypot(dx, dy);
   const ox = me.x, oy = me.y;
-  if (len > 0 && !me.dead && me.sp > 0) [me.x, me.y] = moveBody(me.x, me.y, 14, (dx / len) * me.sp * dt, (dy / len) * me.sp * dt);
+  if (me.roll && (now > me.roll.until || me.dead)) me.roll = null;
+  if (me.roll) { const v = (ROLL_DIST / ROLL_MS) * 1000 * dt; [me.x, me.y] = moveBody(me.x, me.y, 14, Math.cos(me.roll.a) * v, Math.sin(me.roll.a) * v); }
+  else if (len > 0 && !me.dead && me.sp > 0) [me.x, me.y] = moveBody(me.x, me.y, 14, (dx / len) * me.sp * dt, (dy / len) * me.sp * dt);
   const moved = Math.hypot(me.x - ox, me.y - oy);
   me.ph += moved * 0.22; me.moving = moved > 0.3;
   // Everyone else is drawn ~110ms in the past, smoothly between the two snapshots around that moment.
@@ -1021,10 +1154,10 @@ function frame(now) {
 
 // ------------------------------------------------------------------ start
 $('resetBtn').onclick = () => {
-  const n = prof.skills.filter((s) => !SKILLS[s].free).length;
-  if (!n) return toast('You have no skill points to reset.');
-  if (Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) > VILLAGE.r) return toast('Go to Hanbin Haven to reset your skills.');
-  if (confirm(`Refund all ${n} skill point${n === 1 ? '' : 's'}? Learned skills will be removed from your hotbar.`)) send({ t: 'reset' });
+  const w = TREE[treeTab].weapon, n = w ? treeSpent(prof.tal, treeTab) : Object.keys(prof.tal).filter((id) => TALENTS[id] && !TALENTS[id].weapon).reduce((a, id) => a + prof.tal[id], 0);
+  if (!n) return toast(w ? `You have no ${WEAPONS[w].name} mastery points spent.` : 'You have no talent points spent.');
+  if (Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) > VILLAGE.r) return toast('Go to Hanbin Haven to reset.');
+  if (confirm(`Refund all ${n} ${w ? WEAPONS[w].name + ' mastery' : 'talent'} point${n === 1 ? '' : 's'}? Its abilities leave your hotbar.`)) send(w ? { t: 'reset', w } : { t: 'reset' });
 };
 $('combolist').innerHTML = COMBOS.map(([n, d]) => `<li><b>${n}</b>: ${d}</li>`).join('');
 applyBinds();
