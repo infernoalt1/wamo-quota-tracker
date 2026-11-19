@@ -133,3 +133,20 @@ table.ranks tr.got td:first-child { color:#9fe07a; }
   .skillwrap { flex-direction:column; } #treeview { transform-origin:top left; }
   .slot { width:42px; height:42px; } .slot .ico { font-size:20px; line-height:40px; } .slot .cdt { line-height:40px; }
 }
+
+#goldrow { margin-top:5px; font-size:12px; color:#f0d070; }
+#goldrow .carry { color:#f0a060; }
+#bossbar { top:64px; left:50%; transform:translateX(-50%); width:min(520px,80vw); display:none; text-align:center; font-size:15px; color:#f0c0ff; text-shadow:0 0 6px #000, 0 0 3px #000; }
+#bossbar .bar { height:14px; border-color:#3a1040; }
+i.boss { background:linear-gradient(#c040e0,#6a1080); }
+#inv { width:min(760px,96vw); font-size:14px; }
+.relicrow { display:flex; flex-wrap:wrap; gap:6px; }
+.relic { width:132px; min-height:58px; border:2px solid var(--rc,#4a3e28); border-radius:8px; background:#1a140c; padding:4px 6px 4px 34px; position:relative; cursor:pointer; display:flex; flex-direction:column; justify-content:center; box-shadow:inset 0 0 10px color-mix(in srgb, var(--rc,#000) 25%, transparent); }
+.relic .ri { position:absolute; left:6px; top:50%; transform:translateY(-50%); font-size:20px; }
+.relic .rn { font-size:12px; line-height:1.15; color:var(--rc); }
+.relic .rl { font-size:10px; color:var(--dim); }
+.relic.sel { outline:2px solid #fff; }
+.relic.empty { color:var(--dim); font-size:12px; padding-left:8px; border-style:dashed; cursor:default; align-items:center; }
+.relicinfo { margin:8px 0; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#0006; line-height:1.5; }
+.relicinfo .slotpick { margin-top:6px; }
+.synergies { margin:4px 0; padding-left:18px; line-height:1.45; font-size:13px; }

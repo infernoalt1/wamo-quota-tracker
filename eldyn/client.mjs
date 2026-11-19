@@ -2,11 +2,12 @@
 import {
   WORLD, REGIONS, CASTLES, VILLAGE, SKILLS, SKILL_LIST, TREES, MOBS, RANKS, ROADS, LAND_GRID, REGION_GRID, GW, GH, RC,
   rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng, rankBonus, RECALL_RANK, TRAVEL_RANK, COMBOS,
+  CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, RELICS, RARITIES, CRATES, SYNERGIES, ELITE_AFFIXES, CASTLE_LEVEL_COST, MAX_RELIC_LV, MAX_STASH, relicText, dungeonAt,
 } from './shared.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
-import { creature, playerLook, banner, prop, castleBase, castleTop, villageBase, villageTop, CASTLE_SPRITE_SIZE, VILLAGE_SPRITE_SIZE } from './sprites.mjs';
+import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE } from './sprites.mjs';
 
-const { W: WW, H: WH, CASTLE_HALF: CH } = WORLD;
+const { W: WW, H: WORLD_H, IH: WH } = WORLD;
 const $ = (id) => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
 const mini = $('mini'), mctx = mini.getContext('2d');
@@ -41,8 +42,9 @@ const me = { x: VILLAGE.x, y: VILLAGE.y, sx: 0, sy: 0, h: 100, mh: 100, en: 100,
 let prof = { skills: [], hotbar: [], pts: 0, slots: 5, tier: 0, fac: 0, name: '' };
 const ents = new Map();
 let projs = [], zones = [], fxs = [], floaters = [];
-let meta = { c: [], f: [], lb: [], on: 0 };
-const facInfo = new Map(), owners = new Map();
+let meta = { c: [], f: [], lb: [], on: 0, bosses: [] };
+const facInfo = new Map(), owners = new Map(), levels = new Map();
+let loot = [];
 const cdReady = {};
 let slotSel = -1, seq = 0, lastDeath = null;
 const keys = {}, held = new Set();
@@ -109,11 +111,11 @@ function handle(m) {
   switch (m.t) {
     case 's': onSnap(m); break;
     case 'welcome': myId = m.id; connected = true; me.init = false; ents.clear(); $('login').style.display = 'none'; if (!started) { started = true; requestAnimationFrame(frame); } break;
-    case 'prof': prof = m; buildHotbar(); buildPassives(); if (panelOpen('skills')) renderSkills(); if (panelOpen('factions')) renderFactions(); break;
+    case 'prof': prof = m; buildHotbar(); buildPassives(); if (panelOpen('skills')) renderSkills(); if (panelOpen('factions')) renderFactions(); if (panelOpen('inv')) renderInv(); break;
     case 'meta': {
       meta = m; facInfo.clear(); m.f.forEach((f) => facInfo.set(f.id, f));
       let changed = false;
-      for (const [id, o] of m.c) if (owners.get(id) !== o) { owners.set(id, o); changed = true; }
+      for (const [id, o, lv] of m.c) { levels.set(id, lv); if (owners.get(id) !== o) { owners.set(id, o); changed = true; } }
       if (changed) miniDirty = true;
       if (panelOpen('factions')) renderFactions(); if (panelOpen('board')) renderBoard();
       break;
@@ -121,7 +123,9 @@ function handle(m) {
     case 'chat': { const f = facInfo.get(m.f); addChat(m.sc === 'f' ? `[Faction] ${m.n}: ${m.m}` : `${f ? '[' + f.name + '] ' : ''}${m.n}: ${m.m}`, m.sc === 'f' ? '#7fd0ff' : (f ? f.color : '#eadfc4')); break; }
     case 'msg': addChat(m.m, m.c || '#cdbf9a'); break;
     case 'toast': toast(m.m); break;
-    case 'gain': { const ex = []; if (m.v) ex.push('+' + m.v + ' valor'); if (m.s) ex.push('+' + m.s + ' soma'); if (ex.length) floaters.push({ x: me.x, y: me.y - 34 - Math.random() * 14, txt: ex.join('  '), c: '#d8b4ff', t0: performance.now(), life: 1400 }); break; }
+    case 'err': toast(m.m); addChat(m.m, '#f08070'); break;
+    case 'relic': { const r = RELICS[m.r.k], rar = RARITIES[r.rarity]; toast(`${r.icon} ${rar.name} relic: ${r.name}${m.from && m.from !== 'loot' ? ' (from ' + m.from + ')' : ''}`); addChat(`You found ${r.name} (${rar.name}).`, rar.color); if (panelOpen('inv')) renderInv(); break; }
+    case 'gain': { const ex = []; if (m.v) ex.push('+' + m.v + ' valor'); if (m.s) ex.push('+' + m.s + ' soma'); if (m.g) ex.push('+' + m.g + ' gold'); if (ex.length) floaters.push({ x: me.x, y: me.y - 34 - Math.random() * 14, txt: ex.join('  '), c: '#d8b4ff', t0: performance.now(), life: 1400 }); break; }
     case 'died': lastDeath = m; break;
   }
 }
@@ -142,12 +146,12 @@ function onSnap(m) {
     if (!o) { o = { x: e.x, y: e.y, ph: Math.random() * 6, h: e.h, buf: [] }; ents.set(e.i, o); }
     if (e.h < o.h) o.flash = now;
     o.buf.push([now, e.x, e.y]); if (o.buf.length > 8) o.buf.shift();
-    o.k = e.k; o.a = e.a; o.h = e.h; o.m = e.m; o.fl = e.fl; o.n = e.n; o.f = e.f; o.rk = e.rk; o.ow = e.ow; o.wp = e.wp; o.at = e.at; o.sp = e.sp; o.seq = seq; o.id = e.i;
+    o.k = e.k; o.a = e.a; o.h = e.h; o.m = e.m; o.fl = e.fl; o.n = e.n; o.f = e.f; o.rk = e.rk; o.ow = e.ow; o.wp = e.wp; o.at = e.at; o.sp = e.sp; o.el = e.el; o.enr = e.en; o.seq = seq; o.id = e.i;
   }
   for (const [id, o] of ents) if (o.seq !== seq) ents.delete(id);
-  projs = m.pr; zones = m.zs;
+  projs = m.pr; zones = m.zs; loot = m.lt || [];
   for (const f of m.fx) {
-    if (f.t === 'dmg') floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: '#ffd0c0', t0: now, life: 800 });
+    if (f.t === 'dmg') floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: f.c ? '#ffe040' : '#ffd0c0', t0: now, life: f.c ? 1000 : 800, big: f.c });
     else if (f.t === 'heal') floaters.push({ x: f.x, y: f.y, txt: '+' + f.v, c: '#8fe8a0', t0: now, life: 900 });
     else if (f.t === 'combo') floaters.push({ x: f.x, y: f.y, txt: f.txt + '!', c: '#ffe066', t0: now, life: 1100, big: 1 });
     else { f.t0 = now; f.seed = Math.random() * 1000; fxs.push(f); }
@@ -189,6 +193,7 @@ function updateHud() {
   $('somabar').style.width = ((me.s - a) / (b - a)) * 100 + '%';
   $('somatxt').textContent = `Soma tier ${t} · ${me.s} / ${b}`;
   $('ptsrow').textContent = prof.pts > 0 ? `★ ${prof.pts} skill point${prof.pts > 1 ? 's' : ''} to spend (K)` : '';
+  $('goldrow').innerHTML = `🪙 <b>${me.b || 0}</b> banked${me.g ? ` · <span class="carry">${me.g} carried (bank it in the Haven or your castle)</span>` : ''}`;
   const f = facInfo.get(prof.fac);
   $('facrow').textContent = f ? `⚑ ${f.name}` : 'No faction (F)';
   $('facrow').style.color = f ? f.color : '#a99';
@@ -204,18 +209,25 @@ function updateHud() {
     slots[i].classList.toggle('noen', me.en < sk.en);
   }
   const ri = regionAt(me.x, me.y), reg = REGIONS[ri], own = owners.get(ri), of = own && facInfo.get(own);
-  $('regionlbl').innerHTML = `<b>${reg.name}</b> <span class="dim">· ${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`;
+  const dg = reg.dungeon !== undefined ? DUNGEONS[reg.dungeon] : null, bossWait = dg && meta.bosses ? meta.bosses[dg.id] : 0;
+  $('regionlbl').innerHTML = dg ? `<b>${reg.name}</b> <span class="dim">· dungeon · danger ${'◆'.repeat(reg.danger)}</span><br><span class="dim">${bossWait ? 'Boss returns in ' + Math.ceil(bossWait / 60000) + ' min' : 'The boss waits in the deepest room'}</span>`
+    : `<b>${reg.name}</b> <span class="dim">· ${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`;
   const cap = $('capture');
   if (me.cz >= 0 && !me.dead) {
     const co = owners.get(me.cz), cf = co && facInfo.get(co), c = CASTLES.find((k) => k.id === me.cz);
     cap.style.display = 'block';
-    $('captxt').innerHTML = `<b>${c.name}</b> · ${cf ? esc(cf.name) : 'Bandit-held'}<br>${cf && cf.id === prof.fac ? 'Your faction holds this castle.' : me.cdf > 0 ? me.cdf + ' defender' + (me.cdf > 1 ? 's' : '') + ' remaining' : prof.fac ? (me.cp > 0 ? 'Capturing...' : 'Undefended! Hold the courtyard.') : 'Join a faction to claim castles.'}`;
+    $('captxt').innerHTML = `<b>${c.name}</b> · level ${me.cl || 1} · ${cf ? esc(cf.name) : 'Bandit-held'}<br>${cf && cf.id === prof.fac ? 'Your faction holds this castle. Gold you carry is banked here.' : me.cdf > 0 ? me.cdf + ' defender' + (me.cdf > 1 ? 's' : '') + ' remaining' : prof.fac ? (me.cp > 0 ? 'Capturing...' : 'Undefended! Hold the inner courtyard.') : 'Join a faction to claim castles.'}`;
     $('capbar').style.width = me.cp * 100 + '%';
   } else cap.style.display = 'none';
   $('death').style.display = me.dead ? 'flex' : 'none';
-  if (me.dead && lastDeath) $('deathtxt').textContent = `You lost ${lastDeath.lost} valor${lastDeath.by ? ' to ' + lastDeath.by : ''}. Your soma is safe. Respawning in ${Math.ceil(me.rs / 1000)}...`;
+  if (me.dead && lastDeath) $('deathtxt').textContent = `You lost ${lastDeath.lost} valor${lastDeath.gold ? ' and dropped ' + lastDeath.gold + ' gold' : ''}${lastDeath.by ? ' to ' + lastDeath.by : ''}. Your soma and relics are safe. Respawning in ${Math.ceil(me.rs / 1000)}...`;
 }
-setInterval(() => { if (started) updateHud(); }, 100);
+let lastMg = null;
+setInterval(() => {
+  if (!started) return;
+  updateHud();
+  if (lastMg !== me.mg) { lastMg = me.mg; if (panelOpen('inv')) renderInv(); }
+}, 100);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function addChat(text, color) {
@@ -229,14 +241,14 @@ let toastT = null;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = '1'; clearTimeout(toastT); toastT = setTimeout(() => (t.style.opacity = '0'), 3000); }
 
 // ------------------------------------------------------------------ panels
-const PANELS = ['skills', 'factions', 'board', 'help', 'map', 'keys'];
+const PANELS = ['skills', 'factions', 'board', 'help', 'map', 'keys', 'inv'];
 const panelOpen = (id) => $(id).style.display === 'block';
 function togglePanel(id) {
   const open = panelOpen(id);
   for (const p of PANELS) $(p).style.display = 'none';
   if (!open) {
     $(id).style.display = 'block';
-    if (id === 'skills') renderSkills(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap(); if (id === 'keys') renderKeys();
+    if (id === 'skills') renderSkills(); if (id === 'factions') renderFactions(); if (id === 'board') renderBoard(); if (id === 'map') renderMap(); if (id === 'keys') renderKeys(); if (id === 'inv') renderInv();
   } else if (id === 'keys') rebinding = null;
 }
 document.querySelectorAll('[data-close]').forEach((x) => x.addEventListener('click', () => togglePanel(x.closest('.panel').id)));
@@ -300,9 +312,32 @@ function renderSkills() {
     if (slotSel >= 0 && slotSel < prof.slots && prof.hotbar[slotSel] !== s.id) { send({ t: 'hb', s: slotSel, id: s.id }); slotSel = -1; buildHotbar(); }
   }
 }
+// The panel is split so the name box is only rebuilt when your faction changes, not on every
+// once-a-second update (rebuilding it used to wipe whatever you were typing).
+let facFormFor = null;
 function renderFactions() {
-  const b = $('facbody'); b.innerHTML = '';
-  const mine = facInfo.get(prof.fac);
+  const b = $('facbody');
+  if (!$('facme')) b.innerHTML = '<div id="facme"></div><div id="faccastles"></div><h4>All factions</h4><div id="faclist"></div>';
+  const mine = facInfo.get(prof.fac), state = mine ? 'in:' + mine.id + ':' + mine.m + ':' + mine.c + ':' + mine.l : 'out';
+  if (facFormFor !== state) { facFormFor = state; renderFactionMe($('facme'), mine); }
+  renderFactionCastles($('faccastles'), mine);
+  renderFactionList($('faclist'));
+}
+function renderFactionCastles(b, mine) {
+  b.innerHTML = '';
+  if (!mine) return;
+  const mineC = CASTLES.filter((c) => owners.get(c.id) === mine.id);
+  b.appendChild(el('h4', '', 'Your castles'));
+  if (!mineC.length) { b.appendChild(el('p', 'dim', "None yet. Clear a castle's garrison and hold its inner courtyard to claim it. Every castle pays taxes to your online members each minute.")); return; }
+  for (const c of mineC) {
+    const lv = levels.get(c.id) || 1, r = el('div', 'frow');
+    r.appendChild(el('div', 'grow', `${c.name} · level ${lv} · taxes ${8 * lv} gold/min`));
+    if (lv < 3) { const bt = el('button', '', `Fortify (${CASTLE_LEVEL_COST[lv + 1]}g)`); bt.title = 'More and stronger defenders, and higher taxes. Paid from banked gold.'; bt.onclick = () => send({ t: 'fortify', id: c.id }); r.appendChild(bt); }
+    b.appendChild(r);
+  }
+}
+function renderFactionMe(b, mine) {
+  b.innerHTML = '';
   if (mine) {
     const r = el('div', 'frow'); const dot = el('div', 'dot'); dot.style.background = mine.color; r.appendChild(dot);
     r.appendChild(el('div', 'grow', `${mine.name}: ${mine.m} member${mine.m === 1 ? '' : 's'}, ${mine.c} castle${mine.c === 1 ? '' : 's'}. Led by ${mine.l}`));
@@ -314,8 +349,11 @@ function renderFactions() {
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') bt.click(); });
     const bt = el('button', 'primary', 'Found faction'); bt.onclick = () => { if (inp.value.trim()) send({ t: 'fc', n: inp.value.trim() }); };
     r.appendChild(inp); r.appendChild(bt); b.appendChild(r);
+    b.appendChild(el('p', 'dim', "Names are 3-16 letters, numbers, spaces, - or '."));
   }
-  b.appendChild(el('h4', '', 'All factions'));
+}
+function renderFactionList(b) {
+  b.innerHTML = '';
   const list = [...facInfo.values()].sort((a, c) => c.c - a.c || c.m - a.m);
   if (!list.length) b.appendChild(el('p', 'dim', 'No factions yet. Be the first!'));
   for (const f of list) {
@@ -377,12 +415,35 @@ function rebuildOwned() {
   miniDirty = false;
 }
 function hexRgb(c) { const n = parseInt(c.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+const dungeonMaps = new Map();
+function dungeonMap(d) {
+  let c = dungeonMaps.get(d.id);
+  if (c) return c;
+  c = document.createElement('canvas'); c.width = c.height = DGRID;
+  const x = c.getContext('2d'); x.fillStyle = '#0c0b0e'; x.fillRect(0, 0, DGRID, DGRID);
+  for (let i = 0; i < DGRID * DGRID; i++) if (d.tiles[i]) { x.fillStyle = '#8a8070'; x.fillRect(i % DGRID, Math.floor(i / DGRID), 1, 1); }
+  dungeonMaps.set(d.id, c);
+  return c;
+}
 function drawMinimap() {
+  const dg = dungeonAt(me.x, me.y);
+  if (dg) {
+    const mw = mini.width, mh = mini.height, s = Math.min(mw, mh) / DGRID, ox = (mw - DGRID * s) / 2;
+    mctx.fillStyle = '#0c0b0e'; mctx.fillRect(0, 0, mw, mh);
+    mctx.imageSmoothingEnabled = false; mctx.drawImage(dungeonMap(dg), ox, 0, DGRID * s, DGRID * s);
+    const tx = (wx) => ox + ((wx - dg.bx) / DT_SIZE) * s, ty = (wy) => ((wy - dg.by) / DT_SIZE) * s;
+    const br = dg.rooms[dg.rooms.length - 1];
+    mctx.fillStyle = '#ff5050'; mctx.font = 'bold 12px Georgia'; mctx.textAlign = 'center'; mctx.fillText('☠', tx(br.x), ty(br.y) + 4);
+    mctx.fillStyle = '#c8a0ff'; for (const q of [dg.exitPortal, dg.bossPortal]) { mctx.beginPath(); mctx.arc(tx(q.x), ty(q.y), 3, 0, 7); mctx.fill(); }
+    mctx.fillStyle = '#fff'; mctx.strokeStyle = '#000'; mctx.beginPath(); mctx.arc(tx(me.x), ty(me.y), 3.5, 0, 7); mctx.fill(); mctx.stroke();
+    return;
+  }
   if (miniDirty && facInfo.size >= 0) rebuildOwned();
   const mw = mini.width, mh = mini.height, sx = mw / WW, sy = mh / WH;
   mctx.imageSmoothingEnabled = true; mctx.drawImage(ownedMap, 0, 0, mw, mh);
   for (const c of CASTLES) { const f = facInfo.get(owners.get(c.id)); mctx.fillStyle = f ? f.color : '#ddd'; mctx.strokeStyle = '#000'; mctx.fillRect(c.x * sx - 3, c.y * sy - 3, 6, 6); mctx.strokeRect(c.x * sx - 3, c.y * sy - 3, 6, 6); }
   mctx.fillStyle = '#7f7'; mctx.beginPath(); mctx.arc(VILLAGE.x * sx, VILLAGE.y * sy, 3.5, 0, 7); mctx.fill();
+  mctx.fillStyle = '#c8a0ff'; mctx.font = 'bold 10px Georgia'; mctx.textAlign = 'center'; for (const c of CAVES) mctx.fillText('◉', c.x * sx, c.y * sy + 3);
   for (const o of ents.values()) if (o.k === 'player' && o.id !== myId) { mctx.fillStyle = isAlly(o) ? '#4f4' : '#f55'; mctx.fillRect(o.x * sx - 1.5, o.y * sy - 1.5, 3, 3); }
   mctx.fillStyle = '#fff'; mctx.strokeStyle = '#000'; mctx.beginPath(); mctx.arc(me.x * sx, me.y * sy, 3.5, 0, 7); mctx.fill(); mctx.stroke();
   mctx.strokeStyle = 'rgba(255,255,255,.7)'; mctx.strokeRect((me.x - VW / 2 / zoom) * sx, (me.y - VH / 2 / zoom) * sy, (VW / zoom) * sx, (VH / zoom) * sy);
@@ -396,6 +457,7 @@ function renderMap() {
   const sx = w / WW, sy = h / WH;
   m.textAlign = 'center'; m.font = 'bold 12px Georgia';
   for (const r of REGIONS) {
+    if (r.dungeon !== undefined) continue;
     const c2 = CASTLES.find((k) => k.id === r.id), f = facInfo.get(owners.get(r.id));
     if (c2) { m.fillStyle = f ? f.color : '#ddd'; m.strokeStyle = '#000'; m.lineWidth = 1.5; m.fillRect(r.x * sx - 5, r.y * sy - 5, 10, 10); m.strokeRect(r.x * sx - 5, r.y * sy - 5, 10, 10); }
     else { m.fillStyle = '#7f7'; m.beginPath(); m.arc(r.x * sx, r.y * sy, 6, 0, 7); m.fill(); }
@@ -404,7 +466,13 @@ function renderMap() {
     m.font = '10px Georgia'; const sub = r.danger ? (f ? f.name : 'Bandits') + ' · ' + '◆'.repeat(r.danger) : 'Safe haven';
     m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = 'bold 12px Georgia';
   }
-  m.fillStyle = '#fff'; m.strokeStyle = '#000'; m.lineWidth = 2; m.beginPath(); m.arc(me.x * sx, me.y * sy, 5, 0, 7); m.fill(); m.stroke();
+  for (const cv of CAVES) {
+    const d = DUNGEONS[cv.dungeon], wait = meta.bosses && meta.bosses[d.id];
+    m.fillStyle = '#c8a0ff'; m.strokeStyle = '#000'; m.lineWidth = 2; m.beginPath(); m.arc(cv.x * sx, cv.y * sy, 6, 0, 7); m.fill(); m.stroke();
+    m.font = 'bold 11px Georgia'; m.lineWidth = 3; const lbl = `${d.name} ${'◆'.repeat(d.danger)}${wait ? ' (boss in ' + Math.ceil(wait / 60000) + 'm)' : ''}`;
+    m.strokeText(lbl, cv.x * sx, cv.y * sy - 10); m.fillStyle = '#e0d0ff'; m.fillText(lbl, cv.x * sx, cv.y * sy - 10);
+  }
+  if (me.y < WH) { m.fillStyle = '#fff'; m.strokeStyle = '#000'; m.lineWidth = 2; m.beginPath(); m.arc(me.x * sx, me.y * sy, 5, 0, 7); m.fill(); m.stroke(); }
   const rk = rankOf(me.v).idx;
   $('maphint').textContent = rk >= TRAVEL_RANK ? 'Click a castle your faction holds to travel there, or press ' + keyName(binds.recall) + ' to recall to Hanbin Haven.'
     : rk >= RECALL_RANK ? 'Press ' + keyName(binds.recall) + " to recall to Hanbin Haven. Reach Baron to travel to your faction's castles."
@@ -428,7 +496,7 @@ const ACTIONS = [
   ['up', 'Move up', 'KeyW'], ['down', 'Move down', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
   ...Array.from({ length: 10 }, (_, i) => ['slot' + i, `Hotbar slot ${i + 1}`, 'Digit' + ((i + 1) % 10)]),
   ['skills', 'Skill trees', 'KeyK'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Leaderboard', 'Tab'],
-  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['recall', 'Recall to Haven (Knight)', 'KeyB'],
+  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['recall', 'Recall to Haven (Knight)', 'KeyB'], ['inv', 'Relics & shop', 'KeyI'],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([id, , code]) => [id, code]));
 let binds = { ...DEFAULT_BINDS };
@@ -593,6 +661,8 @@ function drawEnt(o, x, y, now) {
   const r = RADIUS(o), self = o.id === myId;
   if (o.k === 'banner') { const img = banner(facColor(o.f) || '#e0b84f'); ctx.drawImage(img, x - 14, y - 62, 48, 70); ctx.strokeStyle = 'rgba(255,240,180,.25)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.arc(x, y, 200, 0, 7); ctx.stroke(); ctx.setLineDash([]); return; }
   drawShadow(x, y, r);
+  if (o.el || MOBS[o.k]?.boss) { const g = ctx.createRadialGradient(x, y, r * 0.6, x, y, r * 1.9); g.addColorStop(0, o.el ? 'rgba(255,200,60,.35)' : 'rgba(200,60,255,.35)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 1.9, 0, 7); ctx.fill(); }
+  if (o.fl & 1024) { ctx.strokeStyle = `rgba(255,60,40,${0.5 + 0.5 * Math.sin(now / 50)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 6, 0, 7); ctx.stroke(); }
   if (o.fl & 2) { ctx.strokeStyle = 'rgba(80,200,240,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 8, 0, 7); ctx.stroke(); }
   if (o.fl & 16) { ctx.strokeStyle = 'rgba(240,190,70,.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 11, now / 300, now / 300 + 4.5); ctx.stroke(); }
   const step = Math.sin(o.ph || 0) * (o.moving ? 1 : 0);
@@ -600,7 +670,8 @@ function drawEnt(o, x, y, now) {
   const img = creature(o.k, creatureColor(o), step, o.at || o.sp, look);
   const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
   ctx.save(); ctx.translate(x, y); ctx.rotate(o.sp ? now / 60 : (self ? aimAngle() : o.a));
-  if (o.k === 'wraith') ctx.globalAlpha = 0.85;
+  if (o.k === 'wraith' || o.k === 'hollow_prince') ctx.globalAlpha = 0.85;
+  if (o.enr) { ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; }
   ctx.drawImage(img, -w / 2, -h / 2, w, h);
   if (o.flash && now - o.flash < 120) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(img, -w / 2, -h / 2, w, h); }
   ctx.restore();
@@ -623,9 +694,11 @@ function drawLabels(o, x, y) {
     ctx.strokeText(nm, x, y - r - 30); ctx.fillStyle = self ? '#fff3c4' : ally ? '#a8f0b0' : '#ffd0c0'; ctx.fillText(nm, x, y - r - 30);
     ctx.font = '10px Georgia'; const sub = `${f ? f.name + ' · ' : ''}${RANKS[o.rk || 0].name}`;
     ctx.strokeText(sub, x, y - r - 18); ctx.fillStyle = f ? f.color : '#c8bca0'; ctx.fillText(sub, x, y - r - 18);
-  } else if (o.h < o.m || o.ow) {
-    ctx.font = '10px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 3; const nm = MOBS[o.k] ? MOBS[o.k].name : o.k;
-    ctx.strokeText(nm, x, y - r - 18); ctx.fillStyle = ally ? '#a8e0f0' : '#f0d8c8'; ctx.fillText(nm, x, y - r - 18);
+  } else if (o.h < o.m || o.ow || o.el) {
+    const boss = MOBS[o.k]?.boss;
+    ctx.font = o.el || boss ? 'bold 11px Georgia' : '10px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 3;
+    const nm = (o.el ? o.el[0].toUpperCase() + o.el.slice(1) + ' ' : '') + (MOBS[o.k] ? MOBS[o.k].name : o.k);
+    ctx.strokeText(nm, x, y - r - 18); ctx.fillStyle = o.el ? '#ffd050' : ally ? '#a8e0f0' : '#f0d8c8'; ctx.fillText(nm, x, y - r - 18);
   }
   let n = 0; ctx.font = '11px serif';
   for (const [bit, ic] of STATUS) if (o.fl & bit) { ctx.fillText(ic, x - 14 + n * 14, y + r + 16); n++; }
@@ -633,8 +706,8 @@ function drawLabels(o, x, y) {
 function drawProjs(now) {
   for (const [x, y, k, a] of projs) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-    if (k === 'fire' || k === 'dark') {
-      const c1 = k === 'fire' ? '255,140,40' : '170,90,255';
+    if (k === 'fire' || k === 'dark' || k === 'frost') {
+      const c1 = k === 'fire' ? '255,140,40' : k === 'frost' ? '140,210,255' : '170,90,255';
       const g = ctx.createRadialGradient(0, 0, 1, 0, 0, 14); g.addColorStop(0, '#fff'); g.addColorStop(0.3, `rgba(${c1},1)`); g.addColorStop(1, `rgba(${c1},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 14, 0, 7); ctx.fill();
       ctx.fillStyle = `rgba(${c1},.35)`; ctx.beginPath(); ctx.moveTo(-6, -5); ctx.lineTo(-26, 0); ctx.lineTo(-6, 5); ctx.fill();
@@ -671,6 +744,14 @@ function drawZones(now) {
       ctx.fillStyle = 'rgba(40,30,20,.15)'; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, 7); ctx.fill();
       ctx.strokeStyle = 'rgba(230,220,190,.8)'; ctx.lineWidth = 1.5;
       for (let i = 0; i < 18; i++) { const a = i * 2.39, d = Math.sqrt((i * 0.618) % 1) * z.r, t = (now / 250 + i * 0.13) % 1; const px = z.x + Math.cos(a) * d, py = z.y + Math.sin(a) * d; ctx.beginPath(); ctx.moveTo(px - 8 + t * 8, py - 30 + t * 30); ctx.lineTo(px + t * 8, py - 18 + t * 30); ctx.stroke(); }
+    } else if (z.t === 'blast') {
+      const p = Math.min(1, 1 - z.l / z.d);
+      ctx.strokeStyle = 'rgba(255,60,40,.9)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, 7); ctx.stroke();
+      ctx.fillStyle = `rgba(255,50,30,${0.12 + 0.22 * p})`; ctx.beginPath(); ctx.arc(z.x, z.y, z.r * Math.max(0.05, p), 0, 7); ctx.fill();
+    } else if (z.t === 'web') {
+      ctx.strokeStyle = 'rgba(235,235,245,.55)'; ctx.lineWidth = 1.2;
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; ctx.beginPath(); ctx.moveTo(z.x, z.y); ctx.lineTo(z.x + Math.cos(a) * z.r, z.y + Math.sin(a) * z.r); ctx.stroke(); }
+      for (let k = 1; k <= 4; k++) { ctx.beginPath(); for (let i = 0; i <= 12; i++) { const a = (i / 12) * Math.PI * 2, rr = (z.r * k) / 4; i ? ctx.lineTo(z.x + Math.cos(a) * rr, z.y + Math.sin(a) * rr) : ctx.moveTo(z.x + Math.cos(a) * rr, z.y + Math.sin(a) * rr); } ctx.stroke(); }
     } else if (z.t === 'trap') {
       ctx.strokeStyle = '#8a8070'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(z.x, z.y, 12, 0, 7); ctx.stroke();
       ctx.fillStyle = '#b0a890'; for (let i = 0; i < 8; i++) { const a = (i / 8) * 6.28; ctx.beginPath(); ctx.moveTo(z.x + Math.cos(a) * 12, z.y + Math.sin(a) * 12); ctx.lineTo(z.x + Math.cos(a + 0.2) * 6, z.y + Math.sin(a + 0.2) * 6); ctx.lineTo(z.x + Math.cos(a - 0.2) * 6, z.y + Math.sin(a - 0.2) * 6); ctx.fill(); }
@@ -707,6 +788,9 @@ function drawFx(now) {
     } else if (f.t === 'poof') {
       ctx.fillStyle = f.c ? `rgba(60,30,90,${0.5 * a})` : `rgba(210,205,195,${0.45 * a})`;
       for (let i = 0; i < 5; i++) { const an = i * 1.26 + f.seed; ctx.beginPath(); ctx.arc(f.x + Math.cos(an) * t / 22, f.y + Math.sin(an) * t / 22 - t / 40, 8 + t / 40, 0, 7); ctx.fill(); }
+    } else if (f.t === 'pulse') {
+      const rr = f.r * Math.max(0.05, 1 - t / 380);
+      ctx.strokeStyle = `rgba(150,110,255,${a})`; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(f.x, f.y, rr, 0, 7); ctx.stroke();
     } else if (f.t === 'spark') {
       ctx.fillStyle = `rgba(255,230,160,${a})`; for (let i = 0; i < 4; i++) { const an = i * 1.57 + f.seed; ctx.fillRect(f.x + Math.cos(an) * t / 30, f.y + Math.sin(an) * t / 30, 2, 2); }
     } else if (f.t === 'bolt') {
@@ -726,6 +810,92 @@ function drawFx(now) {
     ctx.font = f.big ? `bold ${Math.round(18 + 6 * Math.max(0, 1 - p * 4))}px Georgia` : 'bold 14px Georgia';
     ctx.globalAlpha = 1 - p * p; ctx.strokeStyle = '#000'; ctx.lineWidth = f.big ? 4 : 3; ctx.strokeText(f.txt, f.x, f.y - p * 34); ctx.fillStyle = f.c; ctx.fillText(f.txt, f.x, f.y - p * 34); ctx.globalAlpha = 1;
   }
+}
+
+// Loot bags on the ground: gold sacks, and glowing relics coloured by rarity.
+function drawLoot(now) {
+  for (const [, x, y, kind, locked] of loot) {
+    const bob = Math.sin(now / 300 + x) * 2;
+    if (kind === 'gold') {
+      ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x + 2, y + 9, 11, 5, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#8a6030'; ctx.beginPath(); ctx.ellipse(x, y + bob, 11, 10, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#3a2410'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#ffd040'; for (const [dx, dy] of [[-4, -6], [3, -7], [0, -4]]) { ctx.beginPath(); ctx.arc(x + dx, y + dy + bob, 3, 0, 7); ctx.fill(); }
+    } else {
+      const c = RARITIES[kind].color, g = ctx.createRadialGradient(x, y + bob, 2, x, y + bob, 22);
+      g.addColorStop(0, '#fff'); g.addColorStop(0.35, c); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y + bob, 22, 0, 7); ctx.fill();
+      ctx.save(); ctx.translate(x, y + bob); ctx.rotate(now / 700); ctx.fillStyle = c; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(6, 0); ctx.lineTo(0, 8); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    if (locked) { ctx.font = '11px serif'; ctx.textAlign = 'center'; ctx.fillText('🔒', x + 12, y - 10); }
+  }
+}
+// A big health bar along the top when a boss is nearby.
+function drawBossBar() {
+  let boss = null;
+  for (const o of ents.values()) if (MOBS[o.k]?.boss && (!boss || Math.hypot(o.x - me.x, o.y - me.y) < Math.hypot(boss.x - me.x, boss.y - me.y))) boss = o;
+  const el2 = $('bossbar');
+  if (!boss) { el2.style.display = 'none'; return; }
+  el2.style.display = 'block';
+  $('bossname').textContent = MOBS[boss.k].name + (boss.enr ? ' · ENRAGED' : '');
+  $('bossfill').style.width = Math.max(0, boss.h / boss.m) * 100 + '%';
+}
+
+// ------------------------------------------------------------------ relics panel
+let invSel = null;
+function relicCard(it, extra) {
+  const r = RELICS[it.k], rar = RARITIES[r.rarity], d = el('div', 'relic' + (extra || ''));
+  d.style.setProperty('--rc', rar.color);
+  d.innerHTML = `<span class="ri">${r.icon}</span><span class="rn">${r.name}</span><span class="rl">${rar.name} · Lv ${it.lv}</span>`;
+  d.title = `${r.name} (Lv ${it.lv}): ${relicText(it.k, it.lv)}`;
+  return d;
+}
+function renderInv() {
+  const b = $('invbody'); b.innerHTML = '';
+  const manage = !!me.mg, inHaven = Math.hypot(me.x - VILLAGE.x, me.y - VILLAGE.y) < VILLAGE.r;
+  const item = (u) => prof.relics.find((r) => r.u === u);
+  b.appendChild(el('p', manage ? 'dim' : 'warn', manage ? 'Click a relic to equip, fuse or salvage it.' : 'You can look, but relics can only be changed in Hanbin Haven or a castle your faction holds.'));
+  b.appendChild(el('h4', '', `Equipped (${prof.equip.length}/${prof.rslots} slots, more every 4 soma tiers)`));
+  const eq = el('div', 'relicrow');
+  for (let i = 0; i < prof.rslots; i++) {
+    const it = item(prof.equip[i]);
+    const d = it ? relicCard(it, invSel === it.u ? ' sel' : '') : el('div', 'relic empty', 'Empty slot');
+    d.onclick = () => { invSel = it ? it.u : null; renderInv(); };
+    eq.appendChild(d);
+  }
+  b.appendChild(eq);
+  const sel = invSel && item(invSel);
+  if (sel) {
+    const r = RELICS[sel.k], box = el('div', 'relicinfo');
+    box.innerHTML = `<b style="color:${RARITIES[r.rarity].color}">${r.icon} ${r.name}</b> · ${RARITIES[r.rarity].name} · level ${sel.lv}/${MAX_RELIC_LV}<br>${relicText(sel.k, sel.lv)}${sel.lv < MAX_RELIC_LV ? `<br><span class="dim">Next level: ${relicText(sel.k, sel.lv + 1)}</span>` : ''}`;
+    const row = el('div', 'slotpick'), equipped = prof.equip.includes(sel.u);
+    if (equipped) { const ub = el('button', '', 'Unequip'); ub.disabled = !manage; ub.onclick = () => send({ t: 'unequip', u: sel.u }); row.appendChild(ub); }
+    else for (let i = 0; i < prof.rslots; i++) { const eb = el('button', 'primary', `Equip in slot ${i + 1}`); eb.disabled = !manage; eb.onclick = () => send({ t: 'equip', u: sel.u, s: i }); row.appendChild(eb); }
+    const twin = prof.relics.some((o) => o.u !== sel.u && o.k === sel.k && o.lv === sel.lv && !prof.equip.includes(o.u));
+    if (sel.lv < MAX_RELIC_LV) { const fb = el('button', '', `Fuse (needs a 2nd Lv ${sel.lv}, ${RARITIES[r.rarity].fuse * sel.lv}g)`); fb.disabled = !manage || !twin; fb.onclick = () => send({ t: 'fuse', u: sel.u }); row.appendChild(fb); }
+    if (!equipped) { const sb = el('button', '', `Salvage (+${RARITIES[r.rarity].salvage * sel.lv}g)`); sb.disabled = !manage; sb.onclick = () => { if (confirm(`Salvage ${r.name}?`)) { send({ t: 'salvage', u: sel.u }); invSel = null; } }; row.appendChild(sb); }
+    box.appendChild(row);
+    b.appendChild(box);
+  }
+  b.appendChild(el('h4', '', `Stash (${prof.relics.length}/${MAX_STASH})`));
+  const st = el('div', 'relicrow');
+  const stash = prof.relics.filter((r) => !prof.equip.includes(r.u)).sort((a, c) => ['legendary', 'epic', 'rare', 'common'].indexOf(RELICS[a.k].rarity) - ['legendary', 'epic', 'rare', 'common'].indexOf(RELICS[c.k].rarity) || a.k.localeCompare(c.k) || c.lv - a.lv);
+  if (!stash.length) st.appendChild(el('p', 'dim', 'Relics drop from elites (gold names), bosses and sometimes any monster. You can also buy crates below.'));
+  for (const it of stash) { const d = relicCard(it, invSel === it.u ? ' sel' : ''); d.onclick = () => { invSel = it.u; renderInv(); }; st.appendChild(d); }
+  b.appendChild(st);
+  b.appendChild(el('h4', '', `Relic merchant · ${me.b || 0} gold banked`));
+  const shop = el('div', 'slotpick');
+  for (const [id, c] of Object.entries(CRATES)) {
+    const bt = el('button', 'primary', `${c.name} (${c.price}g)`);
+    bt.title = c.odds.map(([k, w]) => `${RARITIES[k].name} ${Math.round(w * 100)}%`).join(', ');
+    bt.disabled = !inHaven || (me.b || 0) < c.price; bt.onclick = () => send({ t: 'buy', c: id }); shop.appendChild(bt);
+  }
+  b.appendChild(shop);
+  if (!inHaven) b.appendChild(el('p', 'dim', 'The merchant trades only in Hanbin Haven.'));
+  b.appendChild(el('h4', '', 'Builds that work'));
+  const syn = el('ul', 'synergies');
+  for (const [n, d] of SYNERGIES) { const li = el('li'); li.innerHTML = `<b>${n}</b>: ${esc(d)}`; syn.appendChild(li); }
+  b.appendChild(syn);
 }
 
 // ------------------------------------------------------------------ frame
@@ -768,7 +938,7 @@ function frame(now) {
   // ground: build the nearest missing chunks first, a couple per frame
   chunkBudget = 1;
   for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
-    if (cx < 0 || cy < 0 || cx * CHUNK >= WW || cy * CHUNK >= WH) continue;
+    if (cx < 0 || cy < 0 || cx * CHUNK >= WW || cy * CHUNK >= WORLD_H) continue;
     const c = getChunk(cx, cy);
     if (c) ctx.drawImage(c, cx * CHUNK, cy * CHUNK, CHUNK + 0.5, CHUNK + 0.5);
     else { ctx.fillStyle = '#4a6a3a'; ctx.fillRect(cx * CHUNK, cy * CHUNK, CHUNK, CHUNK); }
@@ -776,11 +946,15 @@ function frame(now) {
   // warm up the ring of chunks just off screen so walking never shows blank ground
   if (worker && pending.size === 0 && frameNo % 10 === 0) {
     for (let cy = Math.floor((y0 - CHUNK) / CHUNK); cy <= Math.floor((y1 + CHUNK) / CHUNK); cy++) for (let cx = Math.floor((x0 - CHUNK) / CHUNK); cx <= Math.floor((x1 + CHUNK) / CHUNK); cx++)
-      if (cx >= 0 && cy >= 0 && cx * CHUNK < WW && cy * CHUNK < WH) getChunk(cx, cy);
+      if (cx >= 0 && cy >= 0 && cx * CHUNK < WW && cy * CHUNK < WORLD_H) getChunk(cx, cy);
   }
-  const CS = CASTLE_SPRITE_SIZE, VS = VILLAGE_SPRITE_SIZE;
-  const visCastles = CASTLES.filter((c) => c.x + CS / 2 > x0 && c.x - CS / 2 < x1 && c.y + CS / 2 > y0 && c.y - CS / 2 < y1);
-  for (const c of visCastles) ctx.drawImage(castleBase(c.id), c.x - CS / 2, c.y - CS / 2, CS, CS);
+  const VS = VILLAGE_SPRITE_SIZE, csz = (c) => castleSize(c.type);
+  const visCastles = CASTLES.filter((c) => { const h = csz(c) / 2; return c.x + h > x0 && c.x - h < x1 && c.y + h > y0 && c.y - h < y1; });
+  for (const c of visCastles) { const S = csz(c); ctx.drawImage(castleBase(c), c.x - S / 2, c.y - S / 2, S, S); }
+  for (const cv of CAVES) if (Math.abs(cv.x - me.x) < hw + 100 && Math.abs(cv.y - me.y) < hh + 100) ctx.drawImage(caveSprite(DUNGEONS[cv.dungeon].theme), cv.x - 75, cv.y - 70, 150, 130);
+  const dgHere = dungeonAt(me.x, me.y);
+  if (dgHere) for (const q of [dgHere.exitPortal, dgHere.bossPortal]) { ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(now / 600); ctx.drawImage(portalSprite(), -38, -38, 76, 76); ctx.restore(); }
+  drawLoot(now);
   const villageVis = Math.abs(VILLAGE.x - me.x) < hw + VS && Math.abs(VILLAGE.y - me.y) < hh + VS;
   if (villageVis) ctx.drawImage(villageBase(), VILLAGE.x - VS / 2, VILLAGE.y - VS / 2, VS, VS);
   // low props, zones, then everything with height sorted by y
@@ -808,21 +982,27 @@ function frame(now) {
     } else drawEnt(it.o, it.self ? me.x : it.o.x, it.self ? me.y : it.o.y, now);
   }
   for (const c of visCastles) {
-    const inside = Math.abs(me.x - c.x) < CH && Math.abs(me.y - c.y) < CH;
-    ctx.globalAlpha = inside ? 0.92 : 1;
-    ctx.drawImage(castleTop(c.id, facColor(owners.get(c.id)) || '#8a5a42'), c.x - CS / 2, c.y - CS / 2, CS, CS);
-    ctx.globalAlpha = 1;
+    const S = csz(c);
+    ctx.drawImage(castleTop(c, facColor(owners.get(c.id)) || '#8a5a42'), c.x - S / 2, c.y - S / 2, S, S);
   }
   if (villageVis) ctx.drawImage(villageTop(), VILLAGE.x - VS / 2, VILLAGE.y - VS / 2, VS, VS);
   drawProjs(now);
   for (const it of list) if (it.o) drawLabels(it.o, it.self ? me.x : it.o.x, it.self ? me.y : it.o.y);
   for (const c of visCastles) {
-    const f = facInfo.get(owners.get(c.id));
+    const f = facInfo.get(owners.get(c.id)), top = c.y - CASTLE_TYPES[c.type].outer;
     ctx.textAlign = 'center'; ctx.font = 'bold 16px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
-    ctx.strokeText(c.name, c.x, c.y - CH - 50); ctx.fillStyle = '#fff4d8'; ctx.fillText(c.name, c.x, c.y - CH - 50);
-    ctx.font = '13px Georgia'; const lbl = f ? 'Held by ' + f.name : 'Held by bandits';
-    ctx.strokeText(lbl, c.x, c.y - CH - 32); ctx.fillStyle = f ? f.color : '#c8c0b0'; ctx.fillText(lbl, c.x, c.y - CH - 32);
+    ctx.strokeText(c.name, c.x, top - 50); ctx.fillStyle = '#fff4d8'; ctx.fillText(c.name, c.x, top - 50);
+    ctx.font = '13px Georgia'; const lbl = (f ? 'Held by ' + f.name : 'Held by bandits') + ' · ' + '◆'.repeat(c.danger) + (levels.get(c.id) > 1 ? ' · level ' + levels.get(c.id) : '');
+    ctx.strokeText(lbl, c.x, top - 32); ctx.fillStyle = f ? f.color : '#c8c0b0'; ctx.fillText(lbl, c.x, top - 32);
   }
+  for (const cv of CAVES) if (Math.abs(cv.x - me.x) < hw + 100 && Math.abs(cv.y - me.y) < hh + 100) {
+    const d = DUNGEONS[cv.dungeon];
+    ctx.textAlign = 'center'; ctx.font = 'bold 15px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
+    ctx.strokeText(d.name, cv.x, cv.y - 66); ctx.fillStyle = '#e0d0ff'; ctx.fillText(d.name, cv.x, cv.y - 66);
+    ctx.font = '12px Georgia'; const sub = 'Dungeon · ' + '◆'.repeat(d.danger) + ' · walk in to enter';
+    ctx.strokeText(sub, cv.x, cv.y - 50); ctx.fillStyle = '#c8b8e8'; ctx.fillText(sub, cv.x, cv.y - 50);
+  }
+  drawBossBar();
   if (villageVis) {
     ctx.textAlign = 'center'; ctx.font = 'bold 16px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
     ctx.strokeText('Hanbin Haven (safe zone)', VILLAGE.x, VILLAGE.y - VILLAGE.r - 18); ctx.fillStyle = '#b8f0b0'; ctx.fillText('Hanbin Haven (safe zone)', VILLAGE.x, VILLAGE.y - VILLAGE.r - 18);

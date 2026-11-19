@@ -14,6 +14,7 @@
     <div class="namerow"><span id="pname"></span><span id="prank"></span></div>
     <div class="bar"><i id="valbar" class="valor"></i><span id="valtxt"></span></div>
     <div class="bar"><i id="somabar" class="soma"></i><span id="somatxt"></span></div>
+    <div id="goldrow"></div>
     <div id="ptsrow"></div>
     <div id="facrow"></div>
     <div id="passives" title="Passive skills"></div>
@@ -33,10 +34,11 @@
     <canvas id="mini" width="236" height="157"></canvas>
     <div id="regionlbl"></div>
     <div class="menu">
-      <button data-open="skills" data-label="Skills" title="Skill trees">K Skills</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
+      <button data-open="skills" data-label="Skills" title="Skill trees">K Skills</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="inv" data-label="Relics" title="Relics and the merchant">I Relics</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
     </div>
   </div>
   <div id="capture" class="abs box"><div id="captxt"></div><div class="bar"><i id="capbar" class="cap"></i></div></div>
+  <div id="bossbar" class="abs"><div id="bossname"></div><div class="bar"><i id="bossfill" class="boss"></i></div></div>
   <div id="toast" class="abs"></div>
   <div id="death" class="abs"><div><div class="dt">You have fallen</div><small id="deathtxt"></small></div></div>
 </div>
@@ -48,6 +50,7 @@
 </div>
 <div id="factions" class="panel"><h2><span>Factions</span><span class="x" data-close>✕</span></h2><div id="facbody"></div></div>
 <div id="board" class="panel"><h2><span>Ranks &amp; Leaderboard</span><span class="x" data-close>✕</span></h2><div id="boardbody"></div></div>
+<div id="inv" class="panel"><h2><span>Relics</span><span class="x" data-close>✕</span></h2><div id="invbody"></div></div>
 <div id="keys" class="panel"><h2><span>Keybinds</span><span class="x" data-close>✕</span></h2><div id="keysbody"></div></div>
 <div id="map" class="panel"><h2><span>Map of Hanbin Island</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas><p id="maphint" class="dim"></p></div>
 <div id="help" class="panel">
@@ -55,12 +58,15 @@
   <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Use skills</b> <kbd>1</kbd>–<kbd>0</kbd>, <kbd>Left click</kbd> = slot 1, <kbd>Right click</kbd> = slot 2 (hold to repeat)</p>
   <p><kbd>K</kbd> skills · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> leaderboard · <kbd>Enter</kbd> chat (<code>/f message</code> for faction chat) · <kbd>Esc</kbd> close</p>
   <p>These are the default keys. Change any of them under <b>Keybinds</b> (<kbd>O</kbd>). You can reset your skill points for free in the Skill Trees panel, but only while standing in Hanbin Haven.</p>
-  <p><b>Soma</b> is permanent and never capped. Every soma tier gives a skill point, and every 5 tiers unlocks another hotbar slot (up to 10).</p>
+  <p><b>Soma</b> is permanent and never capped. Every soma tier gives a skill point, every 4 tiers another relic slot (up to 6), and every 5 tiers another hotbar slot (up to 10). Each tier costs more soma than the last, so this is a long climb.</p>
+  <p><b>Relics</b> (<kbd>I</kbd>) are your build. They change every attack you make: splash, lifesteal, pulling enemies in, burning, crits, chain lightning, exploding corpses and more. Stack relics that feed each other. They drop from elites (gold names), bosses and occasionally any monster, or come from crates sold in the Haven. Two of the same relic and level fuse into a stronger one.</p>
+  <p><b>Gold</b> buys crates, pays for fusing and fortifies your faction's castles. Gold you are <i>carrying</i> is at risk: dying drops half of it for anyone to grab. It is banked automatically when you walk into Hanbin Haven or a castle your faction holds.</p>
+  <p><b>Dungeons</b>: cave mouths (◉ on the map) lead to multi-room dungeons shared with everyone. Each ends in a boss with telegraphed attacks: get out of the red circles. Bosses drop the best relics and come back 8 minutes after they die.</p>
   <p><b>Valor</b> is capped and sets your rank, from Peasant to King. Your armour improves with rank. You lose 75% of your valor when you die.</p>
   <p>Earn both by slaying monsters and players and by conquering castles. Danger (◆) rises toward the coasts, and so do the rewards.</p>
   <p><b>Skill trees</b>: Blade, Marksman, Alchemy &amp; Sorcery, Command and Technique. Each tree branches, and some skills are passives. Skills have long cooldowns, so mix trees to build your own kit.</p>
   <p><b>Factions</b>: found or join one. Faction members and the soldiers of your faction's castles are your allies.</p>
-  <p><b>Conquest</b>: every region has a walled castle. Enter its courtyard, defeat every defender (its guards and any players of the owning faction), then hold the courtyard to claim it. You need a faction. Hanbin Haven, the village at the centre, is a safe zone.</p>
+  <p><b>Conquest</b>: every region has a fort, castle or moated citadel; the deadlier the region, the bigger the fortress. Castles pay taxes to their faction every minute, can be fortified with gold, and let you bank gold and swap relics inside. Enter its courtyard, defeat every defender (its guards and any players of the owning faction), then hold the courtyard to claim it. You need a faction. Hanbin Haven, the village at the centre, is a safe zone.</p>
   <p><b>Parry</b> a hit to stun and weaken the attacker, then <b>Riposte</b> for a double-damage lunge.</p>
   <p><b>Rank rewards</b>: higher ranks give more health and damage, and unlock Recall (Knight, <kbd>B</kbd>), travel between your faction's castles from the map (Baron), a damage aura for allies (Duke) and faster teleports (Prince). See the full list in the Ranks panel (<kbd>Tab</kbd>).</p>
   <h3>Combos</h3>
