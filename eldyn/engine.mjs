@@ -7,10 +7,10 @@ import {
   DUNGEONS, CAVES, CASTLE_LEVEL_COST, CASTLE_TAX, HOUSES,
   rankOf, tierOf, garrisonFor, inCastleWalls, moveBody, freeAt, shotBlocked, losClear, dungeonAt, regionAt, propsIn,
   CAP_BASE, CAP_LIFT, TERR_BONUS, TERR_MAX, NPC_REWARD, CAPTURE_VALOR, valorGain, somaGain, RANK, rankHp, COMMAND_RANK, TROOP_NAMES,
-  PUBLIC_FACTIONS, PRIVATE_MAX,
+  PUBLIC_FACTIONS, MAP_ID, PRIVATE_MAX,
 } from './shared.mjs';
 import {
-  TOOLS, SLOTS, START_KIT, START_BELT, TURN_RATE, ATK_CAP, DEF_CAP, SPD_CAP, ALLY_SHIELD_CAP, AURA_GAP, RESPEC_COST, MAX_TRAPS, MAX_TROOPS,
+  TOOLS, SLOTS, SLOT_TIERS, START_KIT, START_BELT, slotsFor, TURN_RATE, ATK_CAP, DEF_CAP, SPD_CAP, ALLY_SHIELD_CAP, AURA_GAP, RESPEC_COST, MAX_TRAPS, MAX_TROOPS,
   owns, unlockCheck, sanitizeUnlocks, keysFor, BACKPEDAL, BACKPEDAL_ANGLE,
 } from './builds.mjs';
 
@@ -49,7 +49,7 @@ export function migrateProgress(pr) {
   if (!played) return { progress, note: null };
   progress.vet = 1;
   progress.legacy = { season: pr.season || 1, soma: oldSoma };
-  return { progress, note: `Season ${SEASON} has begun: combat now works like Eldyn, with tools in a 7-slot toolbelt. Everyone starts fresh. As a veteran you keep the ★ badge, and your old record (${oldSoma} soma) is saved.` };
+  return { progress, note: `Season ${SEASON} has begun: combat now works like Eldyn, with tools in a toolbelt of up to 10 slots. Everyone starts fresh. As a veteran you keep the ★ badge, and your old record (${oldSoma} soma) is saved.` };
 }
 
 export class Game {
@@ -61,9 +61,9 @@ export class Game {
     this.factions = {}; this.nextFac = fresh ? 10 : Math.max(10, world.nextFac || 10);
     if (!fresh) for (const [id, f] of Object.entries(world.factions || {})) this.factions[id] = { ...f, members: [...(f.members || [])] };
     for (const pf of PUBLIC_FACTIONS) if (!this.factions[pf.id]) this.factions[pf.id] = { ...pf, pub: true, members: [] };
-    this.worldDirty = fresh;
+    this.worldDirty = fresh || world.map !== MAP_ID;
     this.castles = CASTLES.map((c) => {
-      const saved = !fresh && world.castles && world.castles[c.id];
+      const saved = !fresh && world.map === MAP_ID && world.castles && world.castles[c.id];
       const ownerId = typeof saved === 'object' && saved ? saved.o : saved;
       const owner = ownerId && this.factions[ownerId] ? +ownerId : 0;
       const level = owner && typeof saved === 'object' ? clamp(saved.l | 0, 1, 3) : 1;
@@ -265,7 +265,7 @@ export class Game {
     const nt = tierOf(p.soma);
     if (nt !== p.tier) {
       p.tier = nt;
-      if (nt > oldTier) this.send(p, { t: 'toast', m: `Soma tier ${nt}! +1 key: unlock a tool (K).` });
+      if (nt > oldTier) this.send(p, { t: 'toast', m: slotsFor(nt) > slotsFor(oldTier) ? `Soma tier ${nt}! +1 key, and toolbelt slot ${slotsFor(nt)} is open.` : `Soma tier ${nt}! +1 key: unlock a tool (K).` });
       this.sendProf(p);
     }
     const nr = rankOf(p.valor).idx;
@@ -273,7 +273,7 @@ export class Game {
       this.recalc(p); this.sendProf(p);
       if (nr > oldRank) {
         this.send(p, { t: 'toast', m: `You are now a ${rankOf(p.valor).name}!` });
-        if (nr === RANK.king) this.broadcast({ t: 'msg', m: `👑 ${p.name} has been crowned King!`, c: '#f0c840' });
+        if (nr === RANK.king) this.broadcast({ t: 'msg', m: `${p.name} has been crowned King!`, c: '#f0c840' });
         else if (nr >= RANK.travel) this.broadcast({ t: 'msg', m: `${p.name} has risen to the rank of ${rankOf(p.valor).name}.`, c: '#e0b84f' });
       }
     }
@@ -309,7 +309,7 @@ export class Game {
     this.reward(killer, valor, NPC_REWARD, n);
     const g = Math.round((n.def.gold || 0) * (n.def.boss ? 1 : rnd(0.5, 1.5)));
     if (g) this.dropLoot(n.x, n.y, { gold: g });
-    if (n.def.boss) this.broadcast({ t: 'msg', m: `⚔ ${killer.name} has slain ${n.def.name}!`, c: '#ffb030' });
+    if (n.def.boss) this.broadcast({ t: 'msg', m: `${killer.name} has slain ${n.def.name}!`, c: '#ffb030' });
   }
   killPlayer(p, killer) {
     if (p.dead) return;
@@ -323,7 +323,7 @@ export class Game {
     for (const n of this.npcs.values()) if (n.owner === p.id && !this.isObj(n)) { n.order = 'hold'; n.anchor = { x: n.x, y: n.y }; }
     const by = killer && killer !== p ? killer : null;
     this.send(p, { t: 'died', lost, gold: dg, wood: dw, by: by ? by.name : null });
-    if (wasRank === RANK.king) this.broadcast({ t: 'msg', m: `👑 King ${p.name} has fallen${by ? ' to ' + by.name : ''}!`, c: '#f0c840' });
+    if (wasRank === RANK.king) this.broadcast({ t: 'msg', m: `King ${p.name} has fallen${by ? ' to ' + by.name : ''}!`, c: '#f0c840' });
     else if (wasRank >= RANK.radar) this.broadcast({ t: 'msg', m: `${rankOf(lost).name} ${p.name} has fallen${by ? ' to ' + by.name : ''}.`, c: '#c06060' });
     // Pillagers grow into bigger prizes with every player they kill.
     const actor = this.getEnt(p.lastHurtBy);
@@ -399,7 +399,7 @@ export class Game {
     const f = this.factions[p.fac];
     this.send(p, {
       t: 'prof', unlocked: p.unlocked, belt: p.belt, keys: p.keys, tier: p.tier, fac: p.fac || 0, name: p.name, rank: p.rank, maxhp: p.maxhp, vet: p.vet,
-      code: f && !f.pub ? f.code : null, spots: this.respawnSpots(p),
+      code: f && !f.pub ? f.code : null, spots: this.respawnSpots(p), slots: slotsFor(p.tier || 0),
     });
   }
 
@@ -428,14 +428,15 @@ export class Game {
     this.send(p, { t: 'welcome', id: p.id });
     this.sendProf(p);
     this.send(p, { t: 'meta', ...this.metaObj() });
-    this.send(p, { t: 'msg', m: `Welcome to Hanbin Island! You fight with the 7 tools in your toolbelt: left click, Space, Shift, V, right click, middle click and Q. K unlocks tools, H explains everything.`, c: '#e0b84f' });
+    this.send(p, { t: 'msg', m: `Welcome to Hanbin Island! You fight with the tools in your toolbelt (left click, Space, Shift, V, right click...). More slots open as your Soma tier rises, up to 10. K unlocks tools, H explains everything.`, c: '#e0b84f' });
     if (note) { this.send(p, { t: 'msg', m: note, c: '#ffd070' }); this.send(p, { t: 'toast', m: `Season ${SEASON} has begun!` }); }
     return p;
   }
   cleanBelt(p, belt) {
     const out = [], seen = new Set();
     const src = Array.isArray(belt) && belt.length ? belt : START_BELT;
-    for (let i = 0; i < SLOTS; i++) { const id = src[i]; if (id && TOOLS[id] && owns(p.unlocked, id) && !seen.has(id)) { out.push(id); seen.add(id); } else out.push(null); }
+    const open = slotsFor(p.tier || 0);
+    for (let i = 0; i < SLOTS; i++) { const id = src[i]; if (i < open && id && TOOLS[id] && owns(p.unlocked, id) && !seen.has(id)) { out.push(id); seen.add(id); } else out.push(null); }
     return out;
   }
   // Combat logging: if an enemy player hit you in the last 10s, your character stays for 10s so they can still win.
@@ -460,7 +461,7 @@ export class Game {
   worldState() {
     const castles = {};
     for (const c of this.castles) if (c.owner) castles[c.id] = { o: c.owner, l: c.level };
-    return { season: SEASON, factions: this.factions, castles, nextFac: this.nextFac };
+    return { season: SEASON, map: MAP_ID, factions: this.factions, castles, nextFac: this.nextFac };
   }
   // Equipping only works in Hanbin Haven or inside a castle your faction holds.
   canManage(p) { return inSafe(p) || (p.fac && this.castles.some((c) => c.owner === p.fac && inCastleWalls(c, p.x, p.y))); }
@@ -896,7 +897,7 @@ export class Game {
     } else if (d > ar + tgt.r + n.r - 4) this.steer(n, tgt.x, tgt.y, spd);
     else if (T >= n.nextAtk) {
       n.nextAtk = T + def.cd * cdMul; n.atkAt = T;
-      this.fx({ t: 'arc', x: n.x, y: n.y, a: n.ang, r: ar + 14, w: 1.2 });
+      this.fx({ t: 'arc', i: n.id, x: n.x, y: n.y, a: n.ang, r: ar + 14, w: 1.2 });
       this.dealDamage(n, tgt, def.dmg, { melee: true });
     }
   }
@@ -931,11 +932,13 @@ export class Game {
     const T = this.T, ready = (id) => (n.gcd[TOOLS[id].group] || 0) <= T, use = (id, o) => ready(id) && this.useTool(n, TOOLS[id], o) === true;
     const w = this.npcWeapon(n), reach = this.reachOf(w), ranged = w.type === 'shoot', facing = angDiff(n.ang, Math.atan2(tgt.y - n.y, tgt.x - n.x)) < 0.35;
     const threat = (tgt.atkAt && T - tgt.atkAt < 500) || T < (tgt.windUntil || 0), close = d < reach + tgt.r + 40, at = { ax: tgt.x, ay: tgt.y };
+    // Someone shooting at us from range: get a shield up while closing in, like a player would.
+    const tw = tgt.isPlayer ? TOOLS[tgt.wp] : tgt.kit ? this.npcWeapon(tgt) : null, shotAt = !!tw && tw.type === 'shoot' && d > 150 && d < (tw.range || 0) && threat;
     for (const id of n.kit) {
       const t = TOOLS[id];
       if (t === w) continue;
       switch (t.type) {
-        case 'shield': if (d < 220 && (threat || Math.random() < 0.12) && use(id)) return; break;
+        case 'shield': if (((d < 220 && (threat || Math.random() < 0.12)) || shotAt) && use(id)) return; break;
         case 'parry': if (d < 140 && (threat || Math.random() < 0.2) && use(id)) return; break;
         case 'strike': if (facing && d < t.hits[0].reach + tgt.r && use(id)) return; break;
         case 'shoot': if (facing && d < t.range * 0.9 && d > (t.arm || 0) && (!t.players || tgt.isPlayer) && use(id)) return; break;
@@ -1113,7 +1116,7 @@ export class Game {
       }
       case 'cone': {
         const stub = this.mkStub(e);
-        this.fx({ t: 'arc', x: e.x, y: e.y, a: e.ang, r: t.r, w: (t.arc * Math.PI) / 180, c: 'rgba(150,40,60,.7)' });
+        this.fx({ t: 'arc', i: e.id, x: e.x, y: e.y, a: e.ang, r: t.r, w: (t.arc * Math.PI) / 180, c: 'rgba(150,40,60,.7)' });
         for (const f of this.livingFoesNear(e, e.x, e.y, t.r)) if (angDiff(Math.atan2(f.y - e.y, f.x - e.x), e.ang) <= (t.arc * Math.PI) / 360) this.addDot(f, t.dps, t.dur, stub, t.leech);
         return;
       }
@@ -1154,7 +1157,7 @@ export class Game {
     const ang = e.ang, cos = Math.cos(ang), sin = Math.sin(ang);
     let hits = [];
     if (h.line) {
-      this.fx({ t: 'line', x: e.x + cos * 16, y: e.y + sin * 16, x2: e.x + cos * h.reach, y2: e.y + sin * h.reach, c: 'rgba(235,240,255,.8)', w: 5 });
+      this.fx({ t: 'thrust', i: e.id, wp: e.wp, x: e.x, y: e.y, a: +ang.toFixed(3), r0: 14, r1: h.reach });
       for (const f of this.foesNear(e, e.x + cos * h.reach / 2, e.y + sin * h.reach / 2, h.reach / 2 + 24)) {
         const dx = f.x - e.x, dy = f.y - e.y, t = dx * cos + dy * sin;
         if (t < -f.r || t > h.reach + f.r || Math.abs(-dx * sin + dy * cos) > 16 + f.r) continue;
@@ -1165,7 +1168,7 @@ export class Game {
       hits = hits.map((x) => x[1]);
     } else {
       const arc = (h.arc * Math.PI) / 180;
-      this.fx({ t: 'arc', x: e.x, y: e.y, a: ang, r: h.reach, w: Math.min(6.4, arc) });
+      this.fx({ t: 'arc', i: e.id, wp: e.wp, x: e.x, y: e.y, a: +ang.toFixed(3), r: h.reach, w: Math.min(6.4, arc) });
       for (const f of this.foesNear(e, e.x, e.y, h.reach)) {
         if (h.arc < 360 && angDiff(Math.atan2(f.y - e.y, f.x - e.x), ang) > arc / 2) continue;
         if (losClear(e.x, e.y, f.x, f.y)) hits.push(f);
@@ -1591,6 +1594,7 @@ export class Game {
       case 'belt': {
         const s = m.s | 0;
         if (s < 0 || s >= SLOTS) break;
+        if (s >= slotsFor(p.tier)) { this.say(p, `Toolbelt slot ${s + 1} opens at Soma tier ${SLOT_TIERS[s]}.`); break; }
         if (!this.canManage(p)) { this.say(p, 'You can only change your toolbelt in Hanbin Haven or a castle your faction holds.'); break; }
         if (m.id === null) p.belt[s] = null;
         else if (typeof m.id === 'string' && TOOLS[m.id] && owns(p.unlocked, m.id)) { const prev = p.belt.indexOf(m.id); if (prev >= 0) p.belt[prev] = p.belt[s]; p.belt[s] = m.id; }

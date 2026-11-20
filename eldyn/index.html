@@ -50,18 +50,18 @@
 <div id="factions" class="panel"><h2><span>Factions</span><span class="x" data-close>✕</span></h2><div id="facbody"></div></div>
 <div id="board" class="panel"><h2><span>Ranks &amp; Leaderboard</span><span class="x" data-close>✕</span></h2><div id="boardbody"></div></div>
 <div id="keys" class="panel"><h2><span>Keybinds</span><span class="x" data-close>✕</span></h2><div id="keysbody"></div></div>
-<div id="map" class="panel"><h2><span>Map of Hanbin Island</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas><p id="maphint" class="dim"></p></div>
+<div id="map" class="panel"><h2><span>The Hanbin Isles</span><span class="x" data-close>✕</span></h2><canvas id="bigmap"></canvas><p id="maphint" class="dim"></p></div>
 <div id="help" class="panel">
   <h2><span>How to play</span><span class="x" data-close>✕</span></h2>
-  <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Toolbelt</b>: <kbd>Left click</kbd> <kbd>Space</kbd> <kbd>Shift</kbd> <kbd>V</kbd> <kbd>Right click</kbd> <kbd>Middle click</kbd> <kbd>Q</kbd></p>
+  <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Toolbelt</b>: <kbd>Left click</kbd> <kbd>Space</kbd> <kbd>Shift</kbd> <kbd>V</kbd> <kbd>Right click</kbd> <kbd>Middle click</kbd>, then <kbd>Q</kbd> <kbd>E</kbd> <kbd>R</kbd> <kbd>C</kbd> as more slots open</p>
   <p><kbd>K</kbd> tools · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> ranks · <kbd>Enter</kbd> chat · <kbd>[</kbd> <kbd>]</kbd> turn · <kbd>Esc</kbd> close. Change any key under <b>Keybinds</b> (<kbd>O</kbd>).</p>
   <h3>Fighting</h3>
-  <p>You fight with the <b>7 tools in your toolbelt</b>: weapons, shields, maneuvers, heals, thrown concoctions, traps and banners. Every tool has a wind-up, a timed sequence and a cooldown. <b>Tools in the same group share a cooldown</b> (all weapons, all shields, all heals...), so one weapon swing and one shield at a time, but a weapon, a shield and a sidearm can all work together.</p>
+  <p>You fight with the <b>tools in your toolbelt</b>: weapons, shields, maneuvers, heals, thrown concoctions, traps and banners. Every tool has a wind-up, a timed sequence and a cooldown. <b>Tools in the same group share a cooldown</b> (all weapons, all shields, all heals...), so one weapon swing and one shield at a time, but a weapon, a shield and a sidearm can all work together.</p>
   <p>Your facing <b>turns toward the mouse at a fixed speed</b>, and attacks go where you face. You can back away while attacking forward, but backpedalling is slower.</p>
   <p><b>Hold</b> a key to repeat a tool as soon as it is ready. A single press while it cools down does nothing; a <b>double press</b> queues one use. Hold <kbd>Alt</kbd> and press a keyboard slot to <b>toggle</b> auto-repeat. Traps, banners and thrown flasks aim at your cursor.</p>
   <p><b>Damage</b> = base × (1 + attack/100) × (1 − defence/100). Shields add defence for a few seconds; heals make you slower and easier to hurt while they work, so heal behind a shield, a wall or a friend. Everyone has 80 health (Guard and Knight ranks add 10 each). Out of combat for 8 seconds, you slowly heal.</p>
   <h3>Progress</h3>
-  <p><b>Soma</b> is permanent. Every Soma tier gives one <b>key</b>, and each key unlocks one tool in the Tools panel (<kbd>K</kbd>): Warrior, Hunter, Alchemist and Auxiliary paths, 71 tools in all. Tier never adds health or damage, only choice. Change your toolbelt in Hanbin Haven or a castle your faction holds. A respec in the Haven returns every key for 5% of your soma.</p>
+  <p><b>Soma</b> is permanent. Every Soma tier gives one <b>key</b>, and each key unlocks one tool in the Tools panel (<kbd>K</kbd>): Warrior, Hunter, Alchemist and Auxiliary paths, 70 tools to unlock plus 8 everyone has. Your toolbelt has <b>10 slots</b>: 6 are open from the start and the others open at Soma tiers 3, 7, 13 and 21. Tier never adds health or damage. Change your toolbelt in Hanbin Haven or a castle your faction holds. A respec in the Haven returns every key for 5% of your soma.</p>
   <p><b>Valor</b> lasts one life: you lose all of it when you die or log off. It grows faster the more you have, and every kill gives more Soma the more Valor you carry, so staying alive is the grind and slaying a high-Valor enemy is the prize. NPCs give a fifth of what players give. Ranks give privileges: faction chat, troop commands, quick travel, renaming your faction, world chat (Ranks panel).</p>
   <p>Your faction's territory sets the <b>Valor cap</b> (5,000 with no land) and adds a reward bonus.</p>
   <h3>Factions and conquest</h3>
@@ -71,7 +71,9 @@
   <p><b>Quick travel</b> (Marshall) from the map: 20 seconds standing still, taking 4× damage.</p>
   <h3>Wood and gold</h3>
   <p>Break <b>log piles</b> for wood; it pays for traps, deployed banners and bonfires. <b>Gold</b> comes from dungeon bosses, Pillagers and castle taxes; it hires troops and fortifies castles. Carried gold and wood are at risk: dying drops half. Gold banks itself in the Haven or your castles.</p>
-  <p><b>Dungeons</b>: cave mouths (◉ on the map) lead to shared dungeons with a boss in the last room. Get out of the red circles.</p>
+  <h3>The isles</h3>
+  <p>Hanbin, in the middle, holds the Haven and its gentle heartland. Timber bridges lead out to the other isles: the Frostmark to the north, Emberreach to the east, Mirewold to the west, the Sunscar to the south, and the small Gull Isles, Thornholm and Saltspire beyond them. The further an isle lies from Hanbin, the more dangerous it is. Bridges are narrow: hold one and you hold the way across.</p>
+  <p><b>Dungeons</b>: cave mouths (purple rings on the map) lead to shared dungeons with a boss in the last room. Get out of the red circles.</p>
 </div>
 
 <div id="login">

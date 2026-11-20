@@ -5,11 +5,11 @@ import express from 'express';
 import { WebSocket } from 'ws';
 import {
   CASTLES, CASTLE_TYPES, VILLAGE, DUNGEONS, CAVES, MOBS, RANKS, landValue, moveBody, inCastleWalls, losClear, passable, dungeonAt, tierOf, somaForTier,
-  valorGain, somaGain, NPC_REWARD, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS,
+  valorGain, somaGain, NPC_REWARD, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS, MAP_ID, ISLANDS, BRIDGES, REGIONS, ISLAND_REGIONS, landBase, bridgeAt, regionAt,
 } from './shared.mjs';
 import { Game, CAPTURE_TIME, SEASON, migrateProgress, DT } from './engine.mjs';
 import {
-  TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, START_KIT, UNLOCKABLE, TTK_BANDS, TURN_RATE, BASE_HP, ATK_CAP,
+  TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, START_BELT, UNLOCKABLE, TTK_BANDS, TURN_RATE, BASE_HP, ATK_CAP,
   ttk, damagePerUse, burstTime, attackBuffs, keysFor,
 } from './builds.mjs';
 import { ARCHETYPES, roundRobin, seeded } from './balance.mjs';
@@ -81,8 +81,10 @@ test('dungeons are walkable chains of rooms reached through cave mouths, guarded
 test('70 tools to unlock (plus 8 free) across Warrior, Hunter, Alchemist and Auxiliary, each hanging from a tool on its own path', () => {
   assert.deepEqual(PATHS.map((p) => p.id), ['warrior', 'hunter', 'alchemist', 'auxiliary']);
   assert.equal(UNLOCKABLE.length, 70); assert.equal(START_KIT.length, 8);
-  assert.equal(SLOTS, 7);
-  assert.ok(START_KIT.length >= SLOTS, 'a new player can fill every slot');
+  assert.equal(SLOTS, 10); assert.equal(SLOT_TIERS.length, SLOTS);
+  assert.equal(slotsFor(0), 6); assert.equal(slotsFor(21), 10);
+  for (let i = 1; i < SLOTS; i++) assert.ok(SLOT_TIERS[i] >= SLOT_TIERS[i - 1], 'slots open in order');
+  assert.ok(START_KIT.length >= slotsFor(0), 'a new player can fill every open slot'); assert.equal(START_BELT.length, slotsFor(0));
   for (const t of TOOL_LIST) {
     assert.ok(GROUPS[t.group], t.id);
     assert.ok(t.cd > 0 && t.desc, t.id);
@@ -164,9 +166,9 @@ test('keys: one per tier; a tool needs its parent and a key; the starting kit is
   assert.equal(keysFor(5, ['pike']), 4);
 });
 
-test('the toolbelt changes only in the Haven or your own castle; new players start with a full belt', () => {
+test('the toolbelt changes only in the Haven or your own castle; new players start with every open slot filled', () => {
   const { game, p, msgs } = setup({ soma: somaForTier(1), unlocked: ['pike'] });
-  assert.equal(p.belt.length, SLOTS); assert.ok(p.belt.every(Boolean));
+  assert.equal(p.belt.length, SLOTS); assert.ok(p.belt.slice(0, slotsFor(p.tier)).every(Boolean)); assert.ok(p.belt.slice(slotsFor(p.tier)).every((s) => s === null));
   Object.assign(p, away(CASTLES[0]));
   game.handle(p, { t: 'belt', s: 0, id: 'pike' });
   assert.notEqual(p.belt[0], 'pike'); assert.match(msgs.at(-1).m, /Haven/);
@@ -175,6 +177,12 @@ test('the toolbelt changes only in the Haven or your own castle; new players sta
   assert.equal(p.belt[0], 'pike');
   game.handle(p, { t: 'belt', s: 1, id: 'greatsword' });
   assert.notEqual(p.belt[1], 'greatsword', 'only owned tools');
+  // A slot that is not open yet stays shut until its Soma tier.
+  game.handle(p, { t: 'belt', s: 6, id: 'shortsword' });
+  assert.equal(p.belt[6], null); assert.match(msgs.at(-1).m, /tier 3/);
+  game.gain(p, 0, somaForTier(3) - p.soma + 1);
+  game.handle(p, { t: 'belt', s: 6, id: 'shortsword' });
+  assert.equal(p.belt[6], 'shortsword');
 });
 
 test('respec returns every key for 5% of your soma, only in the Haven', () => {
@@ -260,7 +268,7 @@ test('shields and heals have costs: a Poultice heals but lowers your defence and
   run(game, advance, 5000);
   assert.ok(p.hp >= 54 && p.hp <= 61, `healed to ${p.hp} (25 from the Poultice, plus resting)`);
   game.handle(p, { t: 'use', s: 1, on: 1 });
-  assert.equal(game.defOf(p), 35);
+  assert.equal(game.defOf(p), 40);
 });
 
 test('the Scutum protects allies behind and beside you, up to +20 from allies', () => {
@@ -527,12 +535,15 @@ test('season 3: everyone starts fresh; veterans keep a badge and their old recor
 
 test('a saved world keeps private factions and castle owners; a new season starts the map over', () => {
   const c = CASTLES[2];
-  const world = { season: SEASON, factions: { 12: { id: 12, name: 'Gulls', color: '#3498db', pub: false, code: 'abc', members: ['acc-1'] } }, castles: { [c.id]: { o: 12, l: 3 } }, nextFac: 13 };
+  const world = { season: SEASON, map: MAP_ID, factions: { 12: { id: 12, name: 'Gulls', color: '#3498db', pub: false, code: 'abc', members: ['acc-1'] } }, castles: { [c.id]: { o: 12, l: 3 } }, nextFac: 13 };
   const game = new Game({ world, now: () => 1e12 });
   assert.equal(game.castles.find((k) => k.id === c.id).owner, 12);
   for (const f of PUBLIC_FACTIONS) assert.ok(game.factions[f.id].pub);
   const old = new Game({ world: { ...world, season: 2 }, now: () => 1e12 });
   assert.equal(old.castles.find((k) => k.id === c.id).owner, 0); assert.ok(!old.factions[12]);
+  // A new map keeps the factions but frees every castle.
+  const remap = new Game({ world: { ...world, map: 'old-map' }, now: () => 1e12 });
+  assert.equal(remap.castles.find((k) => k.id === c.id).owner, 0); assert.ok(remap.factions[12]);
 });
 
 test('accounts: register, reject duplicates and wrong passwords, sign in by session', async () => {

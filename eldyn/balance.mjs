@@ -3,11 +3,11 @@
 // Bots are not people: this catches outliers, it does not prove perfect balance.
 // Run `node eldyn/balance.mjs` for the full report.
 import { Game } from './engine.mjs';
-import { CASTLES, CASTLE_TYPES } from './shared.mjs';
-import { BASE_HP } from './builds.mjs';
+import { CASTLES, CASTLE_TYPES, freeAt, passable } from './shared.mjs';
+import { BASE_HP, START_BELT } from './builds.mjs';
 
 export const ARCHETYPES = {
-  starter: ['spear', 'bollock', 'buckler', 'lunge', 'sling', 'rations', 'pennon'],
+  starter: START_BELT,
   shield_spear: ['spear', 'kite', 'quarterstaff', 'parry', 'rations', 'pennon'],
   pike_wall: ['pike', 'pavise', 'pilum', 'retreat', 'poultice'],
   duellist: ['rapier', 'parma', 'feint', 'bollock', 'draught', 'rations'],
@@ -21,12 +21,24 @@ export const ARCHETYPES = {
   halberd: ['halberd', 'heraldic', 'parry', 'pilum', 'rations'],
 };
 
-// A quiet patch of land with nothing else alive on it.
-function arena() {
+// Three arenas outside castles: open ground, some cover, and thick cover (by how many walls, rocks and
+// trees stand nearby). Duels rotate through them, since open ground favours bows and cover favours blades.
+export const ARENAS = (() => {
+  const list = [];
+  for (const c of CASTLES) for (const a of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    const d = CASTLE_TYPES[c.type].outer + 700, x = Math.round(c.x + Math.cos(a) * d), y = Math.round(c.y + Math.sin(a) * d);
+    let blocked = 0, water = 0;
+    for (let dx = -500; dx <= 500; dx += 40) for (let dy = -300; dy <= 300; dy += 40) { if (!passable(x + dx, y + dy, 0)) water++; else if (!freeAt(x + dx, y + dy, 26)) blocked++; }
+    if (!water) list.push({ x, y, blocked });
+  }
+  list.sort((p, q) => p.blocked - q.blocked);
+  return [0.2, 0.5, 0.8].map((q) => list[Math.floor(q * (list.length - 1))]);
+})();
+function arena(where = 0) {
   let t = 1e12;
   const game = new Game({ now: () => t });
   game.npcs.clear(); game.castles = []; game.dungeons = []; game.wildCap = game.wildCap.map(() => 0); game.logSpots = [];
-  const c = CASTLES[0], x = c.x + CASTLE_TYPES[c.type].outer + 500, y = c.y;
+  const { x, y } = ARENAS[where % ARENAS.length];
   return { game, x, y, step: () => { t += 50; game.tick(); } };
 }
 function bot(game, kit, x, y, team, ang) {
@@ -36,8 +48,8 @@ function bot(game, kit, x, y, team, ang) {
   return n;
 }
 // One duel; returns 1 if kit A wins, 0 if B wins, 0.5 for a draw (60 s without a winner).
-export function duel(kitA, kitB, seedSwap = false) {
-  const { game, x, y, step } = arena();
+export function duel(kitA, kitB, seedSwap = false, where = 0) {
+  const { game, x, y, step } = arena(where);
   const [ka, kb] = seedSwap ? [kitB, kitA] : [kitA, kitB];
   const gap = 125 + Math.random() * 150;
   const a = bot(game, ka, x - gap, y, 'A', 0), b = bot(game, kb, x + gap, y, 'B', Math.PI);
@@ -53,14 +65,14 @@ export function seeded(seed, fn) {
   Math.random = () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   try { return fn(); } finally { Math.random = real; }
 }
-// Round robin: every kit against every other, `n` duels per pairing (half from each side).
+// Round robin: every kit against every other, `n` duels per pairing (half from each side, spread over the arenas).
 export function roundRobin(kits = ARCHETYPES, n = 10) {
   const names = Object.keys(kits), wins = {}, games = {}, pair = {};
   for (const k of names) { wins[k] = 0; games[k] = 0; }
   for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
     const A = names[i], B = names[j];
     let s = 0;
-    for (let k = 0; k < n; k++) s += duel(kits[A], kits[B], k % 2 === 1);
+    for (let k = 0; k < n; k++) s += duel(kits[A], kits[B], k % 2 === 1, Math.floor(k / 2));
     wins[A] += s; wins[B] += n - s; games[A] += n; games[B] += n;
     pair[A + ' vs ' + B] = s / n;
   }

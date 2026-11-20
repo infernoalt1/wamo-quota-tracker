@@ -2,8 +2,10 @@
 // The map is generated from a fixed seed, so both sides build exactly the same island.
 
 export const MAP_SEED = 7331;
-// IH is the island's height; the dungeons sit in their own caverns below it (y >= IH), reached by cave mouths.
-export const WORLD = { W: 18000, IH: 12000, H: 20400, SAFE_R: 300 };
+// Saved castle owners only carry over while the map is the same one.
+export const MAP_ID = 'archipelago-1';
+// IH is the height of the sea and its islands; the dungeons sit in their own caverns below it (y >= IH), reached by cave mouths.
+export const WORLD = { W: 30000, IH: 20000, H: 28400, SAFE_R: 300 };
 const { W, IH } = WORLD;
 
 // ------------------------------------------------------------------ noise
@@ -29,12 +31,65 @@ export function rng(seed) {
 }
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-// ------------------------------------------------------------------ island shape
+// ------------------------------------------------------------------ the archipelago
+// Eight islands, each with its own land and danger, joined by long timber bridges. Hanbin, in the
+// middle, holds the Haven; the further an island lies from it, the deadlier it is.
+export const ISLANDS = [
+  { id: 0, name: 'Hanbin', x: 15000, y: 10400, rx: 5300, ry: 4100, rot: 0.08, danger: [1, 3], land: 'heart' },
+  { id: 1, name: 'The Frostmark', x: 14200, y: 2700, rx: 5600, ry: 1900, rot: -0.05, danger: [4, 5], land: 'frost' },
+  { id: 2, name: 'Emberreach', x: 25300, y: 8400, rx: 2900, ry: 4200, rot: 0.15, danger: [5, 6], land: 'ember' },
+  { id: 3, name: 'Mirewold', x: 5300, y: 9200, rx: 3000, ry: 4700, rot: -0.1, danger: [3, 5], land: 'mire' },
+  { id: 4, name: 'The Sunscar', x: 16800, y: 17700, rx: 5200, ry: 1800, rot: 0.04, danger: [3, 4], land: 'sun' },
+  { id: 5, name: 'Gull Isles', x: 5000, y: 17000, rx: 2300, ry: 1600, rot: 0.3, danger: [2, 3], land: 'gull' },
+  { id: 6, name: 'Thornholm', x: 25600, y: 1900, rx: 2000, ry: 1250, rot: -0.2, danger: [6, 6], land: 'thorn' },
+  { id: 7, name: 'Saltspire', x: 26300, y: 16700, rx: 1900, ry: 1700, rot: 0.2, danger: [4, 5], land: 'salt' },
+];
+for (const I of ISLANDS) { I.cos = Math.cos(I.rot); I.sin = Math.sin(I.rot); }
+// Bridges: [x0, y0, x1, y1, island A, island B]. Each end sits well inside its island.
+export const BRIDGE_W = 110;
+export const BRIDGES = [
+  [14600, 7000, 14300, 3900, 0, 1],
+  [19900, 9300, 22900, 8800, 0, 2],
+  [10300, 10000, 7700, 9600, 0, 3],
+  [16300, 13900, 16600, 16500, 0, 4],
+  [5300, 13300, 5100, 15900, 3, 5],
+  [25500, 4800, 25600, 2700, 2, 6],
+  [21400, 17600, 25000, 16900, 4, 7],
+].map(([x0, y0, x1, y1, a, b], id) => ({ id, x0, y0, x1, y1, a, b, len: Math.hypot(x1 - x0, y1 - y0) }));
+
+// How far inside an island's oval a point is: 1 at its centre, 0 on the oval.
+function islandRaw(I, x, y) {
+  const dx = x - I.x, dy = y - I.y, u = (dx * I.cos + dy * I.sin) / I.rx, v = (-dx * I.sin + dy * I.cos) / I.ry;
+  return 1 - Math.sqrt(u * u + v * v);
+}
+export function islandOf(x, y) {
+  let best = 0, bv = -Infinity;
+  for (const I of ISLANDS) { const v = islandRaw(I, x, y); if (v > bv) { bv = v; best = I.id; } }
+  return best;
+}
+// Land without bridges: > 0 is land, < 0 is sea.
+export function landBase(x, y) {
+  if (y >= IH || x < 0 || y < 0 || x > W) return -1;
+  let best = -9;
+  for (const I of ISLANDS) { const v = islandRaw(I, x, y); if (v > best) best = v; }
+  if (best < -0.6) return best;
+  return best + (fbm(x / 1500, y / 1500, MAP_SEED, 4) - 0.5) * 0.6 + (fbm(x / 520, y / 520, MAP_SEED + 3, 3) - 0.5) * 0.22 + (noise(x / 160, y / 160, MAP_SEED + 4) - 0.5) * 0.04 - 0.02;
+}
+// The bridge deck under a point, if any: { b, t (0..1 along), d (signed distance from the centre line) }.
+export function bridgeAt(x, y) {
+  for (const b of BRIDGES) {
+    if (x < Math.min(b.x0, b.x1) - BRIDGE_W || x > Math.max(b.x0, b.x1) + BRIDGE_W || y < Math.min(b.y0, b.y1) - BRIDGE_W || y > Math.max(b.y0, b.y1) + BRIDGE_W) continue;
+    const sx = (b.x1 - b.x0) / b.len, sy = (b.y1 - b.y0) / b.len, px = x - b.x0, py = y - b.y0;
+    const t = px * sx + py * sy, d = -px * sy + py * sx;
+    if (t >= 0 && t <= b.len && Math.abs(d) <= BRIDGE_W / 2) return { b, t: t / b.len, along: t, d };
+  }
+  return null;
+}
+// Land including bridge decks (decks count as just-barely land, so nothing grows on them).
 export function landValue(x, y) {
-  if (y >= IH) return -1;
-  const nx = (x / W - 0.5) * 2, ny = (y / IH - 0.5) * 2;
-  const d = Math.pow(nx ** 4 + ny ** 4, 0.25);
-  return 1 - d + (fbm(x / 1600, y / 1600, MAP_SEED, 4) - 0.5) * 0.7 - 0.04;
+  const v = landBase(x, y);
+  if (v >= 0.05 || y >= IH) return v;
+  return bridgeAt(x, y) ? 0.05 : v;
 }
 
 // ------------------------------------------------------------------ region names (built from syllables, never repeating)
@@ -42,87 +97,9 @@ const PRE = ['Frost', 'Pine', 'Grey', 'Storm', 'Gull', 'Wyrm', 'Thorn', 'Amber',
   'Gold', 'Raven', 'Moss', 'Dune', 'Coral', 'Ash', 'High', 'Elder', 'Bright', 'Hollow', 'Stone', 'Wolf', 'Oak', 'Mist', 'Sun', 'Black', 'Silver', 'Fen', 'Crow', 'Briar', 'Heron', 'Copper', 'Ember', 'Rook'];
 const SUF = ['mere', 'crest', 'watch', 'hold', 'cliff', 'fang', 'wood', 'moor', 'ford', 'marsh', 'vale', 'reach', 'hollow', 'march', 'peak', 'meadow', 'gate', 'water', 'barrow', 'strand', 'field', 'dale', 'spire', 'fell', 'brook', 'rock', 'wick', 'combe', 'haven', 'stead'];
 
-// ------------------------------------------------------------------ regions
-const R0 = rng(MAP_SEED);
-const SEEDS = [];
-{
-  const COLS = 8, ROWS = 6, cw = (W * 0.78) / COLS, ch = (IH * 0.76) / ROWS, MIN = 1720;
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    SEEDS.push({ x: W * 0.11 + (c + 0.5) * cw + (R0() - 0.5) * cw * 0.45, y: IH * 0.12 + (r + 0.5) * ch + (R0() - 0.5) * ch * 0.45 });
-  }
-  // Push crowded centres apart so castles never sit on top of each other.
-  for (let it = 0; it < 200; it++) for (let i = 0; i < SEEDS.length; i++) for (let j = i + 1; j < SEEDS.length; j++) {
-    const a = SEEDS[i], b = SEEDS[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
-    if (d >= MIN) continue;
-    const push = (MIN - d) / 2 / d;
-    a.x -= dx * push; a.y -= dy * push; b.x += dx * push; b.y += dy * push;
-    for (const s of [a, b]) {
-      s.x = clamp(s.x, W * 0.09, W * 0.91); s.y = clamp(s.y, IH * 0.1, IH * 0.9);
-      for (let k = 0; k < 30 && landValue(s.x, s.y) < 0.25; k++) { s.x += (W / 2 - s.x) * 0.02; s.y += (IH / 2 - s.y) * 0.02; }
-    }
-  }
-  for (const s of SEEDS) { s.x = Math.round(s.x); s.y = Math.round(s.y); }
-}
-export const SANCTUARY = SEEDS.reduce((best, s, i) => (Math.hypot(s.x - W / 2, s.y - IH / 2) < Math.hypot(SEEDS[best].x - W / 2, SEEDS[best].y - IH / 2) ? i : best), 0);
-export const VILLAGE = { x: SEEDS[SANCTUARY].x, y: SEEDS[SANCTUARY].y, r: WORLD.SAFE_R };
-
-export const RC = 60, GW = Math.ceil(W / RC), GH = Math.ceil(IH / RC);
-export const REGION_GRID = new Int8Array(GW * GH);
-export const LAND_GRID = new Uint8Array(GW * GH);
-for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
-  const x = gx * RC + RC / 2, y = gy * RC + RC / 2;
-  const wx = x + (fbm(x / 900, y / 900, MAP_SEED + 5, 2) - 0.5) * 900, wy = y + (fbm(x / 900, y / 900, MAP_SEED + 9, 2) - 0.5) * 900;
-  let best = 0, bd = Infinity;
-  for (let i = 0; i < SEEDS.length; i++) { const d = (SEEDS[i].x - wx) ** 2 + (SEEDS[i].y - wy) ** 2; if (d < bd) { bd = d; best = i; } }
-  REGION_GRID[gy * GW + gx] = best;
-  LAND_GRID[gy * GW + gx] = landValue(x, y) > 0 ? 1 : 0;
-}
-
-const adj = SEEDS.map(() => new Set());
-export const REGION_CELLS = SEEDS.map(() => []);
-for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
-  const i = gy * GW + gx; if (!LAND_GRID[i]) continue;
-  const a = REGION_GRID[i];
-  REGION_CELLS[a].push(i);
-  if (gx + 1 < GW && LAND_GRID[i + 1] && REGION_GRID[i + 1] !== a) { adj[a].add(REGION_GRID[i + 1]); adj[REGION_GRID[i + 1]].add(a); }
-  if (gy + 1 < GH && LAND_GRID[i + GW] && REGION_GRID[i + GW] !== a) { adj[a].add(REGION_GRID[i + GW]); adj[REGION_GRID[i + GW]].add(a); }
-}
-const parent = SEEDS.map(() => -1);
-{
-  const seen = new Set([SANCTUARY]), q = [SANCTUARY];
-  while (q.length) { const a = q.shift(); for (const b of [...adj[a]].sort((m, n) => m - n)) if (!seen.has(b)) { seen.add(b); parent[b] = a; q.push(b); } }
-}
-function biomeFor(s, i) {
-  if (i === SANCTUARY) return 'grass';
-  const fx = s.x / W, fy = s.y / IH;
-  if (fy < 0.28) return fx > 0.64 ? 'ash' : fx > 0.38 ? 'rock' : 'snow';
-  if (fy > 0.72) return fx > 0.58 ? 'desert' : fx < 0.3 ? 'heath' : ['grass', 'heath'][i % 2];
-  if (fx < 0.26) return fy < 0.5 ? 'darkforest' : 'forest';
-  if (fx > 0.74) return 'swamp';
-  return ['forest', 'grass', 'heath', 'grass'][i % 4];
-}
-// Danger by distance from the Haven, handed out by rank so every level exists: a safe heart, a deadly rim.
-const DANGER = SEEDS.map(() => 0);
-{
-  const order = SEEDS.map((s, i) => i).filter((i) => i !== SANCTUARY).sort((a, b) => Math.hypot(SEEDS[a].x - VILLAGE.x, SEEDS[a].y - VILLAGE.y) - Math.hypot(SEEDS[b].x - VILLAGE.x, SEEDS[b].y - VILLAGE.y));
-  const cuts = [0.1, 0.28, 0.48, 0.68, 0.86, 1];
-  order.forEach((i, k) => { DANGER[i] = 1 + cuts.findIndex((c) => (k + 0.5) / order.length <= c); });
-}
-const NR = rng(MAP_SEED + 21), usedNames = new Set();
-function regionName() {
-  for (;;) { const n = PRE[Math.floor(NR() * PRE.length)] + SUF[Math.floor(NR() * SUF.length)]; if (!usedNames.has(n)) { usedNames.add(n); return n; } }
-}
-export const REGIONS = SEEDS.map((s, i) => ({
-  id: i, x: s.x, y: s.y, biome: biomeFor(s, i),
-  name: i === SANCTUARY ? 'Hanbin Haven' : regionName(),
-  danger: DANGER[i],
-  neighbors: [...adj[i]],
-}));
-export const ISLAND_REGIONS = REGIONS.length;
-
 // ------------------------------------------------------------------ castle layouts
-// Forts guard the safe heartland, castles the middle ring, citadels (with a moat) the dangerous coasts.
-// All coordinates are relative to the castle's centre. Walls are [x, y, w, h].
+// Forts guard the safe heartland, castles the middle ring, citadels (with a moat) the deadly isles.
+// All coordinates are relative to the castle's centre. Walls are [x, y, w, h]; halls are solid buildings.
 function ring(h, t, gates, gw) {
   const out = [], g = gw / 2;
   for (const d of 'NSWE') {
@@ -138,44 +115,149 @@ function ring(h, t, gates, gw) {
   return out;
 }
 const corners = (h, t, r) => [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([a, b]) => ({ x: a * (h - t / 2), y: b * (h - t / 2), r }));
+// Gatehouses: [x, y, side ('N'|'S'), gap width, ring half-size, wall thickness] (drawn, the walls already block).
 export const CASTLE_TYPES = {
   fort: {
     name: 'Fort', walls: ring(240, 26, 'NS', 120), towers: corners(240, 26, 36), keep: [-66, -70, 132, 96], moat: [],
-    outer: 240, inner: 212, rings: [[240, 26]],
+    halls: [[-206, -150, 58, 112, 'barracks'], [148, 38, 58, 112, 'stable']],
+    gates: [[0, -240, 'N', 120, 26], [0, 240, 'S', 120, 26]],
+    outer: 240, inner: 212, rings: [[240, 26]], style: 'timber',
   },
   castle: {
     name: 'Castle', walls: [...ring(350, 28, 'S', 130), ...ring(180, 22, 'N', 104)], towers: [...corners(350, 28, 42), ...corners(180, 22, 28)], keep: [-52, -46, 104, 80], moat: [],
-    outer: 350, inner: 158, rings: [[350, 28], [180, 22]],
+    halls: [[-302, 196, 100, 92, 'barracks'], [202, 196, 100, 92, 'smithy']],
+    gates: [[0, 350, 'S', 130, 28], [0, -180, 'N', 104, 22]],
+    outer: 350, inner: 158, rings: [[350, 28], [180, 22]], style: 'stone',
   },
   citadel: {
     name: 'Citadel', walls: [...ring(450, 30, 'S', 130), ...ring(305, 26, 'N', 120), ...ring(170, 22, 'S', 100)],
-    towers: [...corners(450, 30, 46), ...corners(305, 26, 34), ...corners(170, 22, 26)], keep: [-48, -42, 96, 72],
-    moat: ring(540, 56, 'S', 150), outer: 540, inner: 148, rings: [[450, 30], [305, 26], [170, 22]],
+    towers: [...corners(450, 30, 46), ...corners(305, 26, 34), ...corners(170, 22, 26)], keep: [-48, -42, 96, 72], halls: [],
+    gates: [[0, 450, 'S', 130, 30], [0, -305, 'N', 120, 26], [0, 170, 'S', 100, 22]],
+    moat: ring(540, 56, 'S', 150), outer: 540, inner: 148, rings: [[450, 30], [305, 26], [170, 22]], style: 'dark',
   },
 };
-// Bigger layouts on coastal sites that cannot fit them step down to a smaller one.
-const fits = (type, x, y) => { const o = CASTLE_TYPES[type].outer + 40; return [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1], [1, 0], [-1, 0], [0, -1]].every(([a, b]) => landValue(x + a * o, y + b * o) > 0); };
+// Does a castle of this type fit on dry land here?
+const fits = (type, x, y) => { const o = CASTLE_TYPES[type].outer + 60; return [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1], [1, 0], [-1, 0], [0, -1], [0.6, 0.6], [-0.6, 0.6], [0.6, -0.6], [-0.6, -0.6]].every(([a, b]) => landBase(x + a * o, y + b * o) > 0.02); };
+
+// ------------------------------------------------------------------ regions
+// Region centres are scattered over each island at least MIN apart; every centre has room for a fort.
+const SEEDS = [{ x: ISLANDS[0].x, y: ISLANDS[0].y, island: 0 }];
+{
+  const MIN = 1500;
+  for (const I of ISLANDS) {
+    const R = rng(MAP_SEED + I.id * 97), ext = Math.max(I.rx, I.ry) * 1.2;
+    for (let k = 0; k < 3000; k++) {
+      const x = Math.round(I.x + (R() * 2 - 1) * ext), y = Math.round(I.y + (R() * 2 - 1) * ext);
+      if (landBase(x, y) < 0.2 || islandOf(x, y) !== I.id || !fits('fort', x, y)) continue;
+      if (SEEDS.some((s) => Math.hypot(s.x - x, s.y - y) < MIN)) continue;
+      if (BRIDGES.some((b) => Math.hypot(b.x0 - x, b.y0 - y) < 700 || Math.hypot(b.x1 - x, b.y1 - y) < 700)) continue;
+      SEEDS.push({ x, y, island: I.id });
+    }
+  }
+}
+export const SANCTUARY = 0;
+export const VILLAGE = { x: SEEDS[0].x, y: SEEDS[0].y, r: WORLD.SAFE_R };
+
+export const RC = 60, GW = Math.ceil(W / RC), GH = Math.ceil(IH / RC);
+export const REGION_GRID = new Int16Array(GW * GH);
+export const LAND_GRID = new Uint8Array(GW * GH);
+{
+  const byIsland = ISLANDS.map((I) => SEEDS.map((s, i) => i).filter((i) => SEEDS[i].island === I.id));
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    const x = gx * RC + RC / 2, y = gy * RC + RC / 2;
+    const wx = x + (fbm(x / 900, y / 900, MAP_SEED + 5, 2) - 0.5) * 900, wy = y + (fbm(x / 900, y / 900, MAP_SEED + 9, 2) - 0.5) * 900;
+    const land = landValue(x, y) > 0, onBridge = land && landBase(x, y) <= 0;
+    // Land belongs to a region of its own island; a bridge deck to whichever end is nearer.
+    const pool = land && !onBridge ? byIsland[islandOf(x, y)] : null;
+    let best = 0, bd = Infinity;
+    for (const i of pool && pool.length ? pool : SEEDS.keys()) { const d = (SEEDS[i].x - wx) ** 2 + (SEEDS[i].y - wy) ** 2; if (d < bd) { bd = d; best = i; } }
+    REGION_GRID[gy * GW + gx] = best;
+    LAND_GRID[gy * GW + gx] = land ? 1 : 0;
+  }
+}
+const adj = SEEDS.map(() => new Set());
+export const REGION_CELLS = SEEDS.map(() => []);
+for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+  const i = gy * GW + gx; if (!LAND_GRID[i]) continue;
+  const a = REGION_GRID[i];
+  REGION_CELLS[a].push(i);
+  if (gx + 1 < GW && LAND_GRID[i + 1] && REGION_GRID[i + 1] !== a) { adj[a].add(REGION_GRID[i + 1]); adj[REGION_GRID[i + 1]].add(a); }
+  if (gy + 1 < GH && LAND_GRID[i + GW] && REGION_GRID[i + GW] !== a) { adj[a].add(REGION_GRID[i + GW]); adj[REGION_GRID[i + GW]].add(a); }
+}
+// Walking distance from the Haven in regions; it orders danger within each island and lays the roads.
+const parent = SEEDS.map(() => -1), hops = SEEDS.map(() => Infinity);
+{
+  hops[0] = 0; const q = [0];
+  while (q.length) { const a = q.shift(); for (const b of [...adj[a]].sort((m, n) => m - n)) if (hops[b] === Infinity) { hops[b] = hops[a] + 1; parent[b] = a; q.push(b); } }
+}
+// Each island has its own lands: [biome] chosen from where in the island a region lies (u: west-east, v: north-south).
+function biomeFor(s, i) {
+  if (i === SANCTUARY) return 'grass';
+  const I = ISLANDS[s.island], dx = s.x - I.x, dy = s.y - I.y, u = (dx * I.cos + dy * I.sin) / I.rx, v = (-dx * I.sin + dy * I.cos) / I.ry;
+  switch (I.land) {
+    case 'heart': return v < -0.4 ? 'forest' : u < -0.45 ? 'forest' : u > 0.5 ? 'heath' : v > 0.45 ? ['grass', 'heath'][i % 2] : ['grass', 'forest', 'grass'][i % 3];
+    case 'frost': return u > 0.45 ? 'rock' : u < -0.55 ? 'darkforest' : ['snow', 'snow', 'rock'][i % 3];
+    case 'ember': return v < -0.55 || u < -0.5 ? 'rock' : 'ash';
+    case 'mire': return v < -0.2 ? 'darkforest' : v > 0.35 ? 'swamp' : ['swamp', 'forest'][i % 2];
+    case 'sun': return u < -0.6 ? 'heath' : 'desert';
+    case 'gull': return ['heath', 'grass'][i % 2];
+    case 'thorn': return ['snow', 'rock'][i % 2];
+    case 'salt': return ['desert', 'swamp'][i % 2];
+  }
+  return 'grass';
+}
+// Danger rises with distance from the Haven inside each island, within that island's band.
+const DANGER = SEEDS.map(() => 0);
+for (const I of ISLANDS) {
+  const ids = SEEDS.map((s, i) => i).filter((i) => i !== SANCTUARY && SEEDS[i].island === I.id)
+    .sort((a, b) => hops[a] - hops[b] || Math.hypot(SEEDS[a].x - VILLAGE.x, SEEDS[a].y - VILLAGE.y) - Math.hypot(SEEDS[b].x - VILLAGE.x, SEEDS[b].y - VILLAGE.y));
+  const [lo, hi] = I.danger, n = hi - lo + 1;
+  ids.forEach((i, k) => { DANGER[i] = lo + Math.min(n - 1, Math.floor(((k + 0.5) / ids.length) * n)); });
+}
+const NR = rng(MAP_SEED + 21), usedNames = new Set();
+function regionName() {
+  for (;;) { const n = PRE[Math.floor(NR() * PRE.length)] + SUF[Math.floor(NR() * SUF.length)]; if (!usedNames.has(n)) { usedNames.add(n); return n; } }
+}
+export const REGIONS = SEEDS.map((s, i) => ({
+  id: i, x: s.x, y: s.y, biome: biomeFor(s, i), island: s.island,
+  name: i === SANCTUARY ? 'Hanbin Haven' : regionName(),
+  danger: DANGER[i],
+  neighbors: [...adj[i]],
+}));
+export const ISLAND_REGIONS = REGIONS.length;
+
 function castleType(danger, x, y) {
   const want = danger <= 2 ? 'fort' : danger <= 4 ? 'castle' : 'citadel', order = ['citadel', 'castle', 'fort'];
   return order.slice(order.indexOf(want)).find((t) => fits(t, x, y)) || 'fort';
 }
 export const CASTLES = REGIONS.filter((r) => r.id !== SANCTUARY).map((r) => {
   const type = castleType(r.danger, r.x, r.y);
-  return { id: r.id, x: r.x, y: r.y, type, name: `${r.name} ${CASTLE_TYPES[type].name}`, danger: r.danger };
+  return { id: r.id, x: r.x, y: r.y, type, name: `${r.name} ${CASTLE_TYPES[type].name}`, danger: r.danger, island: r.island };
 });
 export const castleOf = (regionId) => CASTLES.find((c) => c.id === regionId) || null;
 // The courtyard you must hold to capture (the innermost ring).
 export const inCastle = (c, x, y) => { const L = CASTLE_TYPES[c.type]; return Math.abs(x - c.x) < L.inner && Math.abs(y - c.y) < L.inner; };
 export const inCastleWalls = (c, x, y) => { const L = CASTLE_TYPES[c.type]; return Math.abs(x - c.x) < L.outer && Math.abs(y - c.y) < L.outer; };
 
-// Roads follow the route outward from the sanctuary, entering each castle by its south gate.
+// Roads follow the route outward from the Haven. Between islands they run over the bridge.
 export const ROADS = [];
-for (let b = 0; b < SEEDS.length; b++) {
-  const a = parent[b]; if (a < 0) continue;
-  const A = SEEDS[a], B = SEEDS[b];
-  let wet = false;
-  for (let t = 0; t <= 1; t += 0.04) if (landValue(A.x + (B.x - A.x) * t, A.y + (B.y - A.y) * t) <= 0) wet = true;
-  if (!wet) ROADS.push({ x0: A.x, y0: A.y, x1: B.x, y1: B.y });
+{
+  const dry = (x0, y0, x1, y1) => { for (let t = 0; t <= 1; t += 0.02) if (landValue(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t) <= 0) return false; return true; };
+  for (let b = 0; b < SEEDS.length; b++) {
+    const a = parent[b]; if (a < 0) continue;
+    const A = SEEDS[a], B = SEEDS[b];
+    let path = null;
+    if (A.island === B.island) { if (dry(A.x, A.y, B.x, B.y)) path = [[A.x, A.y], [B.x, B.y]]; }
+    else {
+      const br = BRIDGES.find((q) => (q.a === A.island && q.b === B.island) || (q.b === A.island && q.a === B.island));
+      if (br) {
+        const [ea, eb] = br.a === A.island ? [[br.x0, br.y0], [br.x1, br.y1]] : [[br.x1, br.y1], [br.x0, br.y0]];
+        const pts = [[A.x, A.y], ea, eb, [B.x, B.y]];
+        if (pts.slice(1).every((p, k) => dry(pts[k][0], pts[k][1], p[0], p[1]))) path = pts;
+      }
+    }
+    if (path) for (let k = 1; k < path.length; k++) ROADS.push({ x0: path[k - 1][0], y0: path[k - 1][1], x1: path[k][0], y1: path[k][1] });
+  }
 }
 export function roadDist(x, y, roads = ROADS) {
   let best = Infinity;
@@ -267,6 +349,7 @@ for (const c of CASTLES) {
   for (const [x, y, w, h] of L.moat) rect(c.x + x, c.y + y, w, h, { k: 'moat', shot: false });
   for (const t of L.towers) addSolid({ t: 'circ', x: c.x + t.x, y: c.y + t.y, r: t.r, shot: true, k: 'tower' });
   const [kx, ky, kw, kh] = L.keep; rect(c.x + kx, c.y + ky, kw, kh, { k: 'keep' });
+  for (const [hx, hy, hw, hh] of L.halls) rect(c.x + hx, c.y + hy, hw, hh, { k: 'hall' });
 }
 export const HOUSES = [];
 {

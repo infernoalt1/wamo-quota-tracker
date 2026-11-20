@@ -2,10 +2,11 @@
 import {
   WORLD, REGIONS, CASTLES, VILLAGE, MOBS, RANKS, ROADS, LAND_GRID, REGION_GRID, GW, GH, RC, RANK,
   rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng,
-  CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, CASTLE_LEVEL_COST, CAP_LIFT, PRIVATE_MAX, dungeonAt,
+  CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, CASTLE_LEVEL_COST, CAP_LIFT, PRIVATE_MAX, dungeonAt, ISLANDS, landBase, BRIDGES, BRIDGE_W,
 } from './shared.mjs';
-import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST } from './builds.mjs';
+import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST } from './builds.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
+import { toolImg, statusCanvas, uiImg, uiIcon } from './icons.mjs';
 import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE } from './sprites.mjs';
 
 const { W: WW, H: WORLD_H, IH: WH } = WORLD;
@@ -34,7 +35,7 @@ function getVignette(hurt) {
 addEventListener('resize', resize); resize();
 
 const BIOME_NAME = { grass: 'Meadows', forest: 'Forest', darkforest: 'Deep forest', snow: 'Tundra', rock: 'Highlands', ash: 'Ashlands', swamp: 'Marsh', desert: 'Dunes', heath: 'Heath' };
-const STATUS = [[1, '⛓️', 'Rooted'], [4, '🐌', 'Slowed'], [8, '📉', 'Weakened'], [16, '⬆️', 'Empowered'], [32, '🛡️', 'Shield up'], [64, '🌀', 'Travelling'], [128, '🌿', 'Healing'], [256, '☠️', 'Hurting over time']];
+const STATUS = [1, 4, 8, 16, 32, 64, 128, 256]; // rooted, slowed, weakened, empowered, shield up, travelling, healing, hurting over time
 const TALL = new Set(['tree', 'pine', 'dead', 'cactus']);
 const angDiff = (a, b) => Math.abs(((a - b + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
 const turnToward = (a, b, max) => { const d = ((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI; return a + Math.max(-max, Math.min(max, d)); };
@@ -160,6 +161,7 @@ function onSnap(m) {
     let o = ents.get(e.i);
     if (!o) { o = { x: e.x, y: e.y, ph: Math.random() * 6, h: e.h, buf: [] }; ents.set(e.i, o); }
     if (e.h < o.h) o.flash = now;
+    if (e.at && !o.at) o.atkT = now;
     o.buf.push([now, e.x, e.y]); if (o.buf.length > 8) o.buf.shift();
     Object.assign(o, { k: e.k, a: e.a, h: e.h, m: e.m, fl: e.fl, n: e.n, f: e.f, rk: e.rk, ow: e.ow, wp: e.wp, sh: e.sh, at: e.at, sp: e.sp, el: e.el, enr: e.en, iv: e.iv || 0, vt: e.vt, seq, id: e.i });
   }
@@ -174,15 +176,22 @@ function onSnap(m) {
 }
 
 // ------------------------------------------------------------------ toolbelt / HUD
-// Seven slots. Each shows its key, its tool, and the cooldown of the tool's group.
+// Ten slots: the open ones show their key, tool and the cooldown of the tool's group; the rest show the tier that opens them.
 function slotKey(i) { return keyName(binds['slot' + i]); }
 function buildHotbar() {
   const hb = $('hotbar'); hb.innerHTML = '';
+  const open = slotsFor(prof.tier || 0);
   for (let i = 0; i < SLOTS; i++) {
-    const id = prof.belt[i], t = id && TOOLS[id];
     const d = el('div', 'slot ability');
-    if (t) d.style.setProperty('--tc', PATHS.find((p) => p.id === t.path).color);
-    d.innerHTML = `<span class="key">${slotKey(i)}</span><div class="ico">${t ? t.icon : ''}</div><div class="cd"></div><span class="cdt"></span>${t && t.wood ? `<span class="en">${t.wood}🪵</span>` : t && t.gold ? `<span class="en">${t.gold}g</span>` : ''}`;
+    if (i >= open) {
+      d.classList.add('locked');
+      d.innerHTML = `<span class="key">${slotKey(i)}</span><img class="lk" src="${uiIcon('lock')}" alt=""><span class="lt">Tier ${SLOT_TIERS[i]}</span><div class="cd"></div><span class="cdt"></span>`;
+      d.title = `Toolbelt slot ${i + 1} opens at Soma tier ${SLOT_TIERS[i]}.`;
+      hb.appendChild(d); continue;
+    }
+    const id = prof.belt[i], t = id && TOOLS[id];
+    if (t) d.style.setProperty('--tc', PATHS.find((p) => p.id === t.path).color); else d.classList.add('empty');
+    d.innerHTML = `<span class="key">${slotKey(i)}</span>${t ? toolImg(t.id) : ''}<div class="cd"></div><span class="cdt"></span>${t && t.wood ? `<span class="en">${t.wood}<img src="${uiIcon('wood')}" alt=""></span>` : t && t.gold ? `<span class="en">${t.gold}<img src="${uiIcon('coin')}" alt=""></span>` : ''}`;
     d.title = t ? `${t.name}: ${t.desc}\n${toolStats(t)}${isPlaced(t) ? '\nAims at your cursor.' : ''}\nHold to repeat · double-click during cooldown to queue · ${keyName(binds.toggle)} + key toggles auto-repeat` : 'Empty slot. Equip a tool from the Tools panel (K) in Hanbin Haven or one of your castles.';
     d.addEventListener('mousedown', (e) => { e.stopPropagation(); if (!panelOpen('skills')) togglePanel('skills'); if (t) { skillSel = t.id; treeTab = t.path; renderSkills(); } });
     d.addEventListener('contextmenu', (e) => { e.preventDefault(); if (me.mg) send({ t: 'belt', s: i, id: null }); });
@@ -191,7 +200,7 @@ function buildHotbar() {
 }
 function updateHud() {
   const r = rankOf(me.v);
-  $('pname').textContent = (prof.vet ? '★ ' : '') + (prof.name || '');
+  $('pname').innerHTML = (prof.vet ? uiImg('star', 'Veteran') : '') + esc(prof.name || '');
   $('pname').title = prof.vet ? 'Veteran: played before Season 3' : '';
   $('prank').textContent = r.name;
   $('valbar').style.width = (r.next ? Math.min(1, (me.v - r.cur) / (r.next - r.cur)) : 1) * 100 + '%';
@@ -200,12 +209,12 @@ function updateHud() {
   const t = prof.tier, a = somaForTier(t), b = somaForTier(t + 1);
   $('somabar').style.width = ((me.s - a) / (b - a)) * 100 + '%';
   $('somatxt').textContent = `Soma tier ${t} · ${me.s.toLocaleString()} / ${b.toLocaleString()}`;
-  $('ptsrow').textContent = prof.keys > 0 ? `🗝 ${prof.keys} key${prof.keys > 1 ? 's' : ''} to spend (K)` : '';
-  $('goldrow').innerHTML = `🪙 <b>${me.b || 0}</b> banked${me.g ? ` · <span class="carry">${me.g} carried</span>` : ''} · 🪵 <b>${me.w || 0}</b> wood`;
+  $('ptsrow').innerHTML = prof.keys > 0 ? `${uiImg('key')} ${prof.keys} key${prof.keys > 1 ? 's' : ''} to spend (K)` : '';
+  $('goldrow').innerHTML = `${uiImg('coin', 'Gold')} <b>${me.b || 0}</b> banked${me.g ? ` · <span class="carry">${me.g} carried</span>` : ''} · ${uiImg('wood', 'Wood')} <b>${me.w || 0}</b> wood`;
   const f = facInfo.get(prof.fac);
-  $('facrow').textContent = f ? `⚑ ${f.name}${f.pub ? ' (public)' : ''}` : '';
+  $('facrow').innerHTML = f ? `<span class="dot" style="background:${f.color}"></span>${esc(f.name)}${f.pub ? ' (public)' : ''}` : '';
   $('facrow').style.color = f ? f.color : '#a99';
-  $('hpbar').style.width = Math.max(0, me.h / me.mh) * 100 + '%'; $('hptxt').textContent = `${Math.ceil(me.h)} / ${me.mh}`;
+  $('hpbar').style.width = Math.max(0, me.h / me.mh) * 100 + '%'; $('hptxt').textContent = `${Math.max(0, Math.ceil(me.h))} / ${me.mh}`;
   const now = performance.now(), slots = $('hotbar').querySelectorAll('.ability');
   for (let i = 0; i < slots.length; i++) {
     const id = prof.belt[i], t = id && TOOLS[id], cdEl = slots[i].querySelector('.cd'), cdt = slots[i].querySelector('.cdt');
@@ -219,7 +228,7 @@ function updateHud() {
   const ri = regionAt(me.x, me.y), reg = REGIONS[ri], own = owners.get(ri), of = own && facInfo.get(own);
   const dg = reg.dungeon !== undefined ? DUNGEONS[reg.dungeon] : null, bossWait = dg && meta.bosses ? meta.bosses[dg.id] : 0;
   $('regionlbl').innerHTML = dg ? `<b>${reg.name}</b> <span class="dim">· dungeon · danger ${'◆'.repeat(reg.danger)}</span><br><span class="dim">${bossWait ? 'Boss returns in ' + Math.ceil(bossWait / 60000) + ' min' : 'The boss waits in the deepest room'}</span>`
-    : `<b>${reg.name}</b> <span class="dim">· ${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`;
+    : `<b>${reg.name}</b> <span class="dim">· ${ISLANDS[reg.island].name}</span><br><span class="dim">${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`;
   const cap = $('capture');
   if (me.cz >= 0 && !me.dead) {
     const co = owners.get(me.cz), cf = co && facInfo.get(co), c = CASTLES.find((k) => k.id === me.cz);
@@ -289,76 +298,99 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 
 // ------------------------------------------------------------------ tools panel: unlock trees and the toolbelt
 let treeTab = 'warrior', skillSel = null;
-// Lays a path's tree out: depth from its root, then columns in tree order.
-function layout(path) {
+const NODE_W = 76, NODE_H = 78, CW = 86, RH = 100;
+// Lays a path out: each root tool's family is its own small tree (depth down, leaves across), and the
+// trees are packed left to right and wrapped into rows, so a path fits without scrolling sideways.
+function layout(path, width) {
   const list = TOOL_LIST.filter((t) => t.path === path), pos = new Map();
   const kids = (id) => list.filter((t) => t.req === id);
-  let col = 0;
-  const place = (t, depth) => {
-    const ch = kids(t.id);
-    if (!ch.length) { pos.set(t.id, [col++, depth]); return; }
-    for (const c of ch) place(c, depth + 1);
-    const cs = ch.map((c) => pos.get(c.id)[0]);
-    pos.set(t.id, [(Math.min(...cs) + Math.max(...cs)) / 2, depth]);
-  };
-  for (const r of list.filter((t) => !t.req || !list.some((x) => x.id === t.req))) place(r, 0);
-  return { list, pos, cols: col };
+  const roots = list.filter((t) => !t.req || !list.some((x) => x.id === t.req));
+  const trees = roots.map((r) => {
+    const local = new Map(); let col = 0, depth = 0;
+    const place = (t, d) => {
+      depth = Math.max(depth, d);
+      const ch = kids(t.id);
+      if (!ch.length) { local.set(t.id, [col++, d]); return; }
+      for (const c of ch) place(c, d + 1);
+      const cs = ch.map((c) => local.get(c.id)[0]);
+      local.set(t.id, [(Math.min(...cs) + Math.max(...cs)) / 2, d]);
+    };
+    place(r, 0);
+    return { local, cols: col, depth: depth + 1 };
+  });
+  const maxCols = (width - 24) / CW;
+  let cx = 0, row = 0, rowH = 0, used = 0;
+  for (const tr of trees) {
+    if (cx > 0 && cx + tr.cols > maxCols + 0.01) { row += rowH + 0.3; cx = 0; rowH = 0; }
+    for (const [id, [c, d]] of tr.local) pos.set(id, [cx + c, row + d]);
+    used = Math.max(used, cx + tr.cols); cx += tr.cols + 0.2; rowH = Math.max(rowH, tr.depth);
+  }
+  return { list, pos, cols: used, rows: row + rowH };
 }
 function renderSkills() {
-  const path = PATHS.find((p) => p.id === treeTab);
-  $('skpts').textContent = `🗝 ${prof.keys} key${prof.keys === 1 ? '' : 's'} · soma tier ${prof.tier}`;
+  const path = PATHS.find((p) => p.id === treeTab), open = slotsFor(prof.tier || 0);
+  $('skpts').innerHTML = `${uiImg('key')} ${prof.keys} key${prof.keys === 1 ? '' : 's'} to spend · Soma tier ${prof.tier} · ${open} of ${SLOTS} toolbelt slots open`;
   const tabs = $('treetabs'); tabs.innerHTML = '';
   for (const p of PATHS) {
     const got = TOOL_LIST.filter((t) => t.path === p.id && owns(prof.unlocked, t.id)).length, all = TOOL_LIST.filter((t) => t.path === p.id).length;
-    const b = el('button', 'treetab' + (p.id === treeTab ? ' on' : ''), `${p.name} ${got}/${all}`);
+    const b = el('button', 'treetab' + (p.id === treeTab ? ' on' : ''));
+    b.innerHTML = `${p.name} <span class="cnt">${got}/${all}</span>`;
     b.style.setProperty('--tc', p.color);
     if (TOOL_LIST.some((t) => t.path === p.id && !unlockCheck(prof.unlocked, t.id, prof.tier))) b.classList.add('glow');
-    b.onclick = () => { treeTab = p.id; skillSel = null; renderSkills(); };
+    b.onclick = () => { treeTab = p.id; skillSel = null; $('treeview').scrollTop = 0; renderSkills(); };
     tabs.appendChild(b);
   }
-  const { list, pos, cols } = layout(treeTab);
-  const depth = Math.max(...[...pos.values()].map((p) => p[1])) + 1;
-  const box = $('treeview'); box.innerHTML = ''; box.style.setProperty('--tc', path.color);
-  const CW = 100, RH = 70, ox = 10, oy = 10, w = Math.max(480, cols * CW + 20), h = depth * RH + 20;
-  box.style.height = Math.min(560, h) + 'px';
+  const box = $('treeview'), keep = box.scrollTop;
+  $('skills').style.setProperty('--tc', path.color);
+  const { list, pos, cols, rows } = layout(treeTab, box.clientWidth || 800);
+  const w = cols * CW + 24, h = rows * RH + 6;
+  box.innerHTML = '';
   const inner = el('div', 'treeinner'); inner.style.width = w + 'px'; inner.style.height = h + 'px'; box.appendChild(inner);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', w); svg.setAttribute('height', h); inner.appendChild(svg);
-  const xy = (id) => { const [c, d] = pos.get(id); return [ox + c * CW + CW / 2, oy + d * RH + 24]; };
+  const xy = (id) => { const [c, d] = pos.get(id); return [12 + c * CW + CW / 2, 12 + d * RH]; };
   for (const t of list) if (t.req && pos.has(t.req)) {
-    const [x1, y1] = xy(t.req), [x2, y2] = xy(t.id), line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    line.setAttribute('d', `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}`);
+    const [x1, y1] = xy(t.req), [x2, y2] = xy(t.id), a = y1 + NODE_H, line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', `M${x1},${a} C${x1},${(a + y2) / 2} ${x2},${(a + y2) / 2} ${x2},${y2}`);
     line.setAttribute('class', 'edge' + (owns(prof.unlocked, t.req) ? ' lit' : ''));
     svg.appendChild(line);
   }
   for (const t of list) {
     const have = owns(prof.unlocked, t.id), why = have ? 'owned' : unlockCheck(prof.unlocked, t.id, prof.tier), [x, y] = xy(t.id);
-    const d = el('div', 'node tnode ' + (have ? 'owned' : !why ? 'avail' : 'locked') + (skillSel === t.id ? ' sel' : '') + (prof.belt.includes(t.id) ? ' worn' : ''));
-    d.style.left = x - 45 + 'px'; d.style.top = y - 24 + 'px';
-    d.innerHTML = `<span class="ni">${t.icon}</span><span class="nn">${t.name}</span><span class="nt">${GROUPS[t.group]}</span>`;
+    const d = el('div', 'node ' + (have ? 'owned' : !why ? 'avail' : 'locked') + (skillSel === t.id ? ' sel' : '') + (prof.belt.includes(t.id) ? ' worn' : ''));
+    d.style.left = x - NODE_W / 2 + 'px'; d.style.top = y + 'px';
+    d.innerHTML = `${toolImg(t.id)}<span class="nn">${t.name}</span>`;
+    d.title = `${t.name} (${GROUPS[t.group]}): ${t.desc}${have ? '' : !why ? '\nDouble-click to unlock.' : '\n' + why}`;
     d.onclick = () => { skillSel = t.id; renderSkills(); };
     d.ondblclick = () => { if (!why) send({ t: 'unlock', id: t.id }); };
     inner.appendChild(d);
   }
-  const info = $('skinfo'); info.innerHTML = '';
+  box.scrollTop = keep;
+  const info = $('skinfo'); info.innerHTML = ''; info.style.setProperty('--tc', path.color);
   const t = skillSel && TOOLS[skillSel];
   if (!t || t.path !== treeTab) {
-    info.insertAdjacentHTML('beforeend', `<h3 style="color:${path.color}">${path.name}</h3><p>${path.blurb}</p><p class="dim">Every Soma tier gives one key; each key unlocks one tool. A tool needs the one above it first. Unlocked tools go in your 7-slot toolbelt, which you can only change in Hanbin Haven or a castle your faction holds. Tier never adds health or damage, only choice.</p>`);
+    info.insertAdjacentHTML('beforeend', `<h3 style="color:${path.color}">${path.name}</h3><p>${path.blurb}</p><p class="dim">Every Soma tier gives one key, and each key unlocks one tool. A tool needs the one above it first. Your toolbelt has ${SLOTS} slots: ${slotsFor(0)} are open from the start and the rest open at Soma tiers ${SLOT_TIERS.filter((x) => x > 0).join(', ')}. Change it in Hanbin Haven or a castle your faction holds.</p>`);
     beltPicker(info, null);
     return;
   }
   const have = owns(prof.unlocked, t.id), why = have ? null : unlockCheck(prof.unlocked, t.id, prof.tier);
-  info.insertAdjacentHTML('beforeend', `<h3 style="color:${path.color}">${t.icon} ${t.name}</h3><p>${t.desc}</p><p class="dim">${toolStats(t)}${t.req ? `<br>Needs ${TOOLS[t.req].name}` : '<br>Start of the path'}${START_KIT.includes(t.id) ? '<br>Free for everyone' : ''}</p>`);
-  if (!have && !why) { const b = el('button', 'primary', 'Unlock (1 key)'); b.onclick = () => send({ t: 'unlock', id: t.id }); info.appendChild(b); }
+  info.insertAdjacentHTML('beforeend', `<div class="head">${toolImg(t.id)}<h3 style="color:${path.color}">${t.name}<small>${GROUPS[t.group]} · ${path.name}</small></h3></div><p>${t.desc}</p><div class="stats">${toolStats(t)}${t.req ? `<br>Needs ${TOOLS[t.req].name}` : '<br>Start of the path'}${START_KIT.includes(t.id) ? '<br>Free for everyone' : ''}</div>`);
+  if (!have && !why) { const b = el('button', 'primary', 'Unlock (1 key)'); b.style.marginTop = '8px'; b.onclick = () => send({ t: 'unlock', id: t.id }); info.appendChild(b); }
   else if (!have) info.appendChild(el('p', 'warn', why));
   if (have) beltPicker(info, t.id);
 }
 function beltPicker(info, id) {
   info.appendChild(el('p', 'dim', id ? 'Put it in a toolbelt slot:' : 'Your toolbelt:'));
   if (!me.mg) info.appendChild(el('p', 'warn', 'You can only change your toolbelt in Hanbin Haven or a castle your faction holds.'));
-  const row = el('div', 'slotpick');
+  const row = el('div', 'slotpick'), open = slotsFor(prof.tier || 0);
   for (let i = 0; i < SLOTS; i++) {
-    const cur = prof.belt[i], b = el('button', cur && cur === id ? 'on' : '', `${slotKey(i)} ${cur ? TOOLS[cur].icon : '·'}`);
+    const cur = prof.belt[i], b = el('button', cur && cur === id ? 'on' : '');
+    if (i >= open) {
+      b.classList.add('lockd'); b.disabled = true; b.title = `Opens at Soma tier ${SLOT_TIERS[i]}`;
+      b.innerHTML = `<img src="${uiIcon('lock')}" alt=""><span class="k">Tier ${SLOT_TIERS[i]}</span>`;
+      row.appendChild(b); continue;
+    }
+    b.innerHTML = `${cur ? toolImg(cur) : ''}<span class="k">${slotKey(i)}</span>`;
     b.title = cur ? TOOLS[cur].name : 'Empty';
     b.disabled = !me.mg || !id;
     b.onclick = () => send({ t: 'belt', s: i, id });
@@ -463,7 +495,7 @@ const terrainMap = document.createElement('canvas'); terrainMap.width = GW; terr
   const tctx = terrainMap.getContext('2d'), img = tctx.createImageData(GW, GH);
   for (let i = 0; i < GW * GH; i++) {
     const land = LAND_GRID[i], r = REGION_GRID[i], gx = i % GW, gy = (i / GW) | 0;
-    let c = land ? BIOME_RGB[REGIONS[r].biome] : [36, 78, 128];
+    let c = land ? (landBase(gx * RC + RC / 2, gy * RC + RC / 2) <= 0 ? [150, 108, 66] : BIOME_RGB[REGIONS[r].biome]) : [32, 74, 128];
     const border = land && ((gx + 1 < GW && LAND_GRID[i + 1] && REGION_GRID[i + 1] !== r) || (gy + 1 < GH && LAND_GRID[i + GW] && REGION_GRID[i + GW] !== r));
     if (border) c = c.map((v) => v * 0.55);
     img.data.set([c[0], c[1], c[2], 255], i * 4);
@@ -510,7 +542,7 @@ function drawMinimap() {
     mctx.imageSmoothingEnabled = false; mctx.drawImage(dungeonMap(dg), ox, 0, DGRID * s, DGRID * s);
     const tx = (wx) => ox + ((wx - dg.bx) / DT_SIZE) * s, ty = (wy) => ((wy - dg.by) / DT_SIZE) * s;
     const br = dg.rooms[dg.rooms.length - 1];
-    mctx.fillStyle = '#ff5050'; mctx.font = 'bold 12px Georgia'; mctx.textAlign = 'center'; mctx.fillText('☠', tx(br.x), ty(br.y) + 4);
+    { const bx = tx(br.x), by = ty(br.y); mctx.fillStyle = '#ff5050'; mctx.strokeStyle = '#000'; mctx.lineWidth = 1; mctx.beginPath(); mctx.arc(bx, by, 5, 0, 7); mctx.fill(); mctx.stroke(); mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5; mctx.beginPath(); mctx.moveTo(bx - 2.5, by - 2.5); mctx.lineTo(bx + 2.5, by + 2.5); mctx.moveTo(bx + 2.5, by - 2.5); mctx.lineTo(bx - 2.5, by + 2.5); mctx.stroke(); }
     mctx.fillStyle = '#c8a0ff'; for (const q of [dg.exitPortal, dg.bossPortal]) { mctx.beginPath(); mctx.arc(tx(q.x), ty(q.y), 3, 0, 7); mctx.fill(); }
     mctx.fillStyle = '#fff'; mctx.strokeStyle = '#000'; mctx.beginPath(); mctx.arc(tx(me.x), ty(me.y), 3.5, 0, 7); mctx.fill(); mctx.stroke();
     return;
@@ -520,7 +552,7 @@ function drawMinimap() {
   mctx.imageSmoothingEnabled = true; mctx.drawImage(ownedMap, 0, 0, mw, mh);
   for (const c of CASTLES) { const f = facInfo.get(owners.get(c.id)); mctx.fillStyle = f ? f.color : '#ddd'; mctx.strokeStyle = '#000'; mctx.fillRect(c.x * sx - 3, c.y * sy - 3, 6, 6); mctx.strokeRect(c.x * sx - 3, c.y * sy - 3, 6, 6); }
   mctx.fillStyle = '#7f7'; mctx.beginPath(); mctx.arc(VILLAGE.x * sx, VILLAGE.y * sy, 3.5, 0, 7); mctx.fill();
-  mctx.fillStyle = '#c8a0ff'; mctx.font = 'bold 10px Georgia'; mctx.textAlign = 'center'; for (const c of CAVES) mctx.fillText('◉', c.x * sx, c.y * sy + 3);
+  mctx.strokeStyle = '#c8a0ff'; mctx.lineWidth = 1.5; for (const c of CAVES) { mctx.beginPath(); mctx.arc(c.x * sx, c.y * sy, 2.5, 0, 7); mctx.stroke(); }
   for (const o of ents.values()) if (o.k === 'player' && o.id !== myId) { mctx.fillStyle = isAlly(o) ? '#4f4' : '#f55'; mctx.fillRect(o.x * sx - 1.5, o.y * sy - 1.5, 3, 3); }
   drawRadar(mctx, sx, sy, 3);
   mctx.fillStyle = '#fff'; mctx.strokeStyle = '#000'; mctx.beginPath(); mctx.arc(me.x * sx, me.y * sy, 3.5, 0, 7); mctx.fill(); mctx.stroke();
@@ -533,7 +565,13 @@ function renderMap() {
   if (miniDirty) rebuildOwned();
   m.imageSmoothingEnabled = true; m.drawImage(ownedMap, 0, 0, w, h);
   const sx = w / WW, sy = h / WH;
-  m.textAlign = 'center'; m.font = 'bold 12px Georgia';
+  // island names, in the sea above each island
+  m.textAlign = 'center'; m.lineJoin = 'round';
+  for (const I of ISLANDS) {
+    const lx = I.x * sx, ly = Math.max(16, (I.y - I.ry - 260) * sy);
+    m.font = 'italic bold 17px Georgia'; m.strokeStyle = 'rgba(10,20,40,.85)'; m.lineWidth = 4; m.strokeText(I.name, lx, ly); m.fillStyle = '#f0e2b8'; m.fillText(I.name, lx, ly);
+  }
+  m.font = 'bold 11px Georgia';
   for (const r of REGIONS) {
     if (r.dungeon !== undefined) continue;
     const c2 = CASTLES.find((k) => k.id === r.id), f = facInfo.get(owners.get(r.id));
@@ -541,8 +579,8 @@ function renderMap() {
     else { m.fillStyle = '#7f7'; m.beginPath(); m.arc(r.x * sx, r.y * sy, 6, 0, 7); m.fill(); }
     m.strokeStyle = 'rgba(0,0,0,.8)'; m.lineWidth = 3; m.fillStyle = '#fff';
     m.strokeText(r.name, r.x * sx, r.y * sy - 10); m.fillText(r.name, r.x * sx, r.y * sy - 10);
-    m.font = '10px Georgia'; const sub = r.danger ? (f ? f.name : 'Bandits') + ' · ' + '◆'.repeat(r.danger) + '' : 'Safe haven';
-    m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = 'bold 12px Georgia';
+    m.font = '9px Georgia'; const sub = r.danger ? (f ? f.name : 'Bandits') + ' · ' + '◆'.repeat(r.danger) + '' : 'Safe haven';
+    m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = 'bold 11px Georgia';
   }
   for (const cv2 of CAVES) {
     const d = DUNGEONS[cv2.dungeon], wait = meta.bosses && meta.bosses[d.id];
@@ -573,7 +611,7 @@ $('bigmap').addEventListener('click', (e) => {
 const worldMouse = () => ({ x: me.x + (mouseX - VW / 2) / zoom, y: me.y + (mouseY - VH / 2) / zoom });
 function aimAngle() { return kbTurn !== null ? kbTurn : Math.atan2(mouseY - VH / 2, mouseX - VW / 2); }
 // Rebindable keys, stored per browser as KeyboardEvent.code values (layout-independent); Mouse0-2 are the mouse buttons.
-const SLOT_DEFAULTS = ['Mouse0', 'Space', 'ShiftLeft', 'KeyV', 'Mouse2', 'Mouse1', 'KeyQ'];
+const SLOT_DEFAULTS = ['Mouse0', 'Space', 'ShiftLeft', 'KeyV', 'Mouse2', 'Mouse1', 'KeyQ', 'KeyE', 'KeyR', 'KeyC'];
 const ACTIONS = [
   ['up', 'Move up', 'KeyW'], ['down', 'Move down', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
   ...Array.from({ length: SLOTS }, (_, i) => ['slot' + i, `Toolbelt slot ${i + 1}`, SLOT_DEFAULTS[i]]),
@@ -645,7 +683,7 @@ function bindTo(code) {
 function aimMsg() { const w = worldMouse(); return { a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }; }
 function slotDown(s, mouse) {
   const now = performance.now(), id = prof.belt[s], t = id && TOOLS[id];
-  if (!t) return;
+  if (!t) { if (s >= slotsFor(prof.tier || 0)) toast(`That toolbelt slot opens at Soma tier ${SLOT_TIERS[s]}.`); return; }
   if (!mouse && pressed('toggle')) {
     if (toggled.has(s)) { toggled.delete(s); send({ t: 'use', s, on: 0 }); } else { toggled.add(s); send({ t: 'use', s, on: 1, ...aimMsg() }); }
     return;
@@ -757,6 +795,39 @@ function getChunk(cx, cy) {
   return null;
 }
 
+// ------------------------------------------------------------------ bridges
+// Bridge decks are drawn as crisp vector art over the ground, only where they cross water (plus a
+// little way onto each shore), with planks, rails, posts and a shadow on the water.
+const BRIDGE_SPANS = BRIDGES.map((b) => {
+  let a0 = null, a1 = null;
+  for (let a = 0; a <= b.len; a += 20) { const x = b.x0 + ((b.x1 - b.x0) * a) / b.len, y = b.y0 + ((b.y1 - b.y0) * a) / b.len; if (landBase(x, y) < 0.03) { if (a0 === null) a0 = a; a1 = a; } }
+  return a0 === null ? null : { b, a0: Math.max(0, a0 - 50), a1: Math.min(b.len, a1 + 50), ang: Math.atan2(b.y1 - b.y0, b.x1 - b.x0) };
+});
+function drawBridges(x0, y0, x1, y1) {
+  const W = BRIDGE_W;
+  for (const sp of BRIDGE_SPANS) {
+    if (!sp) continue;
+    const { b, a0, a1, ang } = sp;
+    if (Math.max(b.x0, b.x1) + W < x0 || Math.min(b.x0, b.x1) - W > x1 || Math.max(b.y0, b.y1) + W < y0 || Math.min(b.y0, b.y1) - W > y1) continue;
+    ctx.save(); ctx.translate(b.x0, b.y0); ctx.rotate(ang);
+    ctx.fillStyle = 'rgba(0,12,34,.38)'; ctx.fillRect(a0 + 6, -W / 2 + 12, a1 - a0, W);
+    for (let a = Math.ceil((a0 + 60) / 220) * 220; a < a1 - 60; a += 220) { ctx.fillStyle = '#3a2614'; for (const sd of [-1, 1]) ctx.fillRect(a - 7, sd * (W / 2 + 2) - 7, 14, 14); }
+    ctx.fillStyle = '#7a5634'; ctx.fillRect(a0, -W / 2 + 5, a1 - a0, W - 10);
+    const tones = ['#9a7650', '#8c6842', '#a07c54'];
+    for (let a = Math.ceil(a0 / 14) * 14, k = 0; a < a1; a += 14, k++) {
+      ctx.fillStyle = tones[Math.abs(Math.round(a / 14)) % 3]; ctx.fillRect(a + 0.8, -W / 2 + 7, Math.min(12.4, a1 - a - 0.8), W - 14);
+      if (Math.round(a / 14) % 5 === 0) { ctx.fillStyle = 'rgba(40,24,10,.35)'; ctx.fillRect(a + 3, -W / 2 + 7, 1.2, W - 14); }
+    }
+    for (const sd of [-1, 1]) {
+      ctx.fillStyle = '#5a3a20'; ctx.fillRect(a0, sd * (W / 2 - 4) - 4, a1 - a0, 8);
+      ctx.fillStyle = 'rgba(255,220,160,.18)'; ctx.fillRect(a0, sd * (W / 2 - 4) - 4, a1 - a0, 2);
+      for (let a = Math.ceil(a0 / 110) * 110; a <= a1; a += 110) { ctx.fillStyle = '#4a2e18'; ctx.fillRect(a - 6, sd * (W / 2 - 4) - 7, 12, 14); ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1; ctx.strokeRect(a - 6, sd * (W / 2 - 4) - 7, 12, 14); }
+    }
+    for (const a of [a0, a1 - 14]) { ctx.fillStyle = '#8a8478'; ctx.fillRect(a, -W / 2 - 2, 14, W + 4); ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1.2; ctx.strokeRect(a, -W / 2 - 2, 14, W + 4); }
+    ctx.restore();
+  }
+}
+
 // ------------------------------------------------------------------ drawing helpers
 const facColor = (id) => { const f = facInfo.get(id); return f ? f.color : null; };
 function isAlly(o) { return o.id === myId || (prof.fac && o.f === prof.fac) || o.ow === myId; }
@@ -805,7 +876,9 @@ function drawEnt(o, x, y, now, self) {
   const look = o.k === 'player' ? playerLook(o.n || prof.name, o.rk || 0, facColor(o.f), o.wp, o.sh) : { weapon: TOOL_SPRITE[o.wp] || null, shieldKind: o.sh || null };
   const img = creature(o.k, facColor(o.f) || '#888', step, o.at || o.sp, look);
   const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
-  ctx.save(); ctx.translate(x, y); ctx.rotate(o.sp && o.k !== 'player' ? now / 60 : ang);
+  // a quick step into each attack, so a swing or a thrust has weight
+  const ap = o.atkT ? (now - o.atkT) / 240 : 1, lunge = ap < 1 ? Math.sin(ap * Math.PI) * 5 : 0;
+  ctx.save(); ctx.translate(x + Math.cos(ang) * lunge, y + Math.sin(ang) * lunge); ctx.rotate(o.sp && o.k !== 'player' ? now / 60 : ang);
   if (o.k === 'wraith' || o.k === 'hollow_prince') ctx.globalAlpha = alpha * 0.85;
   if (o.enr) { ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; }
   ctx.drawImage(img, -w / 2, -h / 2, w, h);
@@ -840,8 +913,8 @@ function drawLabels(o, x, y) {
     const nm = (o.el ? o.el[0].toUpperCase() + o.el.slice(1) + ' ' : '') + (MOBS[o.k] ? MOBS[o.k].name : o.k) + (o.ow === myId ? ' (yours)' : '');
     ctx.strokeText(nm, x, y - r - 18); ctx.fillStyle = o.el ? '#ffd050' : ally ? '#a8e0f0' : '#f0d8c8'; ctx.fillText(nm, x, y - r - 18);
   }
-  let n = 0; ctx.font = '11px serif';
-  for (const [bit, ic] of STATUS) if (o.fl & bit) { ctx.fillText(ic, x - 14 + n * 14, y + r + 16); n++; }
+  const on = STATUS.filter((bit) => o.fl & bit);
+  on.forEach((bit, n) => { const c = statusCanvas(bit); if (c) ctx.drawImage(c, x - on.length * 7.5 + n * 15, y + r + 5, 14, 14); });
 }
 function drawProjs(now) {
   for (const [x, y, k, a] of projs) {
@@ -908,17 +981,52 @@ function drawZones(now) {
     }
   }
 }
+// Attack effects are drawn around the attacker's current position, so they move with them.
+function fxAnchor(f) {
+  if (f.i === undefined) return [f.x, f.y];
+  if (f.i === myId) return [me.x, me.y];
+  const o = ents.get(f.i); return o ? [o.x, o.y] : [f.x, f.y];
+}
+// A slash: a crescent that sweeps across the arc, bright at its leading edge and fading behind it.
+function drawSlash(f, t) {
+  const p = Math.min(1, t / 110), fade = Math.max(0, 1 - Math.max(0, t - 110) / 230);
+  if (fade <= 0) return;
+  const [ax, ay] = fxAnchor(f), a0 = f.a - f.w / 2, sweep = f.w * p, col = f.c ? '230,80,100' : '255,246,226';
+  if (sweep < 0.02) return;
+  ctx.save(); ctx.translate(ax, ay); ctx.globalCompositeOperation = 'lighter';
+  const frac = Math.min(0.998, sweep / (Math.PI * 2)), g = ctx.createConicGradient(a0, 0, 0);
+  g.addColorStop(0, `rgba(${col},0)`); g.addColorStop(frac * 0.55, `rgba(${col},${0.16 * fade})`); g.addColorStop(frac, `rgba(${col},${0.7 * fade})`); g.addColorStop(Math.min(1, frac + 0.002), `rgba(${col},0)`);
+  ctx.fillStyle = g;
+  // outer edge along the arc, inner edge closing in toward the leading end (a crescent)
+  ctx.beginPath(); ctx.arc(0, 0, f.r * 1.04, a0, a0 + sweep);
+  for (let k = 24; k >= 0; k--) { const q = k / 24, an = a0 + sweep * q, rr = f.r * (0.95 - 0.38 * q); ctx.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); }
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = `rgba(255,255,255,${0.85 * fade})`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, 0, f.r * 1.03, a0 + sweep * 0.45, a0 + sweep); ctx.stroke(); ctx.lineCap = 'butt';
+  ctx.restore();
+}
+// A thrust: a tapered streak shooting out to the weapon's reach, with a glint at the tip.
+function drawThrust(f, t) {
+  const ext = Math.min(1, t / 70), fade = Math.max(0, 1 - Math.max(0, t - 70) / 210);
+  if (fade <= 0) return;
+  const [ax, ay] = fxAnchor(f), r1 = f.r0 + (f.r1 - f.r0) * ext;
+  ctx.save(); ctx.translate(ax, ay); ctx.rotate(f.a); ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(f.r0, 0, r1, 0);
+  g.addColorStop(0, 'rgba(190,210,255,0)'); g.addColorStop(0.65, `rgba(215,230,255,${0.32 * fade})`); g.addColorStop(1, `rgba(255,255,255,${0.9 * fade})`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(f.r0, -6); ctx.lineTo(r1 - 8, -2.4); ctx.lineTo(r1 + 5, 0); ctx.lineTo(r1 - 8, 2.4); ctx.lineTo(f.r0, 6); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = `rgba(225,236,255,${0.38 * fade})`; ctx.lineWidth = 1.2;
+  for (const off of [-10, 10]) { ctx.beginPath(); ctx.moveTo(f.r0 + (r1 - f.r0) * 0.3, off); ctx.lineTo(r1 - 16, off * 0.55); ctx.stroke(); }
+  const gl = ctx.createRadialGradient(r1, 0, 0, r1, 0, 10); gl.addColorStop(0, `rgba(255,255,255,${fade})`); gl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(r1, 0, 10, 0, 7); ctx.fill();
+  ctx.restore();
+}
 function drawFx(now) {
   fxs = fxs.filter((f) => now - f.t0 < 650);
   for (const f of fxs) {
     const t = now - f.t0, a = Math.max(0, 1 - t / 380);
-    if (f.t === 'arc') {
-      ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.a);
-      const sweep = Math.min(1, t / 120), g = ctx.createRadialGradient(0, 0, f.r * 0.4, 0, 0, f.r);
-      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.85, f.c ? f.c : `rgba(255,255,255,${0.55 * a})`); g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.globalAlpha = a; ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, f.r, -f.w / 2, -f.w / 2 + f.w * sweep); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
-      ctx.restore();
-    } else if (f.t === 'ring') {
+    if (f.t === 'arc') drawSlash(f, t);
+    else if (f.t === 'thrust') drawThrust(f, t);
+    else if (f.t === 'ring') {
       const rr = f.r * Math.min(1, t / 220 + 0.2);
       ctx.globalAlpha = a; ctx.strokeStyle = f.c; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(f.x, f.y, rr, 0, 7); ctx.stroke();
       if (f.fill) { ctx.globalAlpha = a * 0.25; ctx.fillStyle = f.c; ctx.fill(); }
@@ -1021,7 +1129,7 @@ function frame(now) {
   }
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#20406a'; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = '#1e4888'; ctx.fillRect(0, 0, VW, VH);
   ctx.save(); ctx.translate(VW / 2, VH / 2); ctx.scale(zoom, zoom); ctx.translate(-me.x, -me.y);
   const hw = VW / 2 / zoom, hh = VH / 2 / zoom, x0 = me.x - hw, y0 = me.y - hh, x1 = me.x + hw, y1 = me.y + hh;
   chunkBudget = 1;
@@ -1035,6 +1143,7 @@ function frame(now) {
     for (let cy = Math.floor((y0 - CHUNK) / CHUNK); cy <= Math.floor((y1 + CHUNK) / CHUNK); cy++) for (let cx = Math.floor((x0 - CHUNK) / CHUNK); cx <= Math.floor((x1 + CHUNK) / CHUNK); cx++)
       if (cx >= 0 && cy >= 0 && cx * CHUNK < WW && cy * CHUNK < WORLD_H) getChunk(cx, cy);
   }
+  drawBridges(x0, y0, x1, y1);
   const VS = VILLAGE_SPRITE_SIZE, csz = (c) => castleSize(c.type);
   const visCastles = CASTLES.filter((c) => { const h = csz(c) / 2; return c.x + h > x0 && c.x - h < x1 && c.y + h > y0 && c.y - h < y1; });
   for (const c of visCastles) { const S = csz(c); ctx.drawImage(castleBase(c), c.x - S / 2, c.y - S / 2, S, S); }

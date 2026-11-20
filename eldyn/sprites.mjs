@@ -112,8 +112,8 @@ function weapon(x, kind, swing) {
   }
   x.restore();
 }
-function bow(x, drawn) {
-  x.save();
+function bow(x, drawn, len = 1) {
+  x.save(); x.scale(1, len);
   x.strokeStyle = '#7a4a22'; x.lineWidth = 2.6; x.beginPath(); x.arc(-4, 0, 14, -1.1, 1.1); x.stroke();
   x.strokeStyle = '#e8e0c8'; x.lineWidth = 0.7; x.beginPath();
   const ex = -4 + Math.cos(1.1) * 14, ey = Math.sin(1.1) * 14, pull = drawn ? -9 : -1;
@@ -539,6 +539,9 @@ export function prop(k, v, biome) {
 }
 
 // ------------------------------------------------------------------ castles
+// Three looks: forts are timber palisades with log watchtowers round a stone keep; castles are stone
+// with round towers and conical roofs; citadels are dark fortresses with square towers behind a moat.
+// The base layer (ground, paths, clutter) is drawn under people, the top layer (walls, towers, roofs) over.
 // Castle canvases are big, so they are drawn at 1x and only the dozen most recently seen are kept.
 const CPAD = 70;
 export const castleSize = (type) => (CASTLE_TYPES[type].outer + CPAD) * 2;
@@ -551,101 +554,283 @@ function castleMemo(key, fn) {
   return v;
 }
 function bigCanvas(w) { const c = document.createElement('canvas'); c.width = c.height = Math.ceil(w); return [c, c.getContext('2d')]; }
-function stoneTexture(x, x0, y0, w, h, base, R) {
+function stoneTexture(x, x0, y0, w, h, base, R, bw = 14, bh = 8) {
+  x.fillStyle = shade(base, -0.3); x.fillRect(x0, y0, w, h);
+  for (let yy = y0, row = 0; yy < y0 + h; yy += bh, row++) for (let xx = x0 - (row % 2) * (bw / 2); xx < x0 + w; xx += bw) {
+    const sx = Math.max(x0, xx), sw = Math.min(xx + bw, x0 + w) - sx, sh = Math.min(bh, y0 + h - yy);
+    if (sw <= 1 || sh <= 1) continue;
+    x.fillStyle = shade(base, (R() - 0.5) * 0.2); x.fillRect(sx + 0.7, yy + 0.7, sw - 1.4, sh - 1.4);
+  }
+}
+function flagstones(x, x0, y0, w, h, base, R, sz = 18) {
+  x.fillStyle = shade(base, -0.18); x.fillRect(x0, y0, w, h);
+  for (let yy = y0, row = 0; yy < y0 + h; yy += sz, row++) for (let xx = x0 - (row % 2) * (sz / 2); xx < x0 + w; xx += sz) {
+    const sx = Math.max(x0, xx), sw = Math.min(xx + sz, x0 + w) - sx, sh = Math.min(sz, y0 + h - yy);
+    if (sw <= 2 || sh <= 2) continue;
+    x.fillStyle = shade(base, (R() - 0.5) * 0.2); x.fillRect(sx + 1, yy + 1, sw - 2, sh - 2);
+  }
+}
+// Rough ground: a base colour with blotches of a second and pebbles.
+function ground(x, x0, y0, w, h, base, spot, R, n) {
   x.fillStyle = base; x.fillRect(x0, y0, w, h);
-  const bw = 14, bh = 8;
-  for (let yy = y0, row = 0; yy < y0 + h; yy += bh, row++) for (let xx = x0 - (row % 2) * 7; xx < x0 + w; xx += bw) {
-    x.fillStyle = shade(base, (R() - 0.5) * 0.18); x.fillRect(Math.max(x0, xx) + 0.6, yy + 0.6, Math.min(bw, x0 + w - Math.max(x0, xx)) - 1.2, Math.min(bh, y0 + h - yy) - 1.2);
-  }
+  for (let i = 0; i < n; i++) { x.fillStyle = spot; x.globalAlpha = 0.18 + R() * 0.2; x.beginPath(); x.ellipse(x0 + R() * w, y0 + R() * h, 6 + R() * 16, 4 + R() * 10, R() * 3, 0, 7); x.fill(); }
+  x.globalAlpha = 1;
+  for (let i = 0; i < n; i++) { x.fillStyle = 'rgba(40,30,20,.25)'; x.beginPath(); x.arc(x0 + R() * w, y0 + R() * h, 0.8 + R() * 1.6, 0, 7); x.fill(); }
 }
-function flagstones(x, h, base, R) {
-  x.fillStyle = shade(base, -0.15); x.fillRect(-h, -h, h * 2, h * 2);
-  for (let yy = -h; yy < h; yy += 18) for (let xx = -h + ((Math.round((yy + h) / 18)) % 2 ? 9 : 0); xx < h; xx += 18) {
-    x.fillStyle = shade(base, (R() - 0.5) * 0.22); x.fillRect(Math.max(-h, xx) + 1, yy + 1, Math.min(17, h - xx) - 1, Math.min(17, h - yy) - 1);
+const STYLE = {
+  timber: { ground: '#8a7a52', spot: '#6f8a44', yard: '#9a8662', stone: '#8e8a82', wall: '#6e4c2c', log: '#8a5e36', walk: '#9a7650' },
+  stone: { ground: '#7c8a50', spot: '#8a7656', yard: '#a09888', stone: '#9a958c', wall: '#8e8a82', walk: '#7a766e' },
+  dark: { ground: '#5e5a54', spot: '#4e4a44', yard: '#77737a', stone: '#6c6872', wall: '#66626c', walk: '#56525c' },
+};
+const wallSide = (x0, y0, w, h) => (w > h ? (y0 + h / 2 < 0 ? 'N' : 'S') : (x0 + w / 2 < 0 ? 'W' : 'E'));
+// A gable roof seen from above: two slopes meeting at a ridge along the long side.
+function gableRoof(x, x0, y0, w, h, col, R) {
+  const horiz = w >= h, light = shade(col, 0.16), dark = shade(col, -0.22);
+  x.fillStyle = 'rgba(0,0,0,.32)'; x.fillRect(x0 + 6, y0 + 8, w, h);
+  if (horiz) {
+    x.fillStyle = light; x.fillRect(x0, y0, w, h / 2); x.fillStyle = dark; x.fillRect(x0, y0 + h / 2, w, h / 2);
+    x.strokeStyle = 'rgba(0,0,0,.18)'; x.lineWidth = 1; for (let yy = y0 + 4; yy < y0 + h; yy += 5) { x.beginPath(); x.moveTo(x0 + 1, yy); x.lineTo(x0 + w - 1, yy); x.stroke(); }
+    for (let i = 0; i < w * h / 300; i++) { x.fillStyle = `rgba(0,0,0,${0.06 + R() * 0.08})`; x.fillRect(x0 + R() * (w - 8), y0 + R() * (h - 4), 8, 4); }
+    x.strokeStyle = shade(col, 0.45); x.lineWidth = 3; x.beginPath(); x.moveTo(x0 + 2, y0 + h / 2); x.lineTo(x0 + w - 2, y0 + h / 2); x.stroke();
+  } else {
+    x.fillStyle = light; x.fillRect(x0, y0, w / 2, h); x.fillStyle = dark; x.fillRect(x0 + w / 2, y0, w / 2, h);
+    x.strokeStyle = 'rgba(0,0,0,.18)'; x.lineWidth = 1; for (let xx = x0 + 4; xx < x0 + w; xx += 5) { x.beginPath(); x.moveTo(xx, y0 + 1); x.lineTo(xx, y0 + h - 1); x.stroke(); }
+    for (let i = 0; i < w * h / 300; i++) { x.fillStyle = `rgba(0,0,0,${0.06 + R() * 0.08})`; x.fillRect(x0 + R() * (w - 4), y0 + R() * (h - 8), 4, 8); }
+    x.strokeStyle = shade(col, 0.45); x.lineWidth = 3; x.beginPath(); x.moveTo(x0 + w / 2, y0 + 2); x.lineTo(x0 + w / 2, y0 + h - 2); x.stroke();
   }
+  x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(x0, y0, w, h);
 }
+// A hip roof: four slopes up to a short ridge (lit from the top left).
+function hipRoof(x, x0, y0, w, h, col) {
+  const cx = x0 + w / 2, cy = y0 + h / 2, horiz = w >= h, r = Math.min(w, h) / 2;
+  const a = horiz ? [x0 + r, cy] : [cx, y0 + r], b = horiz ? [x0 + w - r, cy] : [cx, y0 + h - r];
+  const TL = [x0, y0], TR = [x0 + w, y0], BL = [x0, y0 + h], BR = [x0 + w, y0 + h];
+  const face = (pts, c) => { x.fillStyle = c; x.beginPath(); x.moveTo(...pts[0]); for (const p of pts.slice(1)) x.lineTo(...p); x.closePath(); x.fill(); };
+  if (horiz) { face([TL, TR, b, a], shade(col, 0.2)); face([BL, BR, b, a], shade(col, -0.28)); face([TL, BL, a], shade(col, 0.04)); face([TR, BR, b], shade(col, -0.14)); }
+  else { face([TL, TR, a], shade(col, 0.2)); face([BL, BR, b], shade(col, -0.28)); face([TL, BL, b, a], shade(col, 0.04)); face([TR, BR, b, a], shade(col, -0.14)); }
+  x.strokeStyle = 'rgba(0,0,0,.3)'; x.lineWidth = 1;
+  for (const [p, q] of [[TL, a], [BL, horiz ? a : b], [TR, horiz ? b : a], [BR, b]]) { x.beginPath(); x.moveTo(...p); x.lineTo(...q); x.stroke(); }
+  x.strokeStyle = shade(col, 0.45); x.lineWidth = 2.5; x.beginPath(); x.moveTo(...a); x.lineTo(...b); x.stroke();
+  x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(x0, y0, w, h);
+}
+function conicalRoof(x, cx, cy, r, col) {
+  const g = x.createRadialGradient(cx - r * 0.35, cy - r * 0.35, 1, cx, cy, r);
+  g.addColorStop(0, shade(col, 0.4)); g.addColorStop(0.55, col); g.addColorStop(1, shade(col, -0.45));
+  x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill();
+  x.strokeStyle = 'rgba(0,0,0,.28)'; x.lineWidth = 1; for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); x.stroke(); }
+  x.strokeStyle = OUT; x.lineWidth = 1.4; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.stroke();
+  x.fillStyle = '#e0c060'; x.beginPath(); x.arc(cx, cy, 2.4, 0, 7); x.fill();
+}
+// A small flag on a pole, flying east.
+function pennant(x, px, py, col, len = 22) {
+  x.strokeStyle = '#3a2a1a'; x.lineWidth = 2; x.beginPath(); x.moveTo(px, py); x.lineTo(px, py - 4); x.stroke();
+  const g = x.createLinearGradient(px, 0, px + len, 0); g.addColorStop(0, shade(col, 0.15)); g.addColorStop(1, shade(col, -0.3));
+  x.fillStyle = g; x.beginPath(); x.moveTo(px, py - 9); x.quadraticCurveTo(px + len * 0.5, py - 12, px + len, py - 5); x.quadraticCurveTo(px + len * 0.5, py - 2, px, py - 1); x.closePath(); x.fill();
+  x.strokeStyle = OUT; x.lineWidth = 1; x.stroke();
+  x.fillStyle = '#d8b040'; x.beginPath(); x.arc(px, py - 1, 2, 0, 7); x.fill();
+}
+// A banner hanging down a wall face, with a charge (a simple device) in gold.
+function hangingBanner(x, cx, top, col, w = 16, h = 30) {
+  x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(cx - w / 2 + 3, top + 3, w, h);
+  x.fillStyle = shade(col, -0.05); x.beginPath(); x.moveTo(cx - w / 2, top); x.lineTo(cx + w / 2, top); x.lineTo(cx + w / 2, top + h); x.lineTo(cx, top + h - 6); x.lineTo(cx - w / 2, top + h); x.closePath(); x.fill();
+  x.strokeStyle = OUT; x.lineWidth = 1; x.stroke();
+  x.fillStyle = 'rgba(255,255,255,.12)'; x.fillRect(cx - w / 2, top, w / 3, h - 4);
+  x.fillStyle = '#e8c860'; x.beginPath(); x.moveTo(cx, top + 6); x.lineTo(cx + 4.5, top + 12); x.lineTo(cx, top + 18); x.lineTo(cx - 4.5, top + 12); x.closePath(); x.fill();
+  x.fillStyle = '#5a3a1a'; x.fillRect(cx - w / 2 - 2, top - 2, w + 4, 3);
+}
+// Courtyard clutter, kept off the paths and away from buildings.
+function clutter(x, kind, px, py, R) {
+  if (kind === 'barrels') for (const [dx, dy] of [[0, 0], [11, 3], [4, 11]]) { blob(x, px + dx, py + dy, 6.5, 6.5, radial(x, px + dx, py + dy, 6.5, '#8a5a2a')); x.strokeStyle = '#3a2410'; x.lineWidth = 1; x.beginPath(); x.arc(px + dx, py + dy, 4, 0, 7); x.stroke(); }
+  else if (kind === 'crates') for (const [dx, dy, s] of [[0, 0, 14], [15, 2, 11], [3, 15, 12]]) { x.fillStyle = 'rgba(0,0,0,.25)'; x.fillRect(px + dx + 2, py + dy + 3, s, s); x.fillStyle = '#a07848'; x.fillRect(px + dx, py + dy, s, s); x.strokeStyle = '#4a3016'; x.lineWidth = 1.2; x.strokeRect(px + dx, py + dy, s, s); x.beginPath(); x.moveTo(px + dx, py + dy); x.lineTo(px + dx + s, py + dy + s); x.stroke(); }
+  else if (kind === 'hay') { blob(x, px, py, 15, 10, radial(x, px, py, 15, '#d8c070')); x.strokeStyle = 'rgba(120,90,30,.5)'; x.lineWidth = 1; for (let i = -10; i <= 10; i += 4) { x.beginPath(); x.moveTo(px + i, py - 7); x.lineTo(px + i + 2, py + 7); x.stroke(); } }
+  else if (kind === 'dummy') { blob(x, px, py + 2, 8, 4, 'rgba(0,0,0,.25)', null); x.strokeStyle = '#6a4a2a'; x.lineWidth = 3; x.beginPath(); x.moveTo(px - 10, py); x.lineTo(px + 10, py); x.stroke(); blob(x, px, py, 6, 6, radial(x, px, py, 6, '#c8b080')); x.fillStyle = '#8a2a2a'; x.fillRect(px - 1.5, py - 1.5, 3, 3); }
+  else if (kind === 'target') { blob(x, px, py, 11, 11, '#e8e0c8'); for (const [r, c] of [[8, '#c03030'], [5, '#e8e0c8'], [2.5, '#c03030']]) blob(x, px, py, r, r, c, null); }
+  else if (kind === 'rack') { x.fillStyle = '#5a3a1a'; x.fillRect(px - 14, py - 3, 28, 6); x.strokeStyle = '#c8ccd0'; x.lineWidth = 1.5; for (let j = -10; j <= 10; j += 5) { x.beginPath(); x.moveTo(px + j, py - 3); x.lineTo(px + j + 3, py - 14); x.stroke(); } }
+  else if (kind === 'cart') { x.fillStyle = 'rgba(0,0,0,.25)'; x.fillRect(px - 12, py - 5, 30, 18); x.fillStyle = '#8a6038'; x.fillRect(px - 14, py - 8, 26, 16); x.strokeStyle = OUT; x.lineWidth = 1; x.strokeRect(px - 14, py - 8, 26, 16); x.fillStyle = '#3a2a1a'; for (const wy of [-10, 8]) x.fillRect(px - 8, py + wy, 12, 3); x.strokeStyle = '#6a4a2a'; x.lineWidth = 2; x.beginPath(); x.moveTo(px + 12, py - 4); x.lineTo(px + 26, py - 4); x.moveTo(px + 12, py + 4); x.lineTo(px + 26, py + 4); x.stroke(); blob(x, px - 2, py, 8, 5, '#d8c070', null); }
+  else if (kind === 'fire') { for (let i = 0; i < 6; i++) { const a = i * 1.05; blob(x, px + Math.cos(a) * 8, py + Math.sin(a) * 8, 3.5, 3.5, '#7a766e'); } blob(x, px, py, 5, 5, '#3a2a1a', null); const g = x.createRadialGradient(px, py, 1, px, py, 7); g.addColorStop(0, 'rgba(255,220,120,.9)'); g.addColorStop(1, 'rgba(255,90,20,0)'); x.fillStyle = g; x.beginPath(); x.arc(px, py, 7, 0, 7); x.fill(); }
+  else if (kind === 'well') { blob(x, px, py, 13, 13, radial(x, px, py, 13, '#8a8478'), OUT, 1.5); blob(x, px, py, 8, 8, '#2a5a7a', null); x.fillStyle = '#6a4a2a'; x.fillRect(px - 13, py - 1.5, 26, 3); }
+  else if (kind === 'tent') { x.fillStyle = 'rgba(0,0,0,.25)'; x.beginPath(); x.moveTo(px + 4, py - 11); x.lineTo(px + 22, py + 6); x.lineTo(px + 4, py + 22); x.lineTo(px - 14, py + 6); x.fill(); const c = ['#d8d0b8', '#c8b898'][Math.floor(R() * 2)]; x.fillStyle = shade(c, 0.1); x.beginPath(); x.moveTo(px, py - 16); x.lineTo(px + 16, py); x.lineTo(px, py); x.closePath(); x.fill(); x.fillStyle = shade(c, -0.15); x.beginPath(); x.moveTo(px + 16, py); x.lineTo(px, py + 16); x.lineTo(px, py); x.closePath(); x.fill(); x.fillStyle = c; x.beginPath(); x.moveTo(px, py + 16); x.lineTo(px - 16, py); x.lineTo(px, py); x.closePath(); x.fill(); x.fillStyle = shade(c, 0.2); x.beginPath(); x.moveTo(px - 16, py); x.lineTo(px, py - 16); x.lineTo(px, py); x.closePath(); x.fill(); x.strokeStyle = OUT; x.lineWidth = 1; x.beginPath(); x.moveTo(px, py - 16); x.lineTo(px + 16, py); x.lineTo(px, py + 16); x.lineTo(px - 16, py); x.closePath(); x.stroke(); }
+  else if (kind === 'garden') { x.fillStyle = '#5a4026'; x.fillRect(px - 20, py - 14, 40, 28); x.strokeStyle = '#6a4a2a'; x.lineWidth = 1.5; x.strokeRect(px - 20, py - 14, 40, 28); for (let j = -10; j <= 10; j += 6.5) for (let i = -16; i <= 16; i += 6) blob(x, px + i, py + j, 2.6, 2.6, ['#5a9a3a', '#7aaa3a', '#a0b040'][Math.floor(R() * 3)], null); }
+}
+// Ground layer: courtyard, cobbled paths from each gate, clutter, open gate doors and the moat.
 export function castleBase(c) {
   return castleMemo('cbase|' + c.id, () => {
-    const L = CASTLE_TYPES[c.type], S = castleSize(c.type), R = rng(c.id * 101 + 7), [cv, x] = bigCanvas(S);
+    const L = CASTLE_TYPES[c.type], st = STYLE[L.style], S = castleSize(c.type), R = rng(c.id * 101 + 7), [cv, x] = bigCanvas(S);
     x.translate(S / 2, S / 2);
     const O = L.outer, rings = L.rings;
-    x.fillStyle = 'rgba(110,90,60,.32)'; x.beginPath(); x.ellipse(0, 0, O + 50, O + 50, 0, 0, 7); x.fill();
+    x.fillStyle = 'rgba(100,84,56,.3)'; x.beginPath(); x.ellipse(0, 0, O + 50, O + 50, 0, 0, 7); x.fill();
     if (L.moat.length) {
       for (const [mx, my, mw, mh] of L.moat) {
-        const g = x.createLinearGradient(mx, my, mx + mw, my + mh); g.addColorStop(0, '#2c5c84'); g.addColorStop(1, '#3a7098');
+        x.fillStyle = '#4a4238'; x.fillRect(mx - 6, my - 6, mw + 12, mh + 12);
+        const g = x.createLinearGradient(mx, my, mx + mw, my + mh); g.addColorStop(0, '#24506e'); g.addColorStop(1, '#2e6488');
         x.fillStyle = g; x.fillRect(mx, my, mw, mh);
-        x.strokeStyle = 'rgba(255,255,255,.18)'; x.lineWidth = 1.5;
-        for (let i = 0; i < Math.max(mw, mh) / 40; i++) { const px = mx + R() * mw, py = my + R() * mh; x.beginPath(); x.moveTo(px - 8, py); x.quadraticCurveTo(px, py - 3, px + 8, py); x.stroke(); }
-        x.strokeStyle = '#5a4a32'; x.lineWidth = 3; x.strokeRect(mx, my, mw, mh);
+        x.strokeStyle = 'rgba(255,255,255,.16)'; x.lineWidth = 1.5;
+        for (let i = 0; i < Math.max(mw, mh) / 34; i++) { const px = mx + R() * mw, py = my + R() * mh; x.beginPath(); x.moveTo(px - 8, py); x.quadraticCurveTo(px, py - 3, px + 8, py); x.stroke(); }
       }
       // drawbridge across the moat gap
       const bw = 150, by = O - 56;
+      x.fillStyle = 'rgba(0,0,0,.35)'; x.fillRect(-bw / 2 + 5, by, bw, 68);
       x.fillStyle = '#7a5530'; x.fillRect(-bw / 2, by - 6, bw, 68);
-      x.strokeStyle = '#4a3018'; x.lineWidth = 2; for (let px = -bw / 2; px <= bw / 2; px += 15) { x.beginPath(); x.moveTo(px, by - 6); x.lineTo(px, by + 62); x.stroke(); }
+      x.strokeStyle = '#4a3018'; x.lineWidth = 2; for (let py = by - 6; py <= by + 62; py += 11) { x.beginPath(); x.moveTo(-bw / 2, py); x.lineTo(bw / 2, py); x.stroke(); }
       x.fillStyle = '#3a3a3a'; for (const sx of [-bw / 2 + 4, bw / 2 - 8]) x.fillRect(sx, by - 6, 4, 68);
+      x.strokeStyle = '#2a2a2a'; x.lineWidth = 1.5; for (const sx of [-bw / 2 + 6, bw / 2 - 6]) { x.beginPath(); x.moveTo(sx, by - 6); x.lineTo(sx * 0.7, by - 40); x.stroke(); }
     }
-    // outer courtyard of packed earth, then flagstones in the innermost ring
+    // Courtyards: outer ground, then each ring inward a little finer; the innermost ward is paved.
     const oh = rings[0][0] - rings[0][1];
-    x.fillStyle = '#8a7656'; x.fillRect(-oh, -oh, oh * 2, oh * 2);
-    for (let i = 0; i < oh / 3; i++) { x.fillStyle = `rgba(${R() > 0.5 ? '60,45,30' : '120,110,80'},.25)`; x.beginPath(); x.arc((R() - 0.5) * oh * 2, (R() - 0.5) * oh * 2, 3 + R() * 6, 0, 7); x.fill(); }
-    if (rings.length === 3) { const mh = rings[1][0] - rings[1][1]; flagstones(x, mh, '#8c8478', R); }
-    const ih = rings[rings.length - 1][0] - rings[rings.length - 1][1];
-    flagstones(x, ih, '#a09888', R);
-    // a dirt track from the outer gate inward
-    x.fillStyle = 'rgba(150,120,80,.7)'; x.fillRect(-36, ih, 72, O - ih);
-    // courtyard clutter: barrels, hay, dummies and racks
-    const items = 6 + rings.length * 4;
-    for (let i = 0; i < items; i++) {
-      const a = R() * Math.PI * 2, d = ih + 30 + R() * (oh - ih - 50), px = Math.cos(a) * d, py = Math.sin(a) * d, k = i % 4;
-      if (Math.abs(px) < 50 && py > 0) continue;
-      if (k === 0) { blob(x, px, py, 9, 9, radial(x, px, py, 9, '#8a5a2a')); x.strokeStyle = '#4a3016'; x.lineWidth = 1; x.beginPath(); x.arc(px, py, 6, 0, 7); x.stroke(); }
-      else if (k === 1) blob(x, px, py, 14, 10, radial(x, px, py, 14, '#d8c070'));
-      else if (k === 2) { x.fillStyle = '#6a4a2a'; x.fillRect(px - 2, py - 2, 4, 4); x.strokeStyle = '#c8b080'; x.lineWidth = 3; x.beginPath(); x.moveTo(px - 8, py); x.lineTo(px + 8, py); x.stroke(); blob(x, px, py - 1, 4, 4, '#c8b080', OUT, 1); }
-      else { x.fillStyle = '#5a3a1a'; x.fillRect(px - 14, py - 3, 28, 6); x.strokeStyle = '#c8ccd0'; x.lineWidth = 1.5; for (let j = -10; j <= 10; j += 5) { x.beginPath(); x.moveTo(px + j, py - 3); x.lineTo(px + j + 3, py - 12); x.stroke(); } }
+    ground(x, -oh, -oh, oh * 2, oh * 2, st.ground, st.spot, R, oh / 2);
+    for (let k = 1; k < rings.length; k++) {
+      const h = rings[k][0] - rings[k][1];
+      if (k === rings.length - 1) flagstones(x, -h, -h, h * 2, h * 2, st.yard, R);
+      else ground(x, -h, -h, h * 2, h * 2, shade(st.ground, -0.08), st.spot, R, h / 2);
+    }
+    if (rings.length === 1) { const h = 110; flagstones(x, -h, -h - 10, h * 2, h * 2 + 20, st.yard, R, 16); }
+    // Cobbled paths from every gate to the keep.
+    const [kx, ky, kw, kh] = L.keep;
+    for (const [gx, gy, side, gw] of L.gates) {
+      const w = Math.min(gw - 20, 84), y0 = side === 'N' ? gy : ky + kh / 2, y1 = side === 'N' ? ky + kh / 2 : gy;
+      flagstones(x, gx - w / 2, Math.min(y0, y1), w, Math.abs(y1 - y0), shade(st.yard, -0.06), R, 12);
+      x.strokeStyle = 'rgba(0,0,0,.2)'; x.lineWidth = 2; x.strokeRect(gx - w / 2, Math.min(y0, y1), w, Math.abs(y1 - y0));
+    }
+    // Hall footprints get a worn apron.
+    for (const [hx, hy, hw, hh] of L.halls) { x.fillStyle = 'rgba(70,52,34,.35)'; x.fillRect(hx - 8, hy - 8, hw + 16, hh + 16); }
+    // Clutter: placed at random where it blocks no path, gate, hall or keep.
+    const busy = [[kx - 20, ky - 20, kw + 40, kh + 40], ...L.halls.map(([a, b, w, h]) => [a - 14, b - 14, w + 28, h + 28]),
+      ...L.gates.map(([gx, gy, , gw]) => [gx - gw / 2 - 10, -O, gw + 20, O * 2])];
+    const clear = (px, py, r) => !busy.some(([a, b, w, h]) => px + r > a && px - r < a + w && py + r > b && py - r < b + h)
+      && rings.every(([h, t]) => Math.abs(Math.abs(px) - (h - t / 2)) > t / 2 + r + 6 || Math.abs(px) > h + 4 || Math.abs(py) > h + 4) && rings.every(([h, t]) => Math.abs(Math.abs(py) - (h - t / 2)) > t / 2 + r + 6 || Math.abs(py) > h + 4 || Math.abs(px) > h + 4);
+    const kinds = L.style === 'timber' ? ['hay', 'barrels', 'dummy', 'dummy', 'tent', 'tent', 'cart', 'fire', 'crates', 'rack', 'target']
+      : L.style === 'stone' ? ['garden', 'well', 'barrels', 'crates', 'rack', 'dummy', 'target', 'cart', 'hay', 'tent']
+        : ['rack', 'rack', 'crates', 'barrels', 'fire', 'tent', 'target', 'cart'];
+    let placed = 0;
+    for (let tries = 0; tries < 400 && placed < kinds.length * 2; tries++) {
+      const px = (R() * 2 - 1) * (oh - 30), py = (R() * 2 - 1) * (oh - 30);
+      if (!clear(px, py, 26)) continue;
+      clutter(x, kinds[placed % kinds.length], px, py, R); busy.push([px - 26, py - 26, 52, 52]); placed++;
     }
     return cv;
   });
 }
+// Top layer: walls, towers, gatehouses, the keep and halls.
 export function castleTop(c, color) {
   return castleMemo(`ctop|${c.id}|${color}`, () => {
-    const L = CASTLE_TYPES[c.type], S = castleSize(c.type), R = rng(c.id * 131 + 3), [cv, x] = bigCanvas(S);
+    const L = CASTLE_TYPES[c.type], st = STYLE[L.style], S = castleSize(c.type), R = rng(c.id * 131 + 3), [cv, x] = bigCanvas(S);
     x.translate(S / 2, S / 2);
-    const stone = c.type === 'citadel' ? '#7e7a80' : '#8e8a82';
+    // Drop shadows first so nothing casts a shadow over a neighbouring wall top.
+    x.fillStyle = 'rgba(0,0,0,.3)';
+    for (const [x0, y0, w, h] of L.walls) x.fillRect(x0 + 5, y0 + 8, w, h);
+    for (const t of L.towers) { x.beginPath(); x.arc(t.x + 6, t.y + 9, t.r + 2, 0, 7); x.fill(); }
+    // Walls
     for (const [x0, y0, w, h] of L.walls) {
-      x.fillStyle = 'rgba(0,0,0,.28)'; x.fillRect(x0 + 5, y0 + 7, w, h);
-      stoneTexture(x, x0, y0, w, h, stone, R);
-      x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(x0, y0, w, h);
-      const horiz = w > h, inset = 6;
-      x.fillStyle = 'rgba(255,255,255,.12)';
-      if (horiz) x.fillRect(x0, y0 + inset, w, h - inset * 2); else x.fillRect(x0 + inset, y0, w - inset * 2, h);
-      x.fillStyle = shade(stone, 0.18); x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 0.8;
-      const merl = 10;
-      if (horiz) { const outer = y0 + h / 2 < 0 ? y0 : y0 + h - 5; for (let xx = x0 + 2; xx < x0 + w - 6; xx += merl * 1.6) { x.fillRect(xx, outer, merl, 5); x.strokeRect(xx, outer, merl, 5); } }
-      else { const outer = x0 + w / 2 < 0 ? x0 : x0 + w - 5; for (let yy = y0 + 2; yy < y0 + h - 6; yy += merl * 1.6) { x.fillRect(outer, yy, 5, merl); x.strokeRect(outer, yy, 5, merl); } }
+      const side = wallSide(x0, y0, w, h), horiz = w > h;
+      if (L.style === 'timber') {
+        // walkway planks along the wall, then a row of sharpened stakes on the outer edge
+        x.fillStyle = st.walk; x.fillRect(x0, y0, w, h);
+        x.strokeStyle = 'rgba(40,24,10,.45)'; x.lineWidth = 1;
+        if (horiz) for (let yy = y0 + 4; yy < y0 + h; yy += 5) { x.beginPath(); x.moveTo(x0, yy); x.lineTo(x0 + w, yy); x.stroke(); }
+        else for (let xx = x0 + 4; xx < x0 + w; xx += 5) { x.beginPath(); x.moveTo(xx, y0); x.lineTo(xx, y0 + h); x.stroke(); }
+        const len = horiz ? w : h, n = Math.floor(len / 10.5);
+        for (let i = 0; i < n; i++) {
+          const along = (horiz ? x0 : y0) + 5.25 + i * (len - 10.5) / Math.max(1, n - 1) + 0;
+          const across = side === 'N' ? y0 + 6 : side === 'S' ? y0 + h - 6 : side === 'W' ? x0 + 6 : x0 + w - 6;
+          const [lx, ly] = horiz ? [along, across] : [across, along];
+          blob(x, lx, ly, 6, 6, radial(x, lx, ly, 6, shade(st.log, (R() - 0.5) * 0.25)), OUT, 1.1);
+          x.fillStyle = shade(st.log, 0.45); x.beginPath(); x.arc(lx - 1, ly - 1, 1.8, 0, 7); x.fill();
+        }
+        x.strokeStyle = '#4a3018'; x.lineWidth = 2;
+        if (horiz) { const ry = side === 'N' ? y0 + h - 2 : y0 + 2; x.beginPath(); x.moveTo(x0, ry); x.lineTo(x0 + w, ry); x.stroke(); }
+        else { const rx = side === 'W' ? x0 + w - 2 : x0 + 2; x.beginPath(); x.moveTo(rx, y0); x.lineTo(rx, y0 + h); x.stroke(); }
+        x.strokeStyle = OUT; x.lineWidth = 1.2; x.strokeRect(x0, y0, w, h);
+      } else {
+        stoneTexture(x, x0, y0, w, h, st.wall, R);
+        // wall-walk down the middle
+        const inset = Math.max(6, (horiz ? h : w) * 0.28);
+        x.fillStyle = shade(st.walk, -0.05);
+        if (horiz) x.fillRect(x0, y0 + inset, w, h - inset * 2); else x.fillRect(x0 + inset, y0, w - inset * 2, h);
+        x.strokeStyle = 'rgba(0,0,0,.18)'; x.lineWidth = 1;
+        if (horiz) for (let xx = x0 + 9; xx < x0 + w; xx += 9) { x.beginPath(); x.moveTo(xx, y0 + inset); x.lineTo(xx, y0 + h - inset); x.stroke(); }
+        else for (let yy = y0 + 9; yy < y0 + h; yy += 9) { x.beginPath(); x.moveTo(x0 + inset, yy); x.lineTo(x0 + w - inset, yy); x.stroke(); }
+        // merlons on both edges (big on the outside)
+        const ml = L.style === 'dark' ? 12 : 10, gap = ml * 0.75, light = shade(st.wall, 0.2);
+        for (const outer of [true, false]) {
+          const dep = outer ? inset - 1 : Math.max(3, inset * 0.5);
+          const edge = horiz ? ((side === 'N') === outer ? y0 : y0 + h - dep) : ((side === 'W') === outer ? x0 : x0 + w - dep);
+          for (let p = (horiz ? x0 : y0) + 2; p < (horiz ? x0 + w : y0 + h) - ml + 2; p += ml + gap) {
+            x.fillStyle = light; x.strokeStyle = 'rgba(0,0,0,.45)'; x.lineWidth = 0.8;
+            if (horiz) { x.fillRect(p, edge, ml, dep); x.strokeRect(p, edge, ml, dep); } else { x.fillRect(edge, p, dep, ml); x.strokeRect(edge, p, dep, ml); }
+          }
+        }
+        x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(x0, y0, w, h);
+      }
     }
+    // Towers
     for (const t of L.towers) {
       const { x: tx, y: ty, r } = t;
-      x.fillStyle = 'rgba(0,0,0,.3)'; x.beginPath(); x.arc(tx + 6, ty + 8, r, 0, 7); x.fill();
-      blob(x, tx, ty, r, r, radial(x, tx, ty, r, '#9a958c'), OUT, 2);
-      const n = Math.max(8, Math.round(r / 3));
-      for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; x.fillStyle = i % 2 ? '#b0aba2' : '#7a766e'; x.beginPath(); x.arc(tx + Math.cos(a) * (r - 4), ty + Math.sin(a) * (r - 4), Math.max(3, r / 10), 0, 7); x.fill(); }
-      const rg = x.createRadialGradient(tx - r * 0.2, ty - r * 0.2, 2, tx, ty, r - 8);
-      rg.addColorStop(0, shade(color, 0.35)); rg.addColorStop(1, shade(color, -0.45));
-      x.fillStyle = rg; x.beginPath(); x.arc(tx, ty, r - 9, 0, 7); x.fill(); x.strokeStyle = OUT; x.lineWidth = 1.2; x.stroke();
-      x.strokeStyle = 'rgba(0,0,0,.25)'; x.lineWidth = 1; for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; x.beginPath(); x.moveTo(tx, ty); x.lineTo(tx + Math.cos(a) * (r - 9), ty + Math.sin(a) * (r - 9)); x.stroke(); }
-      x.fillStyle = '#e0c060'; x.beginPath(); x.arc(tx, ty, 2.5, 0, 7); x.fill();
+      if (L.style === 'timber') {
+        const h = r * 0.82;
+        x.fillStyle = '#7a5634'; x.fillRect(tx - h, ty - h, h * 2, h * 2);
+        x.strokeStyle = 'rgba(40,24,10,.5)'; x.lineWidth = 1; for (let yy = ty - h + 5; yy < ty + h; yy += 5) { x.beginPath(); x.moveTo(tx - h, yy); x.lineTo(tx + h, yy); x.stroke(); }
+        for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) blob(x, tx + a * (h - 3), ty + b * (h - 3), 4.5, 4.5, '#5a3a1e', OUT, 1);
+        x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(tx - h, ty - h, h * 2, h * 2);
+        hipRoof(x, tx - h * 0.72, ty - h * 0.72, h * 1.44, h * 1.44, shade(color, -0.1));
+        pennant(x, tx, ty - 2, color, 18);
+      } else if (L.style === 'stone') {
+        blob(x, tx, ty, r, r, radial(x, tx, ty, r, st.stone), OUT, 2);
+        const n = Math.max(10, Math.round(r / 2.6));
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; x.fillStyle = i % 2 ? shade(st.stone, 0.22) : shade(st.stone, -0.25); x.beginPath(); x.arc(tx + Math.cos(a) * (r - 4), ty + Math.sin(a) * (r - 4), Math.max(3, r / 9), 0, 7); x.fill(); }
+        conicalRoof(x, tx, ty, r - 8, shade(color, -0.05));
+        pennant(x, tx, ty - 1, color, 18 + r / 4);
+      } else {
+        const h = r * 0.9;
+        stoneTexture(x, tx - h, ty - h, h * 2, h * 2, st.stone, R, 10, 7);
+        x.fillStyle = shade(st.stone, -0.12); x.fillRect(tx - h + 7, ty - h + 7, h * 2 - 14, h * 2 - 14);
+        for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) { x.fillStyle = shade(st.stone, 0.22); x.fillRect(tx + a * (h - 4) - 4, ty + b * (h - 4) - 4, 8, 8); x.strokeStyle = 'rgba(0,0,0,.45)'; x.lineWidth = 0.8; x.strokeRect(tx + a * (h - 4) - 4, ty + b * (h - 4) - 4, 8, 8); }
+        x.strokeStyle = OUT; x.lineWidth = 2; x.strokeRect(tx - h, ty - h, h * 2, h * 2);
+        x.fillStyle = '#3a3640'; x.fillRect(tx - 5, ty - 5, 10, 10);
+        pennant(x, tx + h * 0.4, ty - h * 0.4, color, 16 + r / 4);
+      }
     }
+    // Gatehouses: a tower each side of the opening, a beam over it and banners on the outer face.
+    for (const [gx, gy, side, gw, t] of L.gates) {
+      const wy = side === 'N' ? gy : gy - t, tw = 30, ext = 8;
+      for (const s of [-1, 1]) {
+        const cx = gx + s * (gw / 2 + tw / 2 - 4), y0 = wy - ext, hgt = t + ext * 2;
+        x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(cx - tw / 2 + 5, y0 + 8, tw, hgt);
+        if (L.style === 'timber') { x.fillStyle = '#7a5634'; x.fillRect(cx - tw / 2, y0, tw, hgt); x.strokeStyle = OUT; x.lineWidth = 1.4; x.strokeRect(cx - tw / 2, y0, tw, hgt); hipRoof(x, cx - tw / 2 + 3, y0 + 3, tw - 6, hgt - 6, shade(color, -0.1)); }
+        else { stoneTexture(x, cx - tw / 2, y0, tw, hgt, st.wall, R, 10, 7); x.fillStyle = shade(st.walk, -0.1); x.fillRect(cx - tw / 2 + 5, y0 + 5, tw - 10, hgt - 10); x.strokeStyle = OUT; x.lineWidth = 1.5; x.strokeRect(cx - tw / 2, y0, tw, hgt); for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { x.fillStyle = shade(st.wall, 0.22); x.fillRect(cx + a * (tw / 2 - 4) - 3.5, y0 + hgt / 2 + b * (hgt / 2 - 4) - 3.5, 7, 7); } }
+        hangingBanner(x, cx, side === 'N' ? y0 - 22 : y0 + hgt - 6, color, 14, 26);
+      }
+      // the beam (lintel) and a raised portcullis edge across the gap
+      const by = side === 'N' ? wy + t * 0.25 : wy + t * 0.45;
+      x.fillStyle = L.style === 'timber' ? '#5a3a1e' : shade(st.wall, -0.1); x.fillRect(gx - gw / 2 + 4, by, gw - 8, 7);
+      x.strokeStyle = OUT; x.lineWidth = 1; x.strokeRect(gx - gw / 2 + 4, by, gw - 8, 7);
+      x.strokeStyle = 'rgba(30,30,34,.85)'; x.lineWidth = 1.5; for (let px = gx - gw / 2 + 10; px < gx + gw / 2 - 6; px += 9) { x.beginPath(); x.moveTo(px, by + 7); x.lineTo(px, by + 11); x.stroke(); }
+    }
+    // Halls: long gabled buildings. Barracks wear the owner's colour, stables are thatched, the smithy is slate with a chimney.
+    for (const [hx, hy, hw, hh, kind] of L.halls) {
+      const col = kind === 'barracks' ? shade(color, -0.2) : kind === 'stable' ? '#b89a58' : '#5a6070';
+      x.fillStyle = '#d8c8a0'; x.fillRect(hx, hy, hw, hh);
+      gableRoof(x, hx - 4, hy - 4, hw + 8, hh + 8, col, R);
+      if (kind === 'smithy') { const cx = hx + hw * 0.75, cy = hy + hh * 0.3; x.fillStyle = '#6a6460'; x.fillRect(cx - 7, cy - 7, 14, 14); x.strokeStyle = OUT; x.lineWidth = 1.2; x.strokeRect(cx - 7, cy - 7, 14, 14); x.fillStyle = '#1a1614'; x.fillRect(cx - 4, cy - 4, 8, 8); x.fillStyle = 'rgba(200,200,200,.35)'; for (let i = 0; i < 3; i++) { x.beginPath(); x.arc(cx + 6 + i * 6, cy - 6 - i * 5, 5 + i * 2, 0, 7); x.fill(); } }
+    }
+    // The keep: stone walls under a roof (a hip roof, turrets at the corners of bigger keeps) and the great banner.
     const [kx, ky, kw, kh] = L.keep;
-    x.fillStyle = 'rgba(0,0,0,.3)'; x.fillRect(kx + 8, ky + 10, kw, kh);
-    stoneTexture(x, kx, ky, kw, kh, '#86827a', R); x.strokeStyle = OUT; x.lineWidth = 2; x.strokeRect(kx, ky, kw, kh);
-    const roofC = shade(color, -0.15), rx0 = kx + 8, ry0 = ky + 8, rw = kw - 16, rh = kh - 16;
-    x.fillStyle = shade(roofC, 0.15); x.beginPath(); x.moveTo(rx0, ry0); x.lineTo(rx0 + rw, ry0); x.lineTo(rx0 + rw - rh / 2, ry0 + rh / 2); x.lineTo(rx0 + rh / 2, ry0 + rh / 2); x.closePath(); x.fill();
-    x.fillStyle = shade(roofC, -0.25); x.beginPath(); x.moveTo(rx0, ry0 + rh); x.lineTo(rx0 + rw, ry0 + rh); x.lineTo(rx0 + rw - rh / 2, ry0 + rh / 2); x.lineTo(rx0 + rh / 2, ry0 + rh / 2); x.closePath(); x.fill();
-    x.fillStyle = roofC; x.beginPath(); x.moveTo(rx0, ry0); x.lineTo(rx0 + rh / 2, ry0 + rh / 2); x.lineTo(rx0, ry0 + rh); x.closePath(); x.fill();
-    x.fillStyle = shade(roofC, -0.1); x.beginPath(); x.moveTo(rx0 + rw, ry0); x.lineTo(rx0 + rw - rh / 2, ry0 + rh / 2); x.lineTo(rx0 + rw, ry0 + rh); x.closePath(); x.fill();
-    x.strokeStyle = 'rgba(0,0,0,.25)'; x.lineWidth = 1; for (let yy = ry0 + 5; yy < ry0 + rh; yy += 5) { x.beginPath(); x.moveTo(rx0 + 2, yy); x.lineTo(rx0 + rw - 2, yy); x.stroke(); }
-    x.strokeStyle = shade(roofC, 0.4); x.lineWidth = 2.5; x.beginPath(); x.moveTo(rx0 + rh / 2, ry0 + rh / 2); x.lineTo(rx0 + rw - rh / 2, ry0 + rh / 2); x.stroke();
-    x.strokeStyle = OUT; x.lineWidth = 1.2; x.strokeRect(rx0, ry0, rw, rh);
+    x.fillStyle = 'rgba(0,0,0,.32)'; x.fillRect(kx + 8, ky + 11, kw, kh);
+    stoneTexture(x, kx, ky, kw, kh, L.style === 'dark' ? '#6a6670' : '#8a867e', R);
+    x.strokeStyle = OUT; x.lineWidth = 2; x.strokeRect(kx, ky, kw, kh);
+    if (L.style === 'dark') {
+      // flat crenellated top with a hatch
+      x.fillStyle = '#4e4a54'; x.fillRect(kx + 9, ky + 9, kw - 18, kh - 18);
+      for (let p = kx + 3; p < kx + kw - 8; p += 14) for (const yy of [ky + 1, ky + kh - 8]) { x.fillStyle = '#86828c'; x.fillRect(p, yy, 8, 7); }
+      for (let p = ky + 3; p < ky + kh - 8; p += 14) for (const xx of [kx + 1, kx + kw - 8]) { x.fillStyle = '#86828c'; x.fillRect(xx, p, 7, 8); }
+      x.fillStyle = '#2a2630'; x.fillRect(kx + kw / 2 - 7, ky + kh / 2 - 7, 14, 14);
+    } else hipRoof(x, kx + 7, ky + 7, kw - 14, kh - 14, L.style === 'timber' ? '#7a3a2a' : shade(color, -0.25));
+    for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const tx = kx + a * kw, ty = ky + b * kh, r = L.style === 'timber' ? 9 : 13;
+      blob(x, tx, ty, r, r, radial(x, tx, ty, r, '#8a867e'), OUT, 1.5);
+      if (L.style === 'dark') { x.fillStyle = '#4e4a54'; x.beginPath(); x.arc(tx, ty, r - 4, 0, 7); x.fill(); } else conicalRoof(x, tx, ty, r - 3, L.style === 'timber' ? '#7a3a2a' : shade(color, -0.1));
+    }
+    pennant(x, kx + kw / 2, ky + kh / 2 - 2, color, 34);
+    hangingBanner(x, kx + kw / 2, ky + kh - 2, color, 20, 34);
     return cv;
   });
 }
@@ -720,3 +905,6 @@ export function villageTop() {
   });
 }
 export const VILLAGE_SPRITE_SIZE = VSIZE;
+
+// Shared with the icon painter.
+export { weapon as drawWeapon, bow as drawBow, shade, radial, blob, OUT };
