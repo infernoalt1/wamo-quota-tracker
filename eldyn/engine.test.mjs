@@ -233,13 +233,18 @@ test('damage = base × DMG_SCALE × (1 + attack/100) × (1 − defence/100), wit
   assert.equal(game.defOf(n), -50);
 });
 
-test('your facing turns toward the aim at a fixed rate, and attacks go where you face', () => {
-  const { game, p, advance } = arena();
+test('players face where they aim at once, so a blow goes where you clicked; NPCs turn at a fixed rate', () => {
+  const { game, p } = arena();
   p.ang = 0; game.handle(p, { t: 'in', a: Math.PI, x: p.x, y: p.y, tp: p.tp });
-  advance(50); game.tick();
-  assert.ok(Math.abs(p.ang - TURN_RATE * DT) < 1e-6 || Math.abs(p.ang + TURN_RATE * DT) < 1e-6);
-  run(game, advance, 400);
-  assert.ok(Math.abs(Math.abs(p.ang) - Math.PI) < 1e-6);
+  assert.equal(p.ang, Math.PI, 'turned at once');
+  p.belt[0] = 'spear';
+  const n = game.mkNpc('ogre', p.x, p.y + 80, {}); n.hp = n.maxhp = 500; n.def = { ...n.def, spd: 0, dmg: 0 }; game.gridBuild();
+  game.handle(p, { t: 'use', s: 0, on: 1, a: Math.PI / 2 }); game.handle(p, { t: 'use', s: 0, on: 0 });
+  game.tick();
+  assert.ok(n.hp < 500, 'a click straight at a foe hits it on the next tick, whatever way you faced before');
+  const m = game.mkNpc('vagabond', p.x + 400, p.y, {}); m.ang = 0; m.target = p.id; game.gridBuild();
+  game.npcSwing(m, { x: m.x - 100, y: m.y, r: 14 });
+  assert.ok(Math.abs(m.ang) <= TURN_RATE * DT + 1e-6 || Math.abs(Math.abs(m.ang) - TURN_RATE * DT) < 1e-6, 'an NPC turns at the fixed rate');
 });
 
 test('a Battleaxe swings four times and only hits foes still in the arc', () => {

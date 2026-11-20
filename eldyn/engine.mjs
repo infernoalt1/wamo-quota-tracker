@@ -1320,8 +1320,8 @@ export class Game {
     if (p.dead) { if (T >= p.respawnAt + 120000) this.respawn(p, 'haven'); return; }
     this.tickStatus(p);
     if (p.dead) return;
-    // Facing turns toward where you aim at a fixed rate.
-    p.ang = turnToward(p.ang, p.aim, TURN_RATE * DT);
+    // Players face where they aim at once (NPCs turn at a fixed rate), so a blow always goes where you clicked.
+    p.ang = p.aim;
     if (inSafe(p)) p.hp = Math.min(p.maxhp, p.hp + p.maxhp * 0.08 * DT);
     else if (T - p.combatAt > 8000) p.hp = Math.min(p.maxhp, p.hp + DT);
     // Quicksilver makes your cooldowns run slower.
@@ -1553,7 +1553,7 @@ export class Game {
     }
     return JSON.stringify({
       t: 's', n: this.tickNo,
-      me: { x: rd(p.x), y: rd(p.y), h: +p.hp.toFixed(1), mh: p.maxhp, v: Math.floor(p.valor), cap: this.capOf(p), s: Math.floor(p.soma), g: p.gold, b: p.bank, w: p.wood, sp: rd(this.speedOf(p)), fl: this.flagsOf(p), gcd,
+      me: { x: rd(p.x), y: rd(p.y), h: +p.hp.toFixed(1), mh: p.maxhp, ak: Math.round(this.atkOf(p)), v: Math.floor(p.valor), cap: this.capOf(p), s: Math.floor(p.soma), g: p.gold, b: p.bank, w: p.wood, sp: rd(this.speedOf(p)), fl: this.flagsOf(p), gcd,
         dead: p.dead ? 1 : 0, rs: p.dead ? Math.max(0, p.respawnAt - T) : 0, cz, cp, cdf, cl, tp: p.tp, mg: this.canManage(p) ? 1 : 0, q: p.queued, a: +p.ang.toFixed(2),
         iv: +this.invisOf(p).toFixed(2), dg: T < (p.disguiseUntil || 0) ? 1 : 0, ch: p.channel ? [Math.max(0, p.channel.until - T), p.channel.total, p.channel.label] : 0 },
       e: ents, pr, zs, lt, fx: fxs,
@@ -1580,17 +1580,18 @@ export class Game {
   // ---------------------------------------------------------------- messages from a client
   handle(p, m) {
     if (p.gone) return;
-    const aim = () => { if (Number.isFinite(m.a)) p.aim = m.a; if (Number.isFinite(m.x) && Number.isFinite(m.y)) { p.aimX = m.x; p.aimY = m.y; } };
+    const aim = () => { if (Number.isFinite(m.a)) p.aim = p.ang = m.a; if (Number.isFinite(m.x) && Number.isFinite(m.y)) { p.aimX = m.x; p.aimY = m.y; } };
     switch (m.t) {
+      case 'ping': this.send(p, { t: 'pong', c: m.c }); break;
       case 'in':
-        if (Number.isFinite(m.a)) p.aim = m.a;
+        if (Number.isFinite(m.a)) p.aim = p.ang = m.a;
         if (Number.isFinite(m.ax) && Number.isFinite(m.ay)) { p.aimX = m.ax; p.aimY = m.ay; }
         if (!p.dead && m.tp === p.tp && Number.isFinite(m.x) && Number.isFinite(m.y)) this.clientMove(p, m.x, m.y);
         break;
       case 'use': {
         const s = m.s | 0;
         if (s < 0 || s >= SLOTS) break;
-        if (Number.isFinite(m.a)) p.aim = m.a;
+        if (Number.isFinite(m.a)) p.aim = p.ang = m.a;
         if (Number.isFinite(m.x) && Number.isFinite(m.y)) { p.aimX = m.x; p.aimY = m.y; }
         if (m.on) { p.held.add(s); this.useSlot(p, s, true); } else p.held.delete(s);
         break;

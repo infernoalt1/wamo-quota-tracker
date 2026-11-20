@@ -4,7 +4,7 @@ import {
   rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng,
   CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, CASTLE_LEVEL_COST, CAP_LIFT, PRIVATE_MAX, dungeonAt, ISLANDS, landBase, BRIDGES, BRIDGE_W,
 } from './shared.mjs';
-import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST, isAttack, actionTime } from './builds.mjs';
+import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST, isAttack, actionTime, DMG_SCALE, ATK_CAP } from './builds.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
 import { toolImg, statusCanvas, uiImg, uiIcon } from './icons.mjs';
 import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE, weaponSprite, SWINGS, lookScale, armColors } from './sprites.mjs';
@@ -141,6 +141,7 @@ function handle(m) {
       break;
     }
     case 'msg': addChat(m.m, m.c || '#cdbf9a'); break;
+    case 'pong': ping = Math.round(performance.now() - m.c); break;
     case 'err': toast(m.m); addChat(m.m, '#f08070'); break;
     case 'toast': if (/^Soma tier/.test(m.m)) feel.sfx('level'); toast(m.m); break;
     case 'gain': { const ex = []; if (m.v) ex.push('+' + m.v + ' valor'); if (m.s) ex.push('+' + m.s + ' soma'); if (m.g) ex.push('+' + m.g + ' gold'); if (m.w) ex.push('+' + m.w + ' wood'); if (ex.length) floaters.push({ x: me.x, y: me.y - 34 - Math.random() * 14, txt: ex.join('  '), c: '#d8b4ff', t0: performance.now(), life: 1400 }); break; }
@@ -177,7 +178,7 @@ function onSnap(m) {
       const mine = f.by === myId, onMe = f.to === myId, big = f.v >= 28, hitEnt = ents.get(f.to);
       if (hitEnt && !f.dot) { hitEnt.hitT = now; hitEnt.hitA = f.a || 0; }
       if (mine) lastMyHit.set(f.to, now);
-      if (mine && !f.dot && now - (predictedHit.get(f.to) || 0) < 600) { floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: big ? '#ffd040' : '#fff0d0', t0: now, life: 900, big: big ? 1 : 0, pop: true }); continue; }
+      if (mine && !f.dot && now - (predictedHit.get(f.to) || 0) < 1500) { predictedHit.delete(f.to); continue; } // already shown when the blow landed on your screen
       floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: onMe ? '#ff6050' : mine ? (big ? '#ffd040' : '#fff0d0') : '#e0b8a8', t0: now, life: 900, big: mine && big ? 1 : 0, pop: mine || onMe });
       if (!f.dot) feel.spill(f.x, f.y + 10, f.a || 0, f.v, f.k, now);
       if (mine) { feel.sfx(f.sh ? 'block' : big ? 'hithard' : 'hit'); feel.shake(f.dot ? 0 : 2 + Math.min(5, f.v / 5)); if (!f.dot) feel.stop(big ? 75 : 50, now); }
@@ -186,6 +187,7 @@ function onSnap(m) {
       continue;
     }
     if (f.t === 'die') {
+      if (f.i && now - (localKills.get(f.i) || 0) < 3000) { localKills.delete(f.i); continue; } // already fell on your screen
       if (f.i && now - (lastMyHit.get(f.i) || 0) < 1500) killConfirm(f, now);
       feel.addBody(f, now); feel.sfx('die', ddx, dd, f.k === 'player' ? 1 : 0.6); if (f.k === 'logs') feel.sfx('wood', ddx, dd); continue; }
     if ((f.t === 'arc' || f.t === 'thrust') && f.i === myId && now - lastPredict < 2500) continue; // already shown when you pressed
@@ -253,8 +255,9 @@ function updateHud() {
   }
   const ri = regionAt(me.x, me.y), reg = REGIONS[ri], own = owners.get(ri), of = own && facInfo.get(own);
   const dg = reg.dungeon !== undefined ? DUNGEONS[reg.dungeon] : null, bossWait = dg && meta.bosses ? meta.bosses[dg.id] : 0;
-  $('regionlbl').innerHTML = dg ? `<b>${reg.name}</b> <span class="dim">· dungeon · danger ${'◆'.repeat(reg.danger)}</span><br><span class="dim">${bossWait ? 'Boss returns in ' + Math.ceil(bossWait / 60000) + ' min' : 'The boss waits in the deepest room'}</span>`
-    : `<b>${reg.name}</b> <span class="dim">· ${ISLANDS[reg.island].name}</span><br><span class="dim">${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`;
+  const pingTxt = ping ? `<br><span class="dim" style="color:${ping < 120 ? '#8fe07a' : ping < 250 ? '#e0c060' : '#f07060'}">ping ${ping} ms</span>` : '';
+  $('regionlbl').innerHTML = (dg ? `<b>${reg.name}</b> <span class="dim">· dungeon · danger ${'◆'.repeat(reg.danger)}</span><br><span class="dim">${bossWait ? 'Boss returns in ' + Math.ceil(bossWait / 60000) + ' min' : 'The boss waits in the deepest room'}</span>`
+    : `<b>${reg.name}</b> <span class="dim">· ${ISLANDS[reg.island].name}</span><br><span class="dim">${BIOME_NAME[reg.biome]}${reg.danger ? ' · danger ' + '◆'.repeat(reg.danger) : ' · safe haven'}</span>${of ? `<br><span style="color:${of.color}">Held by ${esc(of.name)}</span>` : ''}<br><span class="dim">${meta.on} online</span>`) + pingTxt;
   const cap = $('capture');
   if (me.cz >= 0 && !me.dead) {
     const co = owners.get(me.cz), cf = co && facInfo.get(co), c = CASTLES.find((k) => k.id === me.cz);
@@ -713,7 +716,7 @@ function bindTo(code) {
 function aimMsg() { const w = worldMouse(); return { a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }; }
 // Your attacks are shown at once (swing, sound, effect) instead of waiting for the server's echo, and a blow
 // that visibly connects lands at once too (sound, blood, hit-stop); the server's number follows.
-const predictedHit = new Map(), lastMyHit = new Map();
+const predictedHit = new Map(), lastMyHit = new Map(), localKills = new Map();
 let streak = 0, streakAt = 0;
 function predictHits(h) {
   const reach = h.reach, out = [];
@@ -728,7 +731,7 @@ function predictHits(h) {
 }
 function killConfirm(f, now) {
   streak = now - streakAt < 5000 ? streak + 1 : 1; streakAt = now;
-  feel.sfx('kill'); feel.stop(120, now); feel.shake(7);
+  feel.sfx('kill'); feel.stop(70, now); feel.shake(7);
   floaters.push({ x: f.x, y: f.y - 46, txt: streak > 1 ? `${['', '', 'Double', 'Triple', 'Quadruple'][streak] || streak + '×'} kill!` : 'Slain', c: streak > 1 ? '#ffb030' : '#f0e0c0', t0: now, life: 1300, big: 1 });
 }
 let lastPredict = 0, animNow = 0, pausedMs = 0;
@@ -753,8 +756,18 @@ function firePending(now) {
     const hit = predictHits(h);
     if (hit.length) {
       const big = h.dmg >= 13;
-      feel.sfx(big ? 'hithard' : 'hit'); feel.stop(big ? 80 : 55, now); feel.shake(2.5 + h.dmg / 5);
-      for (const o of hit) { predictedHit.set(o.id, now); o.hitT = now; o.hitA = Math.atan2(o.y - me.y, o.x - me.x); o.flash = now; feel.spill(o.x, o.y + 10, o.hitA, h.dmg * 2, o.k, now); }
+      feel.sfx(big ? 'hithard' : 'hit'); feel.stop(big ? 45 : 30, now); feel.shake(2.5 + h.dmg / 5);
+      for (const o of hit) {
+        o.hitT = now; o.hitA = Math.atan2(o.y - me.y, o.x - me.x); o.flash = now; feel.spill(o.x, o.y + 10, o.hitA, h.dmg * 2, o.k, now);
+        // what the blow does: your attack against its armour (a raised shield is unknown, so the server's number waits)
+        if (o.fl & 32) continue;
+        const A = Math.max(ATK_CAP[0], Math.min(ATK_CAP[1], me.ak || 0)), D = (MOBS[o.k]?.armor || 0) + (o.el === 'armored' ? 40 : 0);
+        const dmg = Math.max(1, Math.round(h.dmg * DMG_SCALE * (1 + A / 100) * (1 - D / 100)));
+        predictedHit.set(o.id, now);
+        o.predH = (o.predUntil > now ? Math.min(o.h, o.predH) : o.h) - dmg; o.predUntil = now + 900;
+        floaters.push({ x: o.x + (Math.random() * 14 - 7), y: o.y - 10, txt: String(dmg), c: dmg >= 28 ? '#ffd040' : '#fff0d0', t0: now, life: 900, big: dmg >= 28 ? 1 : 0, pop: true });
+        if (o.predH <= 0 && !o.localDead) { o.localDead = now; localKills.set(o.id, now); feel.addBody({ x: o.x, y: o.y, k: o.k, a: o.a || 0, f: o.f, n: o.n, rk: o.rk, wp: o.wp }, now); killConfirm({ x: o.x, y: o.y }, now); }
+      }
     }
   }
 }
@@ -776,7 +789,8 @@ function slotDown(s, mouse) {
 }
 function slotUp(s) { if (!held.has(s)) return; held.delete(s); if (!toggled.has(s)) send({ t: 'use', s, on: 0 }); }
 // Send our predicted position 20 times a second while it differs from what the server last confirmed.
-let lastA = 0, lastSent = 0, lastX = 0, lastY = 0;
+let lastA = 0, lastSent = 0, lastX = 0, lastY = 0, ping = 0;
+setInterval(() => { if (connected) send({ t: 'ping', c: performance.now() }); }, 2000);
 setInterval(() => {
   if (!connected || !me.init) return;
   const a = aimAngle(), now = performance.now(), w = worldMouse();
@@ -1037,6 +1051,7 @@ function drawEnt(o, x, y, now, self) {
   if (o.fl & 4) { ctx.strokeStyle = 'rgba(140,210,255,.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y + r * 0.5, r + 3, r * 0.5, 0, 0, 7); ctx.stroke(); }
   ctx.globalAlpha = 1;
 }
+const shownHp = (o) => (o.predUntil > performance.now() ? Math.min(o.h, o.predH) : o.h);
 function drawLabels(o, x, y) {
   if (o.k === 'logs' || (OBJ(o) && !isAlly(o) && o.h >= o.m)) return;
   const r = RADIUS(o) * 1.25, self = o.id === myId, ally = isAlly(o);
@@ -1045,7 +1060,7 @@ function drawLabels(o, x, y) {
   if (o.h < o.m || o.k === 'player' || MOBS[o.k]?.ai === 'kit') {
     const bw = Math.max(30, r * 2.2), by = y + r + 4;
     ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x - bw / 2 - 1, by - 1, bw + 2, 5);
-    ctx.fillStyle = self ? '#8fe07a' : ally ? '#6ac060' : '#c83a2a'; ctx.fillRect(x - bw / 2, by, bw * Math.max(0, o.h / o.m), 3);
+    ctx.fillStyle = self ? '#8fe07a' : ally ? '#6ac060' : '#c83a2a'; ctx.fillRect(x - bw / 2, by, bw * Math.max(0, shownHp(o) / o.m), 3);
   }
   ctx.textAlign = 'center'; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.85)';
   const line = (txt, yy, font, col, lw = 3) => { ctx.font = font; ctx.lineWidth = lw; ctx.strokeText(txt, x, yy); ctx.fillStyle = col; ctx.fillText(txt, x, yy); };
@@ -1262,7 +1277,7 @@ function frame(now) {
   feel.stepParticles(dt, now);
   // Keyboard turning nudges the aim; facing follows the aim at a fixed rate, like on the server.
   if (kbTurn !== null) kbTurn += ((pressed('turnr') ? 1 : 0) - (pressed('turnl') ? 1 : 0)) * TURN_RATE * dt;
-  if (!me.dead) me.ang = turnToward(me.ang, aimAngle(), TURN_RATE * dt);
+  if (!me.dead) me.ang = aimAngle();
   // You move instantly on your own screen using the same collision as the server; backpedalling is slower.
   const k = mask();
   const dx = ((k & 8) ? 1 : 0) - ((k & 4) ? 1 : 0), dy = ((k & 2) ? 1 : 0) - ((k & 1) ? 1 : 0), len = Math.hypot(dx, dy);
@@ -1325,6 +1340,7 @@ function frame(now) {
   const list = [];
   for (const o of ents.values()) {
     if (o.id === myId || o.x < x0 - 80 || o.x > x1 + 80 || o.y < y0 - 80 || o.y > y1 + 80) continue;
+    if (o.localDead && now - o.localDead < 1500) continue;
     if (OBJ(o) && MOBS[o.k].trap && o.k !== 'spinner') drawObject(o, o.x, o.y, now);
     else list.push({ y: o.y, o });
   }
