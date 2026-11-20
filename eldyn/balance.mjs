@@ -8,17 +8,18 @@ import { BASE_HP, START_BELT } from './builds.mjs';
 
 export const ARCHETYPES = {
   starter: START_BELT,
-  shield_spear: ['spear', 'kite', 'quarterstaff', 'parry', 'rations', 'pennon'],
-  pike_wall: ['pike', 'pavise', 'pilum', 'retreat', 'poultice'],
-  duellist: ['rapier', 'parma', 'feint', 'bollock', 'draught', 'rations'],
-  greatsword: ['greatsword', 'round', 'lunge', 'quarterstaff', 'rations'],
-  berserker: ['battleaxe', 'targe', 'redemption', 'quarterstaff', 'lunge', 'rations'],
-  longbow: ['longbow', 'sprint', 'focus', 'rondel', 'rations'],
-  crossbow: ['repeater', 'retreat', 'pilum', 'tincture', 'buckler'],
-  leech: ['glaive', 'leeches', 'sceptre', 'draught', 'buckler'],
-  alchemist: ['sling', 'naphtha', 'quarterstaff', 'parma', 'rations'],
-  flail: ['flail', 'scutum', 'lunge', 'blackjack', 'rations'],
-  halberd: ['halberd', 'heraldic', 'parry', 'pilum', 'rations'],
+  // Seven-slot kits (Soma tier 3+), each with a second attack to weave between swings, as players carry.
+  shield_spear: ['spear', 'kite', 'quarterstaff', 'parry', 'rations', 'sling', 'lunge'],
+  pike_wall: ['pike', 'pavise', 'pilum', 'retreat', 'poultice', 'bollock', 'rations'],
+  duellist: ['rapier', 'parma', 'feint', 'bollock', 'draught', 'rations', 'lunge'],
+  greatsword: ['greatsword', 'round', 'lunge', 'quarterstaff', 'rations', 'bollock', 'parry'],
+  berserker: ['battleaxe', 'targe', 'redemption', 'quarterstaff', 'lunge', 'rations', 'bollock'],
+  longbow: ['longbow', 'sprint', 'focus', 'rondel', 'rations', 'sling', 'buckler'],
+  crossbow: ['repeater', 'retreat', 'pilum', 'tincture', 'buckler', 'bollock', 'rations'],
+  leech: ['glaive', 'leeches', 'sceptre', 'draught', 'buckler', 'rations', 'lunge'],
+  alchemist: ['sling', 'naphtha', 'quarterstaff', 'parma', 'rations', 'gall', 'bollock'],
+  flail: ['flail', 'scutum', 'lunge', 'blackjack', 'rations', 'sling', 'parry'],
+  halberd: ['halberd', 'heraldic', 'parry', 'pilum', 'rations', 'bollock', 'lunge'],
 };
 
 // Three arenas outside castles: open ground, some cover, and thick cover (by how many walls, rocks and
@@ -42,7 +43,7 @@ function arena(where = 0) {
   return { game, x, y, step: () => { t += 50; game.tick(); } };
 }
 function bot(game, kit, x, y, team, ang) {
-  const n = game.mkNpc('vagabond', x, y, { team, leash: 99999, order: 'hold' });
+  const n = game.mkNpc('vagabond', x, y, { team, leash: 99999, order: 'hold', danger: 3 });
   n.def = { ...n.def, name: 'Bot', hp: BASE_HP, spd: 190, aggro: 900, social: 0, pack: null };
   n.hp = n.maxhp = BASE_HP; n.kit = kit.slice(); n.wp = kit[0]; n.ang = ang; n.atkBase = 0; n.player = true;
   return n;
@@ -57,6 +58,21 @@ export function duel(kitA, kitB, seedSwap = false, where = 0) {
   for (let i = 0; i < 1200 && !a.dead && !b.dead; i++) step();
   const r = a.dead && !b.dead ? 0 : b.dead && !a.dead ? 1 : 0.5;
   return seedSwap ? 1 - r : r;
+}
+// A new player's first fights: the starting toolbelt against the enemies of the safest regions.
+// Returns how often the new player wins (out of n).
+export function firstFights(foes, n = 20) {
+  let wins = 0;
+  for (let k = 0; k < n; k++) {
+    const { game, x, y, step } = arena(k);
+    // a new player: the starting toolbelt, and pauses between attacks like a person (not a frame-perfect bot)
+    const me = bot(game, START_BELT, x - 150, y, 'A', 0); me.player = false; me.danger = 3;
+    const them = foes.map((kind, i) => game.mkNpc(kind, x + 120 + i * 30, y + (i - (foes.length - 1) / 2) * 50, { danger: 1, leash: 99999, order: 'hold' }));
+    game.gridBuild(); me.target = them[0].id; for (const t of them) t.target = me.id;
+    for (let i = 0; i < 1200 && !me.dead && them.some((t) => !t.dead); i++) step();
+    if (!me.dead) wins++;
+  }
+  return wins / n;
 }
 // Runs fn with Math.random replaced by a seeded generator, so a report (and the CI gate) is repeatable.
 export function seeded(seed, fn) {

@@ -3,7 +3,7 @@
 
 export const MAP_SEED = 7331;
 // Saved castle owners only carry over while the map is the same one.
-export const MAP_ID = 'archipelago-1';
+export const MAP_ID = 'archipelago-2';
 // IH is the height of the sea and its islands; the dungeons sit in their own caverns below it (y >= IH), reached by cave mouths.
 export const WORLD = { W: 30000, IH: 20000, H: 28400, SAFE_R: 300 };
 const { W, IH } = WORLD;
@@ -32,35 +32,55 @@ export function rng(seed) {
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 // ------------------------------------------------------------------ the archipelago
-// Eight islands, each with its own land and danger, joined by long timber bridges. Hanbin, in the
-// middle, holds the Haven; the further an island lies from it, the deadlier it is.
+// A designed world. New players start in Hanbin Haven at the tip of the Hanbin Reach, a long peninsula:
+// one road leads up it through three regions that grow more dangerous (Greenfold, Millbrook, Barrowgate)
+// into the Hanbin heartland. From there timber bridges lead out to the other isles; the further an isle
+// lies from Hanbin, the deadlier it is. Islands are unions of ovals: [x, y, rx, ry, rotation].
 export const ISLANDS = [
-  { id: 0, name: 'Hanbin', x: 15000, y: 10400, rx: 5300, ry: 4100, rot: 0.08, danger: [1, 3], land: 'heart' },
-  { id: 1, name: 'The Frostmark', x: 14200, y: 2700, rx: 5600, ry: 1900, rot: -0.05, danger: [4, 5], land: 'frost' },
-  { id: 2, name: 'Emberreach', x: 25300, y: 8400, rx: 2900, ry: 4200, rot: 0.15, danger: [5, 6], land: 'ember' },
-  { id: 3, name: 'Mirewold', x: 5300, y: 9200, rx: 3000, ry: 4700, rot: -0.1, danger: [3, 5], land: 'mire' },
-  { id: 4, name: 'The Sunscar', x: 16800, y: 17700, rx: 5200, ry: 1800, rot: 0.04, danger: [3, 4], land: 'sun' },
-  { id: 5, name: 'Gull Isles', x: 5000, y: 17000, rx: 2300, ry: 1600, rot: 0.3, danger: [2, 3], land: 'gull' },
-  { id: 6, name: 'Thornholm', x: 25600, y: 1900, rx: 2000, ry: 1250, rot: -0.2, danger: [6, 6], land: 'thorn' },
-  { id: 7, name: 'Saltspire', x: 26300, y: 16700, rx: 1900, ry: 1700, rot: 0.2, danger: [4, 5], land: 'salt' },
+  { id: 0, name: 'Hanbin Reach', land: 'reach', danger: [1, 2],
+    blobs: [[8000, 17100, 1500, 1250, 0.3], [9400, 15700, 1350, 1150, 0.7], [10800, 14400, 1300, 1150, 0.7], [12200, 13100, 1350, 1200, 0.7]],
+    seeds: [
+      { x: 7800, y: 17300, name: 'Hanbin Haven', biome: 'grass', danger: 0 },
+      { x: 9400, y: 15750, name: 'Greenfold', biome: 'grass', danger: 1 },
+      { x: 10800, y: 14400, name: 'Millbrook', biome: 'heath', danger: 1 },
+      { x: 12250, y: 13100, name: 'Barrowgate', biome: 'forest', danger: 2 },
+    ] },
+  { id: 1, name: 'Hanbin', land: 'heart', danger: [2, 3], blobs: [[15300, 10000, 4300, 3300, 0.08]] },
+  { id: 2, name: 'The Frostmark', land: 'frost', danger: [4, 5], blobs: [[14400, 2600, 5600, 1900, -0.05]] },
+  { id: 3, name: 'Emberreach', land: 'ember', danger: [5, 6], blobs: [[25300, 8400, 2900, 4200, 0.15]] },
+  { id: 4, name: 'Mirewold', land: 'mire', danger: [3, 5], blobs: [[5200, 8400, 2900, 4500, -0.1]] },
+  { id: 5, name: 'The Sunscar', land: 'sun', danger: [3, 4], blobs: [[20200, 17500, 4400, 1800, 0.04]] },
+  { id: 6, name: 'Gull Isles', land: 'gull', danger: [3, 4], blobs: [[2900, 16600, 2000, 1500, 0.3]] },
+  { id: 7, name: 'Thornholm', land: 'thorn', danger: [6, 6], blobs: [[25600, 1900, 2000, 1250, -0.2]] },
+  { id: 8, name: 'Saltspire', land: 'salt', danger: [4, 5], blobs: [[27700, 15600, 1800, 1700, 0.2]] },
 ];
-for (const I of ISLANDS) { I.cos = Math.cos(I.rot); I.sin = Math.sin(I.rot); }
+for (const I of ISLANDS) {
+  I.ovals = I.blobs.map(([x, y, rx, ry, rot]) => ({ x, y, rx, ry, cos: Math.cos(rot), sin: Math.sin(rot) }));
+  const b = I.blobs[0]; I.x = b[0]; I.y = b[1]; I.rx = b[2]; I.ry = b[3]; I.cos = Math.cos(b[4]); I.sin = Math.sin(b[4]);
+  // the island's label sits above its highest point
+  I.top = Math.min(...I.blobs.map(([, y, , ry]) => y - ry)); I.mid = I.blobs.reduce((a, q) => a + q[0], 0) / I.blobs.length;
+}
 // Bridges: [x0, y0, x1, y1, island A, island B]. Each end sits well inside its island.
 export const BRIDGE_W = 110;
 export const BRIDGES = [
-  [14600, 7000, 14300, 3900, 0, 1],
-  [19900, 9300, 22900, 8800, 0, 2],
-  [10300, 10000, 7700, 9600, 0, 3],
-  [16300, 13900, 16600, 16500, 0, 4],
-  [5300, 13300, 5100, 15900, 3, 5],
-  [25500, 4800, 25600, 2700, 2, 6],
-  [21400, 17600, 25000, 16900, 4, 7],
+  [15000, 7300, 14700, 4100, 1, 2],
+  [19000, 9600, 22900, 9000, 1, 3],
+  [11400, 9600, 7700, 9000, 1, 4],
+  [17200, 12800, 18200, 16000, 1, 5],
+  [4600, 12000, 3400, 15300, 4, 6],
+  [25500, 4800, 25600, 2700, 3, 7],
+  [23800, 17300, 26300, 16300, 5, 8],
 ].map(([x0, y0, x1, y1, a, b], id) => ({ id, x0, y0, x1, y1, a, b, len: Math.hypot(x1 - x0, y1 - y0) }));
 
-// How far inside an island's oval a point is: 1 at its centre, 0 on the oval.
+// How far inside an island a point is: 1 at the centre of one of its ovals, 0 on the edge.
 function islandRaw(I, x, y) {
-  const dx = x - I.x, dy = y - I.y, u = (dx * I.cos + dy * I.sin) / I.rx, v = (-dx * I.sin + dy * I.cos) / I.ry;
-  return 1 - Math.sqrt(u * u + v * v);
+  let best = -Infinity;
+  for (const o of I.ovals) {
+    const dx = x - o.x, dy = y - o.y, u = (dx * o.cos + dy * o.sin) / o.rx, v = (-dx * o.sin + dy * o.cos) / o.ry;
+    const val = 1 - Math.sqrt(u * u + v * v);
+    if (val > best) best = val;
+  }
+  return best;
 }
 export function islandOf(x, y) {
   let best = 0, bv = -Infinity;
@@ -140,16 +160,19 @@ export const CASTLE_TYPES = {
 const fits = (type, x, y) => { const o = CASTLE_TYPES[type].outer + 60; return [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1], [1, 0], [-1, 0], [0, -1], [0.6, 0.6], [-0.6, 0.6], [0.6, -0.6], [-0.6, -0.6]].every(([a, b]) => landBase(x + a * o, y + b * o) > 0.02); };
 
 // ------------------------------------------------------------------ regions
-// Region centres are scattered over each island at least MIN apart; every centre has room for a fort.
-const SEEDS = [{ x: ISLANDS[0].x, y: ISLANDS[0].y, island: 0 }];
+// The Reach's regions are placed by hand; elsewhere region centres are scattered at least MIN apart,
+// each with room for a fort.
+const SEEDS = ISLANDS[0].seeds.map((q) => ({ ...q, island: 0, fixed: true }));
 {
   const MIN = 1500;
   for (const I of ISLANDS) {
-    const R = rng(MAP_SEED + I.id * 97), ext = Math.max(I.rx, I.ry) * 1.2;
+    if (I.seeds) continue;
+    const R = rng(MAP_SEED + I.id * 97), x0 = Math.min(...I.blobs.map((b) => b[0] - Math.max(b[2], b[3]))), x1 = Math.max(...I.blobs.map((b) => b[0] + Math.max(b[2], b[3])));
+    const y0 = Math.min(...I.blobs.map((b) => b[1] - Math.max(b[2], b[3]))), y1 = Math.max(...I.blobs.map((b) => b[1] + Math.max(b[2], b[3])));
     for (let k = 0; k < 3000; k++) {
-      const x = Math.round(I.x + (R() * 2 - 1) * ext), y = Math.round(I.y + (R() * 2 - 1) * ext);
+      const x = Math.round(x0 + R() * (x1 - x0)), y = Math.round(y0 + R() * (y1 - y0));
       if (landBase(x, y) < 0.2 || islandOf(x, y) !== I.id || !fits('fort', x, y)) continue;
-      if (SEEDS.some((s) => Math.hypot(s.x - x, s.y - y) < MIN)) continue;
+      if (SEEDS.some((q) => Math.hypot(q.x - x, q.y - y) < MIN)) continue;
       if (BRIDGES.some((b) => Math.hypot(b.x0 - x, b.y0 - y) < 700 || Math.hypot(b.x1 - x, b.y1 - y) < 700)) continue;
       SEEDS.push({ x, y, island: I.id });
     }
@@ -192,7 +215,7 @@ const parent = SEEDS.map(() => -1), hops = SEEDS.map(() => Infinity);
 }
 // Each island has its own lands: [biome] chosen from where in the island a region lies (u: west-east, v: north-south).
 function biomeFor(s, i) {
-  if (i === SANCTUARY) return 'grass';
+  if (s.biome) return s.biome;
   const I = ISLANDS[s.island], dx = s.x - I.x, dy = s.y - I.y, u = (dx * I.cos + dy * I.sin) / I.rx, v = (-dx * I.sin + dy * I.cos) / I.ry;
   switch (I.land) {
     case 'heart': return v < -0.4 ? 'forest' : u < -0.45 ? 'forest' : u > 0.5 ? 'heath' : v > 0.45 ? ['grass', 'heath'][i % 2] : ['grass', 'forest', 'grass'][i % 3];
@@ -209,6 +232,7 @@ function biomeFor(s, i) {
 // Danger rises with distance from the Haven inside each island, within that island's band.
 const DANGER = SEEDS.map(() => 0);
 for (const I of ISLANDS) {
+  if (I.seeds) { SEEDS.forEach((q, i) => { if (q.fixed) DANGER[i] = q.danger; }); continue; }
   const ids = SEEDS.map((s, i) => i).filter((i) => i !== SANCTUARY && SEEDS[i].island === I.id)
     .sort((a, b) => hops[a] - hops[b] || Math.hypot(SEEDS[a].x - VILLAGE.x, SEEDS[a].y - VILLAGE.y) - Math.hypot(SEEDS[b].x - VILLAGE.x, SEEDS[b].y - VILLAGE.y));
   const [lo, hi] = I.danger, n = hi - lo + 1;
@@ -220,7 +244,7 @@ function regionName() {
 }
 export const REGIONS = SEEDS.map((s, i) => ({
   id: i, x: s.x, y: s.y, biome: biomeFor(s, i), island: s.island,
-  name: i === SANCTUARY ? 'Hanbin Haven' : regionName(),
+  name: s.name || regionName(),
   danger: DANGER[i],
   neighbors: [...adj[i]],
 }));
@@ -495,6 +519,8 @@ export function losClear(ax, ay, bx, by) {
 // drives how much Soma each kill gives, and ranks give privileges, never damage.
 export const CAP_BASE = 5000, CAP_LIFT = { fort: 500, castle: 900, citadel: 1500 };
 export const TERR_BONUS = { fort: 0.005, castle: 0.0075, citadel: 0.01 }, TERR_MAX = 0.35;
+// Every NPC kill also gives a flat NPC_SOMA, so a brand-new player (with no Valor yet) still moves up.
+export const NPC_SOMA = 3;
 export const NPC_REWARD = 0.2, CAPTURE_VALOR = { fort: 1000, castle: 2000, citadel: 4000 };
 export const valorGain = (own, victim, m = 1, t = 0) => (6 + 0.04 * own + 0.1 * victim) * m * (1 + t);
 export const somaGain = (own, victim, m = 1, t = 0) => (1 + 0.1 * own + 0.05 * victim) * m * (1 + t);
@@ -526,7 +552,9 @@ export const COMMAND_RANK = { farmer: 4, ranger: 4, reiver: 5, alchemist: 5, hea
 // ------------------------------------------------------------------ soma
 // Soma is permanent. Each tier gives one key and needs far more soma than the last:
 // tier 1 = 69, tier 10 = 23,220, tier 30 = 970,642, tier 50 = 5,561,734.
-export const somaForTier = (t) => (t <= 0 ? 0 : Math.round(60 * t + 8.6 * t ** 3.42));
+// The first tiers come quickly (tier 1 in a minute or two, tier 3 in about ten), then the curve stretches out:
+// tier 10 takes about 8 hours of play and tier 30 about 140.
+export const somaForTier = (t) => (t <= 0 ? 0 : Math.round(10 * t + 8.6 * t ** 3.42 * Math.min(1, t / 10)));
 export function tierOf(soma) {
   soma = Math.max(0, soma);
   let t = Math.max(0, Math.floor((soma / 8.6) ** (1 / 3.42)) - 1);
@@ -564,7 +592,7 @@ export const MOBS = {
   fire_elemental: M({ name: 'Fire Elemental', hp: 72, dmg: 11, spd: 100, r: 18, range: 320, cd: 1700, aggro: 380, valor: 102, ai: 'caster', ranged: true, proj: 'fire' }),
   necromancer: M({ name: 'Necromancer', hp: 60, dmg: 8, spd: 90, r: 15, range: 320, cd: 1800, aggro: 380, valor: 120, ai: 'summoner', ranged: true, proj: 'dark', minion: 'risen' }),
   // people: they fight with the same tools and numbers as players
-  farmer: P({ name: 'Farmer', hp: 40, spd: 160, aggro: 260, valor: 10, kit: ['shortsword'], social: 1, pack: [2, 4] }),
+  farmer: P({ name: 'Farmer', hp: 40, spd: 160, aggro: 260, valor: 10, kit: ['shortsword'], social: 1, pack: [1, 3] }),
   vagabond: P({ name: 'Vagabond', hp: 50, spd: 165, aggro: 300, valor: 15, kit: ['spear'], pack: [1, 2] }),
   ranger: P({ name: 'Ranger', hp: 50, spd: 165, aggro: 420, valor: 40, kit: ['sling'] }),
   reiver: P({ name: 'Reiver', hp: 80, valor: 60, kit: ['sabre', 'buckler'] }),

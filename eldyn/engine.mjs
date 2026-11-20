@@ -6,12 +6,12 @@ import {
   WORLD, VILLAGE, REGIONS, CASTLES, CASTLE_TYPES, SANCTUARY, REGION_CELLS, RC, GW, MOBS, WILD_BY_BIOME, ELITE_AFFIXES,
   DUNGEONS, CAVES, CASTLE_LEVEL_COST, CASTLE_TAX, HOUSES,
   rankOf, tierOf, garrisonFor, inCastleWalls, moveBody, freeAt, shotBlocked, losClear, dungeonAt, regionAt, propsIn,
-  CAP_BASE, CAP_LIFT, TERR_BONUS, TERR_MAX, NPC_REWARD, CAPTURE_VALOR, valorGain, somaGain, RANK, rankHp, COMMAND_RANK, TROOP_NAMES,
+  CAP_BASE, CAP_LIFT, TERR_BONUS, TERR_MAX, NPC_REWARD, NPC_SOMA, CAPTURE_VALOR, valorGain, somaGain, RANK, rankHp, COMMAND_RANK, TROOP_NAMES,
   PUBLIC_FACTIONS, MAP_ID, PRIVATE_MAX,
 } from './shared.mjs';
 import {
   TOOLS, SLOTS, SLOT_TIERS, START_KIT, START_BELT, slotsFor, TURN_RATE, ATK_CAP, DEF_CAP, SPD_CAP, ALLY_SHIELD_CAP, AURA_GAP, RESPEC_COST, MAX_TRAPS, MAX_TROOPS,
-  owns, unlockCheck, sanitizeUnlocks, keysFor, BACKPEDAL, BACKPEDAL_ANGLE,
+  owns, unlockCheck, sanitizeUnlocks, keysFor, BACKPEDAL, BACKPEDAL_ANGLE, isAttack, actionTime,
 } from './builds.mjs';
 
 const { W } = WORLD;
@@ -223,7 +223,7 @@ export class Game {
     if (!o.dot) { tgt.lastHurtAt = T; tgt.lastHurtBy = actor ? actor.id : null; }
     if (actor) actor.combatAt = T;
     if (root && tgt.hitters) tgt.hitters.set(root.id, T);
-    this.fx({ t: 'dmg', x: tgt.x, y: tgt.y - 10, v: amt < 10 ? Math.round(amt * 10) / 10 : Math.round(amt) });
+    this.fx({ t: 'dmg', x: tgt.x, y: tgt.y - 10, v: amt < 10 ? Math.round(amt * 10) / 10 : Math.round(amt), to: tgt.id, by: root ? root.id : 0, a: +Math.atan2(tgt.y - src.y, tgt.x - src.x).toFixed(2), sh: D >= 35 ? 1 : 0, k: tgt.kind, dot: o.dot ? 1 : 0 });
     if (tgt.effs && tgt.effs.some((f) => f.breakHit)) this.breakStealth(tgt, 'hit');
     if (o.leech && actor && !actor.dead) this.heal(actor, amt * o.leech * (1 + this.sumEff(actor, 'leech') / 100));
     if (actor && actor.isNpc && !o.secondary) {
@@ -282,7 +282,7 @@ export class Game {
   reward(killer, victimValor, m, victim) {
     if (!killer || killer.dead) return;
     const own = killer.valor, t = this.terrOf(killer);
-    const v = valorGain(own, victimValor, m, t), s = somaGain(own, victimValor, m, t);
+    const v = valorGain(own, victimValor, m, t), s = somaGain(own, victimValor, m, t) + (victim && !victim.isPlayer ? NPC_SOMA * (1 + t) : 0);
     this.gain(killer, v, s);
     if (victim && victim.hitters) for (const [id, at] of victim.hitters) {
       const o = this.players.get(id);
@@ -302,7 +302,8 @@ export class Game {
     if (n.region >= 0) this.wildCount[n.region]--;
     if (n.master) { const m = this.npcs.get(n.master); if (m && m.minions) m.minions.delete(n.id); }
     if (n.kind === 'logs') { this.logRespawn(n.spot); if (killer && !silent) { killer.wood += 2; killer.dirty = true; this.send(killer, { t: 'gain', v: 0, s: 0, g: 0, w: 2 }); } }
-    this.fx({ t: 'poof', x: n.x, y: n.y });
+    if (this.isObj(n) || silent) this.fx({ t: 'poof', x: n.x, y: n.y });
+    else this.fx({ t: 'die', x: Math.round(n.x), y: Math.round(n.y), k: n.kind, a: +n.ang.toFixed(2), f: n.owner ? (this.players.get(n.owner)?.fac || 0) : n.fac || 0, wp: n.wp || '' });
     if (n.elite === 'volatile') this.zones.push({ type: 'blast', x: n.x, y: n.y, r: 120, at: this.T + 900, d: 900, dmg: n.def.dmg * 2, team: n.team, stub: this.mkStub(n) });
     if (silent || !killer || this.isObj(n) || n.minionOf || n.owner === killer.id) return;
     const valor = (n.valor || 0) * (n.elite ? 3 : 1);
@@ -314,6 +315,7 @@ export class Game {
   killPlayer(p, killer) {
     if (p.dead) return;
     const T = this.T;
+    this.fx({ t: 'die', x: Math.round(p.x), y: Math.round(p.y), k: 'player', a: +p.ang.toFixed(2), f: p.fac || 0, n: p.name, rk: p.rank, wp: p.wp || '' });
     p.dead = true; p.respawnAt = T + DYING_MS; p.channel = null; p.dots = []; p.hots = []; p.effs = []; p.held.clear(); p.queued = -1;
     const lost = Math.floor(p.valor), wasRank = p.rank;
     const dg = Math.floor(p.gold / 2), dw = Math.floor(p.wood / 2);
@@ -565,6 +567,8 @@ export class Game {
       target: null, nextAtk: 0, nextScan: 0, nextSkill: 0, nextThink: 0, wanderT: 0, wp: kit ? kit[0] : null, returning: false, lastHit: null, lastHitAt: 0, detour: 0, detourUntil: 0,
       order: o.order || 'home', leader: o.leader || 0, aggr: o.aggr ?? true, obey: false, cmdBy: 0, leaderSeen: this.T, uses: 0, spot: o.spot ?? -1,
     };
+    // The gentle first regions: enemies there are frailer and hit softer, so a new player wins their first fights.
+    if (!def.obj && !o.owner && danger <= 2 && !def.boss) { const k = danger === 1 ? 0.7 : 0.85; n.hp = n.maxhp = n.maxhp * k; n.atkBase += danger === 1 ? -15 : -5; }
     if (o.elite) { n.elite = o.elite; n.hp = n.maxhp = n.maxhp * 2.5; n.r = Math.round(n.r * 1.15); if (o.elite === 'armored') n.defBase += 40; }
     if (def.trap && kind !== 'tripwire') n.inv = 0.4;
     if (def.trap && def.trap.uses) n.uses = def.trap.uses;
@@ -589,7 +593,8 @@ export class Game {
       if (Math.hypot(x - VILLAGE.x, y - VILLAGE.y) < VILLAGE.r + 350) continue;
       if (CAVES.some((c) => Math.hypot(x - c.x, y - c.y) < 200)) continue;
       if (!ignorePlayers && [...this.players.values()].some((p) => Math.hypot(p.x - x, p.y - y) < 700)) continue;
-      const kind = pickWeighted(table), [lo, hi] = MOBS[kind].pack || [1, 1], count = lo + Math.floor(Math.random() * (hi - lo + 1));
+      // In the first regions enemies come alone (danger 1) or in twos at most (danger 2).
+      const kind = pickWeighted(table), [lo, hi] = MOBS[kind].pack || [1, 1], count = Math.min(danger, lo + Math.floor(Math.random() * (hi - lo + 1)));
       const elite = count === 1 ? this.eliteRoll(danger) : null;
       for (let i = 0; i < count; i++) {
         const s = i ? this.freeSpot(x, y, 70) : { x, y };
@@ -693,7 +698,7 @@ export class Game {
   // NPCs see anyone less than 99% invisible.
   findTarget(n) {
     let best = null, bd = Infinity;
-    for (const e of this.near(n.x, n.y, n.def.aggro)) {
+    for (const e of this.near(n.x, n.y, n.def.aggro * (n.danger === 1 && !n.owner && n.castle < 0 ? 0.65 : 1))) {
       if (e === n || this.isObj(e) || !this.hostile(n, e) || inSafe(e) || this.invisOf(e) >= 0.99) continue;
       const d = (e.x - n.x) ** 2 + (e.y - n.y) ** 2;
       if (d < bd && losClear(n.x, n.y, e.x, e.y)) { bd = d; best = e; }
@@ -808,6 +813,8 @@ export class Game {
     }
     const scan = n.aggr && !(n.order === 'follow' && n.obey);
     if (!tgt && scan && !n.returning && T >= n.nextScan) { n.nextScan = T + 300 + Math.random() * 200; n.target = this.findTarget(n); tgt = n.target ? this.getEnt(n.target) : null; }
+    // A moment to react when a fight starts, like a person (bots standing in for players don't need it).
+    if (n.target && n.target !== n.reactFor) { n.reactFor = n.target; if (!n.player) { const r = rnd(400, 800); n.swingOk = Math.max(n.swingOk || 0, T + r); n.nextAtk = Math.max(n.nextAtk || 0, T + r); } }
     if (n.def.healer && T >= n.nextThink && this.npcHeal(n)) return;
     if (tgt) return n.def.ai === 'kit' ? this.fightKit(n, tgt, spd) : this.fight(n, tgt, spd);
     if (n.ghost && T < n.ghost.until) {
@@ -911,7 +918,7 @@ export class Game {
     if (tgt.shieldUntil > this.T && this.defOf(tgt) >= 70 && Math.random() < 0.85) return;
     // People hesitate a moment between swings instead of attacking frame-perfectly (bots standing in for players don't).
     if (this.T < (n.swingOk || 0)) return;
-    if (angDiff(n.ang, a) < 0.3 && dist(n, tgt) <= this.reachOf(w) + tgt.r && this.useTool(n, w) === true && !n.player) n.swingOk = this.T + w.cd + rnd(100, 400);
+    if (angDiff(n.ang, a) < 0.3 && dist(n, tgt) <= this.reachOf(w) + tgt.r && this.useTool(n, w) === true && !n.player) n.swingOk = this.T + w.cd + rnd(100, 400) + (n.danger <= 2 ? rnd(200, 500) : 0);
   }
   fightKit(n, tgt, spd) {
     const T = this.T, d = dist(n, tgt), w = this.npcWeapon(n), reach = this.reachOf(w), ranged = w.type === 'shoot';
@@ -929,7 +936,7 @@ export class Game {
   }
   // What a person does with the rest of their kit, checked a couple of times a second.
   npcTactics(n, tgt, d) {
-    const T = this.T, ready = (id) => (n.gcd[TOOLS[id].group] || 0) <= T, use = (id, o) => ready(id) && this.useTool(n, TOOLS[id], o) === true;
+    const T = this.T, ready = (id) => this.ready(n, TOOLS[id]), use = (id, o) => ready(id) && this.useTool(n, TOOLS[id], o) === true;
     const w = this.npcWeapon(n), reach = this.reachOf(w), ranged = w.type === 'shoot', facing = angDiff(n.ang, Math.atan2(tgt.y - n.y, tgt.x - n.x)) < 0.35;
     const threat = (tgt.atkAt && T - tgt.atkAt < 500) || T < (tgt.windUntil || 0), close = d < reach + tgt.r + 40, at = { ax: tgt.x, ay: tgt.y };
     // Someone shooting at us from range: get a shield up while closing in, like a player would.
@@ -964,17 +971,19 @@ export class Game {
     const root = this.rootOwner(src);
     return { isStub: true, id: -1, from: src.id, x: src.x, y: src.y, team: this.teamOf(src), credit: root ? root.id : null, hp: 1, r: 0 };
   }
-  ready(e, t) { return (e.gcd[t.group] || 0) <= this.T; }
+  ready(e, t) { return (e.gcd[t.id] || 0) <= this.T && (!isAttack(t) || this.T >= (e.busyUntil || 0)); }
   // Uses a tool. Returns true, or a reason it couldn't be used.
   useTool(e, t, o = {}) {
     const T = this.T;
     if (!t || e.dead) return 'dead';
-    if (!this.ready(e, t)) return 'cooldown';
+    if ((e.gcd[t.id] || 0) > T) return 'cooldown';
+    if (isAttack(t) && T < (e.busyUntil || 0)) return 'busy';
     if (e.channel) { if (!e.isPlayer) return 'busy'; this.cancelChannel(e, 'Cancelled: you used a tool.'); }
     if (e.effs.some((f) => f.until > T && f.root && f.still) && t.type !== 'heal') return 'meditating';
     const why = this.toolCheck(e, t, o);
     if (why) return why;
-    e.gcd[t.group] = T + t.cd; e.gcdTotal = e.gcdTotal || {}; e.gcdTotal[t.group] = t.cd;
+    e.gcd[t.id] = T + t.cd; e.gcdTotal = e.gcdTotal || {}; e.gcdTotal[t.id] = t.cd;
+    if (isAttack(t)) e.busyUntil = T + actionTime(t);
     e.atkAt = T; e.lastTool = t.id;
     if (t.group === 'weapon' || (t.group === 'sidearm' && t.type === 'strike')) e.wp = t.id;
     if (t.group !== 'stealth') { this.breakStealth(e, 'act'); e.disguiseUntil = 0; }
@@ -1503,11 +1512,11 @@ export class Game {
       if (enemy && iv >= 0.99) return;
       const o = { i: e.id, k: e.kind, x: rd(e.x), y: rd(e.y), a: +e.ang.toFixed(2), h: Math.ceil(e.hp), m: rd(e.maxhp), fl: this.flagsOf(e) };
       if (iv) o.iv = +iv.toFixed(2);
-      if (e.atkAt && T - e.atkAt < 300) o.at = 1;
+      if (e.atkAt && T - e.atkAt < 2500) { o.at = Math.round(T - e.atkAt); o.lt = e.lastTool; }
       if (T < (e.shieldUntil || 0)) o.sh = e.shieldKind;
       if (e.wp) o.wp = e.wp;
       if (e.isPlayer) {
-        o.n = e.name; o.f = e.fac || 0; o.rk = e.rank; if (e.vet) o.vt = 1;
+        o.n = e.name; o.f = e.fac || 0; o.rk = e.rank; o.ti = e.tier; if (e.vet) o.vt = 1;
         if (enemy && T < (e.disguiseUntil || 0) && p.fac) o.f = p.fac;
       } else {
         if (e.owner) { const ow = this.players.get(e.owner); o.f = ow ? ow.fac || 0 : 0; o.ow = e.owner; } else o.f = e.fac || 0;

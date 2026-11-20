@@ -4,10 +4,11 @@ import {
   rankOf, somaForTier, regionAt, moveBody, landValue, roadDist, propsIn, rng,
   CASTLE_TYPES, DUNGEONS, CAVES, DGRID, DT_SIZE, CASTLE_LEVEL_COST, CAP_LIFT, PRIVATE_MAX, dungeonAt, ISLANDS, landBase, BRIDGES, BRIDGE_W,
 } from './shared.mjs';
-import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST } from './builds.mjs';
+import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST, isAttack, actionTime } from './builds.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
 import { toolImg, statusCanvas, uiImg, uiIcon } from './icons.mjs';
-import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE } from './sprites.mjs';
+import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE, weaponSprite, SWINGS, lookScale } from './sprites.mjs';
+import * as feel from './feel.mjs';
 
 const { W: WW, H: WORLD_H, IH: WH } = WORLD;
 const $ = (id) => document.getElementById(id);
@@ -26,8 +27,8 @@ function getVignette(hurt) {
   if (vignette && vignetteHurt === hurt) return vignette;
   const c = document.createElement('canvas'); c.width = Math.ceil(VW / 2); c.height = Math.ceil(VH / 2);
   const x = c.getContext('2d'), w = c.width, h = c.height;
-  const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.75);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, hurt ? 'rgba(130,0,0,.45)' : 'rgba(0,0,0,.35)');
+  const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.72);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.55, hurt ? 'rgba(90,0,0,.25)' : 'rgba(0,0,0,.28)'); g.addColorStop(1, hurt ? 'rgba(110,0,0,.7)' : 'rgba(0,0,0,.72)');
   x.fillStyle = g; x.fillRect(0, 0, w, h);
   vignette = c; vignetteHurt = hurt;
   return c;
@@ -128,6 +129,7 @@ function handle(m) {
       for (const [id, o, lv] of m.c) { levels.set(id, lv); if (owners.get(id) !== o) { owners.set(id, o); changed = true; } }
       if (changed) miniDirty = true;
       if (panelOpen('factions')) renderFactions(); if (panelOpen('board')) renderBoard();
+      renderRankings();
       break;
     }
     case 'radar': radar = m; break;
@@ -137,8 +139,8 @@ function handle(m) {
       break;
     }
     case 'msg': addChat(m.m, m.c || '#cdbf9a'); break;
-    case 'toast': toast(m.m); break;
     case 'err': toast(m.m); addChat(m.m, '#f08070'); break;
+    case 'toast': if (/^Soma tier/.test(m.m)) feel.sfx('level'); toast(m.m); break;
     case 'gain': { const ex = []; if (m.v) ex.push('+' + m.v + ' valor'); if (m.s) ex.push('+' + m.s + ' soma'); if (m.g) ex.push('+' + m.g + ' gold'); if (m.w) ex.push('+' + m.w + ' wood'); if (ex.length) floaters.push({ x: me.x, y: me.y - 34 - Math.random() * 14, txt: ex.join('  '), c: '#d8b4ff', t0: performance.now(), life: 1400 }); break; }
     case 'died': lastDeath = m; deathShown = null; break;
     case 'rally': rallyFrom = { id: m.id, n: m.n, until: performance.now() + 30000 }; showRally(); break;
@@ -161,15 +163,30 @@ function onSnap(m) {
     let o = ents.get(e.i);
     if (!o) { o = { x: e.x, y: e.y, ph: Math.random() * 6, h: e.h, buf: [] }; ents.set(e.i, o); }
     if (e.h < o.h) o.flash = now;
-    if (e.at && !o.at) o.atkT = now;
+    if (e.at !== undefined) { const st = animNow - e.at; if (!o.atkStart || o.atkTool !== e.lt || Math.abs(st - o.atkStart) > 150) { o.atkStart = st; o.atkTool = e.lt; } }
     o.buf.push([now, e.x, e.y]); if (o.buf.length > 8) o.buf.shift();
-    Object.assign(o, { k: e.k, a: e.a, h: e.h, m: e.m, fl: e.fl, n: e.n, f: e.f, rk: e.rk, ow: e.ow, wp: e.wp, sh: e.sh, at: e.at, sp: e.sp, el: e.el, enr: e.en, iv: e.iv || 0, vt: e.vt, seq, id: e.i });
+    Object.assign(o, { k: e.k, a: e.a, h: e.h, m: e.m, fl: e.fl, n: e.n, f: e.f, rk: e.rk, ti: e.ti, ow: e.ow, wp: e.wp, sh: e.sh, at: e.at, sp: e.sp, el: e.el, enr: e.en, iv: e.iv || 0, vt: e.vt, seq, id: e.i });
   }
   for (const [id, o] of ents) if (o.seq !== seq) ents.delete(id);
   projs = m.pr; zones = m.zs; loot = m.lt || [];
   for (const f of m.fx) {
-    if (f.t === 'dmg') floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: '#ffd0c0', t0: now, life: 800 });
-    else if (f.t === 'heal') floaters.push({ x: f.x, y: f.y, txt: '+' + f.v, c: '#8fe8a0', t0: now, life: 900 });
+    const ddx = f.x - me.x, dd = Math.hypot(ddx, f.y - me.y);
+    if (f.t === 'dmg') {
+      const mine = f.by === myId, onMe = f.to === myId, big = f.v >= 14;
+      floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: onMe ? '#ff6050' : mine ? (big ? '#ffd040' : '#fff0d0') : '#e0b8a8', t0: now, life: 900, big: mine && big ? 1 : 0, pop: mine || onMe });
+      if (!f.dot) feel.spill(f.x, f.y + 10, f.a || 0, f.v, f.k, now);
+      if (mine) { feel.sfx(f.sh ? 'block' : big ? 'hithard' : 'hit'); feel.shake(f.dot ? 0 : 2 + Math.min(5, f.v / 5)); if (!f.dot) feel.stop(big ? 75 : 50, now); }
+      else if (onMe) { feel.sfx(f.sh ? 'block' : 'hurt'); feel.shake(4 + Math.min(7, f.v / 3)); feel.hurtFlash(now); }
+      else if (!f.dot) feel.sfx(f.sh ? 'block' : 'hit', ddx, dd, 0.55);
+      continue;
+    }
+    if (f.t === 'die') { feel.addBody(f, now); feel.sfx('die', ddx, dd, f.k === 'player' ? 1 : 0.6); if (f.k === 'logs') feel.sfx('wood', ddx, dd); continue; }
+    if ((f.t === 'arc' || f.t === 'thrust') && f.i === myId && now - lastPredict < 2500) continue; // already shown when you pressed
+    if (f.t === 'arc') feel.sfx(f.w > 2.5 ? 'heavy' : 'swing', ddx, dd, 0.6);
+    else if (f.t === 'thrust') feel.sfx('thrust', ddx, dd, 0.6);
+    else if (f.t === 'boom') feel.sfx('boom', ddx, dd);
+    else if (f.t === 'parry') feel.sfx('block', ddx, dd);
+    if (f.t === 'heal') { floaters.push({ x: f.x, y: f.y, txt: '+' + f.v, c: '#8fe8a0', t0: now, life: 900 }); if (dd < 40) feel.sfx('heal', 0, 0, 0.5); }
     else if (f.t === 'combo') floaters.push({ x: f.x, y: f.y, txt: f.txt + '!', c: '#ffe066', t0: now, life: 1100, big: 1 });
     else { f.t0 = now; f.seed = Math.random() * 1000; fxs.push(f); }
   }
@@ -200,6 +217,8 @@ function buildHotbar() {
 }
 function updateHud() {
   const r = rankOf(me.v);
+  $('valnum').textContent = spaced(me.v); $('somanum').textContent = spaced(me.s);
+  $('bars').firstElementChild.classList.toggle('low', me.h < me.mh * 0.5); $('bars').firstElementChild.classList.toggle('crit', me.h < me.mh * 0.25);
   $('pname').innerHTML = (prof.vet ? uiImg('star', 'Veteran') : '') + esc(prof.name || '');
   $('pname').title = prof.vet ? 'Veteran: played before Season 3' : '';
   $('prank').textContent = r.name;
@@ -220,8 +239,8 @@ function updateHud() {
     const id = prof.belt[i], t = id && TOOLS[id], cdEl = slots[i].querySelector('.cd'), cdt = slots[i].querySelector('.cdt');
     slots[i].classList.toggle('tog', toggled.has(i)); slots[i].classList.toggle('sel', me.q === i);
     if (!t) { cdEl.style.height = '0'; cdt.textContent = ''; continue; }
-    const rem = (gcdEnd[t.group] || 0) - now;
-    cdEl.style.height = rem > 0 ? Math.min(100, (rem / (gcdTotal[t.group] || t.cd)) * 100) + '%' : '0';
+    const rem = Math.max((gcdEnd[t.id] || 0), localCd[t.id] || 0) - now;
+    cdEl.style.height = rem > 0 ? Math.min(100, (rem / (gcdTotal[t.id] || t.cd)) * 100) + '%' : '0';
     cdt.textContent = rem > 950 ? Math.ceil(rem / 1000) : '';
     slots[i].classList.toggle('noen', !!(t.wood && (me.w || 0) < t.wood) || !!(t.gold && (me.b || 0) < t.gold));
   }
@@ -245,6 +264,13 @@ setInterval(() => {
   updateHud();
   if (lastMg !== me.mg) { lastMg = me.mg; if (panelOpen('skills')) renderSkills(); }
 }, 100);
+const spaced = (n) => Math.floor(n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const ROMAN = (n) => { if (!n) return '0'; let r = ''; for (const [v, l] of [[50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) while (n >= v) { r += l; n -= v; } return r; };
+// Valor rankings at the top right: everyone online, most Valor first.
+function renderRankings() {
+  const box = $('rankings'); if (!box) return;
+  box.innerHTML = '<div class="rt">Valor rankings</div>' + meta.lb.map((p) => `<div class="${p.n === prof.name ? 'me' : ''}">${p.n === prof.name ? '&gt; ' : ''}${rankOf(p.v).name} ${esc(p.n)} : ${spaced(p.v)}</div>`).join('');
+}
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // After 5 seconds of dying you pick where to come back.
@@ -397,10 +423,7 @@ function beltPicker(info, id) {
     row.appendChild(b);
   }
   info.appendChild(row);
-  const groups = {};
-  for (const tid of prof.belt) if (tid) (groups[TOOLS[tid].group] ||= []).push(TOOLS[tid].name);
-  const shared = Object.entries(groups).filter(([, v]) => v.length > 1);
-  if (shared.length) info.appendChild(el('p', 'dim', 'Sharing a cooldown: ' + shared.map(([g, v]) => `${GROUPS[g]} (${v.join(', ')})`).join('; ') + '.'));
+  info.appendChild(el('p', 'dim', 'Every tool has its own cooldown. An attack keeps you busy while it plays out, so weave a second weapon between swings.'));
 }
 
 // ------------------------------------------------------------------ factions panel
@@ -568,10 +591,10 @@ function renderMap() {
   // island names, in the sea above each island
   m.textAlign = 'center'; m.lineJoin = 'round';
   for (const I of ISLANDS) {
-    const lx = I.x * sx, ly = Math.max(16, (I.y - I.ry - 260) * sy);
+    const lx = I.mid * sx, ly = Math.max(16, (I.top - 260) * sy);
     m.font = 'italic bold 17px Georgia'; m.strokeStyle = 'rgba(10,20,40,.85)'; m.lineWidth = 4; m.strokeText(I.name, lx, ly); m.fillStyle = '#f0e2b8'; m.fillText(I.name, lx, ly);
   }
-  m.font = 'bold 11px Georgia';
+  m.font = '600 11px Cinzel, Georgia';
   for (const r of REGIONS) {
     if (r.dungeon !== undefined) continue;
     const c2 = CASTLES.find((k) => k.id === r.id), f = facInfo.get(owners.get(r.id));
@@ -579,13 +602,13 @@ function renderMap() {
     else { m.fillStyle = '#7f7'; m.beginPath(); m.arc(r.x * sx, r.y * sy, 6, 0, 7); m.fill(); }
     m.strokeStyle = 'rgba(0,0,0,.8)'; m.lineWidth = 3; m.fillStyle = '#fff';
     m.strokeText(r.name, r.x * sx, r.y * sy - 10); m.fillText(r.name, r.x * sx, r.y * sy - 10);
-    m.font = '9px Georgia'; const sub = r.danger ? (f ? f.name : 'Bandits') + ' · ' + '◆'.repeat(r.danger) + '' : 'Safe haven';
-    m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = 'bold 11px Georgia';
+    m.font = '9px Cinzel, Georgia'; const sub = r.danger ? (f ? f.name : 'Bandits') + ' · ' + '◆'.repeat(r.danger) + '' : 'Safe haven';
+    m.strokeText(sub, r.x * sx, r.y * sy + 18); m.fillStyle = f ? f.color : '#ccc'; m.fillText(sub, r.x * sx, r.y * sy + 18); m.font = '600 11px Cinzel, Georgia';
   }
   for (const cv2 of CAVES) {
     const d = DUNGEONS[cv2.dungeon], wait = meta.bosses && meta.bosses[d.id];
     m.fillStyle = '#c8a0ff'; m.strokeStyle = '#000'; m.lineWidth = 2; m.beginPath(); m.arc(cv2.x * sx, cv2.y * sy, 6, 0, 7); m.fill(); m.stroke();
-    m.font = 'bold 11px Georgia'; m.lineWidth = 3; const lbl = `${d.name} ${'◆'.repeat(d.danger)}${wait ? ' (boss in ' + Math.ceil(wait / 60000) + 'm)' : ''}`;
+    m.font = '600 11px Cinzel, Georgia'; m.lineWidth = 3; const lbl = `${d.name} ${'◆'.repeat(d.danger)}${wait ? ' (boss in ' + Math.ceil(wait / 60000) + 'm)' : ''}`;
     m.strokeText(lbl, cv2.x * sx, cv2.y * sy - 10); m.fillStyle = '#e0d0ff'; m.fillText(lbl, cv2.x * sx, cv2.y * sy - 10);
   }
   drawRadar(m, sx, sy, 5);
@@ -617,7 +640,7 @@ const ACTIONS = [
   ...Array.from({ length: SLOTS }, (_, i) => ['slot' + i, `Toolbelt slot ${i + 1}`, SLOT_DEFAULTS[i]]),
   ['toggle', 'Toggle auto-repeat (hold, then a slot key)', 'AltLeft'], ['turnl', 'Turn left', 'BracketLeft'], ['turnr', 'Turn right', 'BracketRight'],
   ['skills', 'Tools', 'KeyK'], ['factions', 'Factions', 'KeyF'], ['map', 'World map', 'KeyM'], ['board', 'Ranks', 'Tab'],
-  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'],
+  ['help', 'Help', 'KeyH'], ['keys', 'Keybinds', 'KeyO'], ['chat', 'Open chat', 'Enter'], ['mute', 'Mute sound', 'KeyN'],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(([id, , code]) => [id, code]));
 let binds = { ...DEFAULT_BINDS };
@@ -681,6 +704,27 @@ function bindTo(code) {
 // Pressing a slot: hold to repeat; a second press within 0.35s while it cools down queues one use;
 // the toggle key + a slot key keeps it repeating until toggled off.
 function aimMsg() { const w = worldMouse(); return { a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }; }
+// Your attacks are shown at once (swing, sound, effect) instead of waiting for the server's echo.
+let lastPredict = 0, animNow = 0, pausedMs = 0;
+const localCd = {}, pendingFx = [];
+function predictAttack(t, now) {
+  if (!isAttack(t) || me.dead || now < (me.busyEnd || 0) || (gcdEnd[t.id] || 0) > now || (localCd[t.id] || 0) > now) return;
+  me.atk = { tool: t, start: animNow }; me.busyEnd = now + actionTime(t); localCd[t.id] = now + t.cd; lastPredict = now;
+  const w = t.windup || 0;
+  if (t.type === 'strike') for (const h of t.hits) pendingFx.push({ at: now + w + h.t, h, tool: t });
+  else if (t.type === 'shoot') pendingFx.push({ at: now + w, shot: t });
+}
+function firePending(now) {
+  for (let i = pendingFx.length - 1; i >= 0; i--) {
+    const p = pendingFx[i]; if (p.at > now) continue;
+    pendingFx.splice(i, 1);
+    if (me.dead) continue;
+    if (p.shot) { feel.sfx(p.shot.id === 'sling' || p.shot.proj === 'stone' ? 'sling' : 'bow'); continue; }
+    const h = p.h, arc = Math.min(6.4, ((h.arc || 0) * Math.PI) / 180);
+    if (h.line) { fxs.push({ t: 'thrust', i: myId, x: me.x, y: me.y, a: me.ang, r0: 14, r1: h.reach, t0: now, seed: 0 }); feel.sfx('thrust'); }
+    else { fxs.push({ t: 'arc', i: myId, x: me.x, y: me.y, a: me.ang, r: h.reach, w: arc, t0: now, seed: 0 }); feel.sfx(arc >= 6.2 ? 'spin' : arc > 2.5 || h.dmg >= 15 ? 'heavy' : 'swing'); }
+  }
+}
 function slotDown(s, mouse) {
   const now = performance.now(), id = prof.belt[s], t = id && TOOLS[id];
   if (!t) { if (s >= slotsFor(prof.tier || 0)) toast(`That toolbelt slot opens at Soma tier ${SLOT_TIERS[s]}.`); return; }
@@ -688,10 +732,13 @@ function slotDown(s, mouse) {
     if (toggled.has(s)) { toggled.delete(s); send({ t: 'use', s, on: 0 }); } else { toggled.add(s); send({ t: 'use', s, on: 1, ...aimMsg() }); }
     return;
   }
-  const cooling = (gcdEnd[t.group] || 0) > now;
+  const cooling = (gcdEnd[t.id] || 0) > now;
   if (cooling && now - (lastPress[s] || 0) < 350) send({ t: 'q', s, ...aimMsg() });
   lastPress[s] = now;
   held.add(s);
+  feel.initAudio();
+  predictAttack(t, now);
+  if (t.type === 'shield') feel.sfx('shield');
   send({ t: 'use', s, on: 1, ...aimMsg() });
 }
 function slotUp(s) { if (!held.has(s)) return; held.delete(s); if (!toggled.has(s)) send({ t: 'use', s, on: 0 }); }
@@ -721,7 +768,9 @@ addEventListener('keydown', (e) => {
   if (act || e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Tab' || e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault();
   keys[e.code] = true;
   if (!act || e.repeat) return;
+  feel.initAudio();
   if (act === 'chat') return openChat();
+  if (act === 'mute') { feel.setMuted(!feel.isMuted()); return toast(feel.isMuted() ? 'Sound off (N)' : 'Sound on (N)'); }
   if (act === 'turnl' || act === 'turnr') { if (kbTurn === null) kbTurn = me.ang; return; }
   if (PANELS.includes(act)) return togglePanel(act);
   if (act.startsWith('slot')) slotDown(+act.slice(4), false);
@@ -734,6 +783,7 @@ addEventListener('keyup', (e) => {
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; for (const s of [...held]) slotUp(s); });
 function openChat() { chatOpen = true; for (const s of [...held]) slotUp(s); const i = $('chatin'); i.style.display = 'block'; i.value = ''; i.focus(); }
 function closeChat() { chatOpen = false; const i = $('chatin'); i.style.display = 'none'; i.blur(); }
+addEventListener('pointerdown', () => feel.initAudio());
 addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; kbTurn = null; });
 addEventListener('mousedown', (e) => { if (rebinding && performance.now() - rebindAt > 250 && e.target.closest('#keys')) { e.preventDefault(); bindTo('Mouse' + e.button); } });
 cv.addEventListener('mousedown', (e) => {
@@ -749,7 +799,7 @@ cv.addEventListener('contextmenu', (e) => e.preventDefault());
 cv.addEventListener('auxclick', (e) => e.preventDefault());
 
 // ------------------------------------------------------------------ ground chunks
-const CHUNK = 512, RES = 4, NPX = CHUNK / RES, chunks = new Map(), pending = new Set();
+const CHUNK = 512, RES = 2, NPX = CHUNK / RES, chunks = new Map(), pending = new Set();
 const tmp = document.createElement('canvas'); tmp.width = NPX; tmp.height = NPX; const tctx = tmp.getContext('2d');
 let worker = null;
 try {
@@ -757,6 +807,15 @@ try {
   worker.onmessage = (e) => { const { cx, cy, px } = e.data; pending.delete(cy * 100 + cx); finishChunk(cx, cy, px); };
   worker.onerror = () => { worker = null; pending.clear(); };
 } catch { worker = null; }
+// A tiling grit texture (grain, small stones, worn patches) laid over the ground.
+const GRIT = (() => {
+  const n = 256, c = document.createElement('canvas'); c.width = c.height = n; const x = c.getContext('2d'), img = x.createImageData(n, n), R = rng(4242);
+  for (let i = 0; i < n * n; i++) { const v = 128 + (R() - 0.5) * 70; img.data.set([v, v, v, 255], i * 4); }
+  x.putImageData(img, 0, 0);
+  for (let i = 0; i < 260; i++) { const px = R() * n, py = R() * n, rr = 1 + R() * 3.5; x.fillStyle = R() < 0.5 ? 'rgba(20,20,20,.5)' : 'rgba(235,235,235,.4)'; x.beginPath(); x.ellipse(px, py, rr, rr * (0.5 + R() * 0.5), R() * 3, 0, 7); x.fill(); }
+  for (let i = 0; i < 40; i++) { const px = R() * n, py = R() * n, rr = 10 + R() * 30, g = x.createRadialGradient(px, py, 1, px, py, rr); g.addColorStop(0, R() < 0.5 ? 'rgba(0,0,0,.25)' : 'rgba(255,255,255,.18)'); g.addColorStop(1, 'rgba(128,128,128,0)'); x.fillStyle = g; x.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+  return c;
+})();
 // Turns raw ground pixels into a chunk canvas and sprinkles grass tufts, flowers and pebbles on top.
 function finishChunk(cx, cy, px) {
   tctx.putImageData(new ImageData(px, NPX, NPX), 0, 0);
@@ -781,6 +840,8 @@ function finishChunk(cx, cy, px) {
       x.fillStyle = 'rgba(160,180,200,.35)'; x.beginPath(); x.ellipse(px2, py, 6 + R() * 6, 2, 0, 0, 7); x.fill();
     }
   }
+  x.save(); x.globalCompositeOperation = 'overlay'; x.globalAlpha = 0.55; const pat = x.createPattern(GRIT, 'repeat'); pat.setTransform(new DOMMatrix().translate(-(x0 % 256), -(y0 % 256))); x.fillStyle = pat; x.fillRect(0, 0, CHUNK, CHUNK);
+  x.globalAlpha = 1; x.globalCompositeOperation = 'multiply'; x.fillStyle = '#a9a49a'; x.fillRect(0, 0, CHUNK, CHUNK); x.restore();
   chunks.set(cy * 100 + cx, { canvas: c, used: performance.now() });
   if (chunks.size > 60) { const old = [...chunks.entries()].sort((a, b) => a[1].used - b[1].used).slice(0, 10); for (const [ok] of old) chunks.delete(ok); }
 }
@@ -829,6 +890,12 @@ function drawBridges(x0, y0, x1, y1) {
 }
 
 // ------------------------------------------------------------------ drawing helpers
+function bodySprite(b) {
+  if (b.k === 'logs' || (MOBS[b.k] && MOBS[b.k].obj)) return null;
+  const look = b.k === 'player' ? playerLook(b.n || '', b.rk || 0, facColor(b.f), b.wp, null) : { weapon: 'none', shieldKind: null };
+  if (b.k === 'player') look.weapon = 'none';
+  return creature(b.k, facColor(b.f) || '#888', 0, false, look);
+}
 const facColor = (id) => { const f = facInfo.get(id); return f ? f.color : null; };
 function isAlly(o) { return o.id === myId || (prof.fac && o.f === prof.fac) || o.ow === myId; }
 const RADIUS = (o) => (o.k === 'player' ? 14 : MOBS[o.k] ? MOBS[o.k].r : 13);
@@ -873,16 +940,28 @@ function drawEnt(o, x, y, now, self) {
   if (o.fl & 2) { ctx.strokeStyle = 'rgba(80,200,240,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 8, 0, 7); ctx.stroke(); }
   if (o.fl & 16) { ctx.strokeStyle = 'rgba(240,190,70,.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 11, now / 300, now / 300 + 4.5); ctx.stroke(); }
   const step = Math.sin(o.ph || 0) * (o.moving ? 1 : 0), ang = self ? me.ang : o.a;
+  // the attack in progress: your own from the moment you pressed, everyone else's from the server
+  const atk = self && me.atk && animNow - me.atk.start < 2600 ? me.atk : o.atkTool ? { tool: TOOLS[o.atkTool], start: o.atkStart } : null;
+  const at = atk ? animNow - atk.start : 1e9, wkind = o.k === 'player' || MOBS[o.k]?.ai === 'kit' ? TOOL_SPRITE[o.wp] : null, swings = wkind && SWINGS.has(wkind);
   const look = o.k === 'player' ? playerLook(o.n || prof.name, o.rk || 0, facColor(o.f), o.wp, o.sh) : { weapon: TOOL_SPRITE[o.wp] || null, shieldKind: o.sh || null };
-  const img = creature(o.k, facColor(o.f) || '#888', step, o.at || o.sp, look);
+  if (swings) look.weapon = 'none';
+  const img = creature(o.k, facColor(o.f) || '#888', step, at < 260 || o.sp, look);
   const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
   // a quick step into each attack, so a swing or a thrust has weight
-  const ap = o.atkT ? (now - o.atkT) / 240 : 1, lunge = ap < 1 ? Math.sin(ap * Math.PI) * 5 : 0;
+  const ap = at / 240, lunge = ap < 1 ? Math.sin(ap * Math.PI) * 5 : 0;
   ctx.save(); ctx.translate(x + Math.cos(ang) * lunge, y + Math.sin(ang) * lunge); ctx.rotate(o.sp && o.k !== 'player' ? now / 60 : ang);
   if (o.k === 'wraith' || o.k === 'hollow_prince') ctx.globalAlpha = alpha * 0.85;
   if (o.enr) { ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; }
   ctx.drawImage(img, -w / 2, -h / 2, w, h);
-  if (o.flash && now - o.flash < 120) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(img, -w / 2, -h / 2, w, h); }
+  if (o.flash && now - o.flash < 120) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(img, -w / 2, -h / 2, w, h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = alpha; }
+  if (swings) {
+    // the weapon is held at the right hand and moves through the attack
+    const pose = feel.weaponPose(atk && atk.tool && atk.tool.id === o.wp ? atk.tool : null, at), ws = weaponSprite(wkind), sc = 1.3 * (o.k === 'player' ? 1 : lookScale(o.k));
+    ctx.save(); ctx.translate(10 * sc, 9 * sc); ctx.rotate(pose.rot + step * 0.04); ctx.translate(pose.fwd, 0);
+    ctx.drawImage(ws.c, -ws.px * sc, -ws.py * sc, ws.w * sc, ws.h * sc);
+    ctx.restore();
+    ctx.fillStyle = '#e0b890'; ctx.strokeStyle = 'rgba(20,14,10,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(10 * sc, 9 * sc, 3.6, 0, 7); ctx.fill(); ctx.stroke();
+  }
   ctx.restore();
   ctx.globalAlpha = alpha;
   // A raised shield shows as a bright arc in front.
@@ -895,26 +974,28 @@ function drawLabels(o, x, y) {
   if (o.k === 'logs' || (OBJ(o) && !isAlly(o) && o.h >= o.m)) return;
   const r = RADIUS(o) * 1.25, self = o.id === myId, ally = isAlly(o);
   if (o.iv >= 0.6 && !ally) return;
-  if (o.h < o.m || o.k === 'player') {
-    const bw = Math.max(32, r * 2.2), by = y - r - 14;
-    ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(x - bw / 2 - 1, by - 1, bw + 2, 6);
-    ctx.fillStyle = self ? '#5fd35f' : ally ? '#4cc0e0' : '#e04848'; ctx.fillRect(x - bw / 2, by, bw * Math.max(0, o.h / o.m), 4);
+  const nameCol = self ? '#fff3c4' : ally ? '#8fe07a' : '#ff7060';
+  if (o.h < o.m || o.k === 'player' || MOBS[o.k]?.ai === 'kit') {
+    const bw = Math.max(30, r * 2.2), by = y + r + 4;
+    ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x - bw / 2 - 1, by - 1, bw + 2, 5);
+    ctx.fillStyle = self ? '#8fe07a' : ally ? '#6ac060' : '#c83a2a'; ctx.fillRect(x - bw / 2, by, bw * Math.max(0, o.h / o.m), 3);
   }
-  ctx.textAlign = 'center'; ctx.lineJoin = 'round';
+  ctx.textAlign = 'center'; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.85)';
+  const line = (txt, yy, font, col, lw = 3) => { ctx.font = font; ctx.lineWidth = lw; ctx.strokeText(txt, x, yy); ctx.fillStyle = col; ctx.fillText(txt, x, yy); };
   if (o.k === 'player') {
-    const f = facInfo.get(o.f), nm = ((self ? prof.vet : o.vt) ? '★ ' : '') + (o.n || prof.name);
-    ctx.font = 'bold 12px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 3;
-    ctx.strokeText(nm, x, y - r - 30); ctx.fillStyle = self ? '#fff3c4' : ally ? '#a8f0b0' : '#ffd0c0'; ctx.fillText(nm, x, y - r - 30);
-    ctx.font = '10px Georgia'; const sub = `${f ? f.name + ' · ' : ''}${RANKS[o.rk || 0].name}`;
-    ctx.strokeText(sub, x, y - r - 18); ctx.fillStyle = f ? f.color : '#c8bca0'; ctx.fillText(sub, x, y - r - 18);
-  } else if (o.h < o.m || o.ow || o.el || MOBS[o.k]?.ai === 'kit') {
-    const boss = MOBS[o.k]?.boss;
-    ctx.font = o.el || boss ? 'bold 11px Georgia' : '10px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 3;
-    const nm = (o.el ? o.el[0].toUpperCase() + o.el.slice(1) + ' ' : '') + (MOBS[o.k] ? MOBS[o.k].name : o.k) + (o.ow === myId ? ' (yours)' : '');
-    ctx.strokeText(nm, x, y - r - 18); ctx.fillStyle = o.el ? '#ffd050' : ally ? '#a8e0f0' : '#f0d8c8'; ctx.fillText(nm, x, y - r - 18);
+    const f = facInfo.get(o.f), tier = self ? prof.tier : o.ti;
+    line(RANKS[o.rk || 0].name, y - r - 40, '600 16px Cinzel, Georgia', '#f2ece0', 4);
+    line(((self ? prof.vet : o.vt) ? '★ ' : '') + (o.n || prof.name), y - r - 23, '600 13px Cinzel, Georgia', nameCol);
+    line('Tier ' + ROMAN(tier || 0) + (f && !self ? ' · ' + f.name : ''), y - r - 9, '11px Cinzel, Georgia', ally ? '#b8e0a8' : '#f0b0a0');
+  } else if (o.h < o.m || o.ow || o.el || MOBS[o.k]?.ai === 'kit' || MOBS[o.k]?.boss) {
+    const boss = MOBS[o.k]?.boss, f = facInfo.get(o.f);
+    const nm = (o.el ? o.el[0].toUpperCase() + o.el.slice(1) + ' ' : '') + (MOBS[o.k] ? MOBS[o.k].name : o.k);
+    line(nm, y - r - 22, boss || o.el ? '600 15px Cinzel, Georgia' : '600 13px Cinzel, Georgia', o.el ? '#ffd050' : '#f0e8dc');
+    const sub = o.ow === myId ? 'Yours' : f ? f.name : MOBS[o.k]?.ai === 'kit' ? 'Outlaw' : '';
+    if (sub) line(sub, y - r - 8, '11px Cinzel, Georgia', o.ow === myId ? '#8fe07a' : f ? f.color : nameCol);
   }
   const on = STATUS.filter((bit) => o.fl & bit);
-  on.forEach((bit, n) => { const c = statusCanvas(bit); if (c) ctx.drawImage(c, x - on.length * 7.5 + n * 15, y + r + 5, 14, 14); });
+  on.forEach((bit, n) => { const c = statusCanvas(bit); if (c) ctx.drawImage(c, x - on.length * 7.5 + n * 15, y + r + 10, 14, 14); });
 }
 function drawProjs(now) {
   for (const [x, y, k, a] of projs) {
@@ -1051,10 +1132,11 @@ function drawFx(now) {
     }
   }
   floaters = floaters.filter((f) => now - f.t0 < f.life);
-  ctx.textAlign = 'center'; ctx.font = 'bold 14px Georgia'; ctx.lineJoin = 'round';
+  ctx.textAlign = 'center'; ctx.font = '600 14px Cinzel, Georgia'; ctx.lineJoin = 'round';
   for (const f of floaters) {
     const p = (now - f.t0) / f.life;
-    ctx.font = f.big ? `bold ${Math.round(18 + 6 * Math.max(0, 1 - p * 4))}px Georgia` : 'bold 14px Georgia';
+    const pop = f.pop ? 1 + 0.6 * Math.max(0, 1 - p * 6) : 1;
+    ctx.font = f.big ? `600 ${Math.round((20 + 8 * Math.max(0, 1 - p * 4)) * pop)}px Cinzel, Georgia` : `600 ${Math.round(15 * pop)}px Cinzel, Georgia`;
     ctx.globalAlpha = 1 - p * p; ctx.strokeStyle = '#000'; ctx.lineWidth = f.big ? 4 : 3; ctx.strokeText(f.txt, f.x, f.y - p * 34); ctx.fillStyle = f.c; ctx.fillText(f.txt, f.x, f.y - p * 34); ctx.globalAlpha = 1;
   }
 }
@@ -1089,7 +1171,7 @@ function drawChannel() {
   const [rem, total, label] = me.ch, f = 1 - rem / total, cx = VW / 2, cy = VH / 2 - 60 * zoom;
   ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.arc(cx, cy, 22, 0, 7); ctx.stroke();
   ctx.strokeStyle = '#c8a0ff'; ctx.beginPath(); ctx.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
-  ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000';
+  ctx.font = '600 13px Cinzel, Georgia'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000';
   ctx.strokeText(label, cx, cy - 32); ctx.fillStyle = '#e8d8ff'; ctx.fillText(label, cx, cy - 32);
 }
 // Where a placed tool will land, drawn while its key is held.
@@ -1104,6 +1186,12 @@ function drawPlacement() {
 }
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  // Hit-stop: the animation clock pauses for a moment when a blow lands.
+  if (feel.stopped(now)) pausedMs += dt * 1000;
+  animNow = now - pausedMs;
+  for (const sl of new Set([...held, ...toggled])) { const t = TOOLS[prof.belt[sl]]; if (t) predictAttack(t, now); }
+  firePending(now);
+  feel.stepParticles(dt, now);
   // Keyboard turning nudges the aim; facing follows the aim at a fixed rate, like on the server.
   if (kbTurn !== null) kbTurn += ((pressed('turnr') ? 1 : 0) - (pressed('turnl') ? 1 : 0)) * TURN_RATE * dt;
   if (!me.dead) me.ang = turnToward(me.ang, aimAngle(), TURN_RATE * dt);
@@ -1129,8 +1217,9 @@ function frame(now) {
   }
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#1e4888'; ctx.fillRect(0, 0, VW, VH);
-  ctx.save(); ctx.translate(VW / 2, VH / 2); ctx.scale(zoom, zoom); ctx.translate(-me.x, -me.y);
+  ctx.fillStyle = '#152f58'; ctx.fillRect(0, 0, VW, VH);
+  const [shx, shy] = feel.shakeOffset(dt);
+  ctx.save(); ctx.translate(VW / 2 + shx, VH / 2 + shy); ctx.scale(zoom, zoom); ctx.translate(-me.x, -me.y);
   const hw = VW / 2 / zoom, hh = VH / 2 / zoom, x0 = me.x - hw, y0 = me.y - hh, x1 = me.x + hw, y1 = me.y + hh;
   chunkBudget = 1;
   for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
@@ -1159,6 +1248,8 @@ function frame(now) {
     const s = propSprite(p), w = s.c.width / 2;
     ctx.drawImage(s.c, p.x - w / 2, p.y - w / 2, w, w);
   }
+  feel.drawDecals(ctx, now, x0, y0, x1, y1);
+  feel.drawBodies(ctx, now, x0, y0, x1, y1, bodySprite);
   drawZones(now);
   // Ground objects (traps, log piles) first, then everything with height sorted by y.
   const list = [];
@@ -1186,31 +1277,33 @@ function frame(now) {
     ctx.drawImage(castleTop(c, facColor(owners.get(c.id)) || '#8a5a42'), c.x - S / 2, c.y - S / 2, S, S);
   }
   if (villageVis) ctx.drawImage(villageTop(), VILLAGE.x - VS / 2, VILLAGE.y - VS / 2, VS, VS);
+  feel.drawParticles(ctx);
   drawProjs(now);
   drawPlacement();
   for (const it of list) if (it.o) drawLabels(it.o, it.self ? me.x : it.o.x, it.self ? me.y : it.o.y);
   for (const c of visCastles) {
     const f = facInfo.get(owners.get(c.id)), top = c.y - CASTLE_TYPES[c.type].outer;
-    ctx.textAlign = 'center'; ctx.font = 'bold 16px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+    ctx.textAlign = 'center'; ctx.font = '600 16px Cinzel, Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4; ctx.lineJoin = 'round';
     ctx.strokeText(c.name, c.x, top - 50); ctx.fillStyle = '#fff4d8'; ctx.fillText(c.name, c.x, top - 50);
-    ctx.font = '13px Georgia'; const lbl = (f ? 'Held by ' + f.name : 'Held by bandits') + ' · ' + '◆'.repeat(c.danger) + (levels.get(c.id) > 1 ? ' · level ' + levels.get(c.id) : '');
+    ctx.font = '13px Cinzel, Georgia'; const lbl = (f ? 'Held by ' + f.name : 'Held by bandits') + ' · ' + '◆'.repeat(c.danger) + (levels.get(c.id) > 1 ? ' · level ' + levels.get(c.id) : '');
     ctx.strokeText(lbl, c.x, top - 32); ctx.fillStyle = f ? f.color : '#c8c0b0'; ctx.fillText(lbl, c.x, top - 32);
   }
   for (const cv2 of CAVES) if (Math.abs(cv2.x - me.x) < hw + 100 && Math.abs(cv2.y - me.y) < hh + 100) {
     const d = DUNGEONS[cv2.dungeon];
-    ctx.textAlign = 'center'; ctx.font = 'bold 15px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
+    ctx.textAlign = 'center'; ctx.font = '600 15px Cinzel, Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
     ctx.strokeText(d.name, cv2.x, cv2.y - 66); ctx.fillStyle = '#e0d0ff'; ctx.fillText(d.name, cv2.x, cv2.y - 66);
-    ctx.font = '12px Georgia'; const sub = 'Dungeon · ' + '◆'.repeat(d.danger) + ' · walk in to enter';
+    ctx.font = '12px Cinzel, Georgia'; const sub = 'Dungeon · ' + '◆'.repeat(d.danger) + ' · walk in to enter';
     ctx.strokeText(sub, cv2.x, cv2.y - 50); ctx.fillStyle = '#c8b8e8'; ctx.fillText(sub, cv2.x, cv2.y - 50);
   }
   drawBossBar();
   if (villageVis) {
-    ctx.textAlign = 'center'; ctx.font = 'bold 16px Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
+    ctx.textAlign = 'center'; ctx.font = '600 16px Cinzel, Georgia'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4;
     ctx.strokeText('Hanbin Haven (safe zone)', VILLAGE.x, VILLAGE.y - VILLAGE.r - 18); ctx.fillStyle = '#b8f0b0'; ctx.fillText('Hanbin Haven (safe zone)', VILLAGE.x, VILLAGE.y - VILLAGE.r - 18);
   }
   drawFx(now);
   ctx.restore();
   drawChannel();
+  const fa = feel.flashAlpha(now); if (fa > 0) { ctx.fillStyle = `rgba(160,0,0,${fa})`; ctx.fillRect(0, 0, VW, VH); }
   const hurt = me.h < me.mh * 0.3 && !me.dead;
   if (hurt) ctx.globalAlpha = 0.75 + 0.25 * Math.sin(now / 200);
   ctx.drawImage(getVignette(hurt), 0, 0, VW, VH); ctx.globalAlpha = 1;

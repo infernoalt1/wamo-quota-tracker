@@ -4,8 +4,8 @@
 
 export const BASE_HP = 80, SLOTS = 10, TURN_RATE = (600 * Math.PI) / 180; // rad per second
 export const ATK_CAP = [-90, 75], DEF_CAP = [-50, 90], SPD_CAP = [0.2, 2], ALLY_SHIELD_CAP = 20, AURA_GAP = 300;
-// Moving away from where you face (more than 100° off) is slower, so kiting has a cost.
-export const BACKPEDAL = 0.75, BACKPEDAL_ANGLE = (100 * Math.PI) / 180;
+// Moving away from where you face costs nothing (BACKPEDAL 1): walking backwards is as fast as forwards.
+export const BACKPEDAL = 1, BACKPEDAL_ANGLE = (100 * Math.PI) / 180;
 export const RESPEC_COST = 0.05, MAX_TRAPS = 10, MAX_TROOPS = 5;
 
 export const PATHS = [
@@ -19,7 +19,7 @@ export const GROUPS = {
   buff: 'Buff', stealth: 'Stealth', banner: 'Banner', trap: 'Trap', troops: 'Troops',
 };
 // Time-to-kill bands (seconds against 80 HP, no defence, attacking non-stop) every weapon must sit in.
-export const TTK_BANDS = { light: [4.4, 5.0], heavy: [4.6, 5.2], reach: [5.4, 7.5], ranged: [5.5, 7.5], side: [14, Infinity] };
+export const TTK_BANDS = { light: [4.4, 5.0], heavy: [4.2, 6.0], reach: [5.4, 7.5], ranged: [5.5, 8.5], side: [14, Infinity] };
 
 const T = (id, name, path, req, group, cd, spec, desc) => ({ id, name, path, req, group, cd, ...spec, desc });
 const hit = (t, dmg, o = {}) => ({ t, dmg, ...o });
@@ -30,21 +30,21 @@ export const TOOL_LIST = [
   T('pike', 'Pike', 'warrior', 'spear', 'weapon', 700, { cls: 'reach', type: 'strike', hits: [hit(0, 10, { line: 1, reach: 190, first: 1, push: 60 })], after: { spd: -15, dur: 500 } }, 'Long thrust that pushes the foe back. You are slower for a moment after each thrust.'),
   T('partisan', 'Partisan', 'warrior', 'pike', 'weapon', 950, { cls: 'reach', type: 'strike', hits: [hit(0, 11, { line: 1, reach: 200, first: 1 })] }, 'The longest thrust in the game.'),
   T('lance', 'Lance', 'warrior', 'pike', 'weapon', 2200, { cls: 'reach', type: 'charge', dist: 200, dur: 400, dmg: 24, push: 70, after: { spd: -40, atk: -20, dur: 2000 } }, 'Charge forward and run through the first foe, knocking it back. Afterwards you are slow and weaker for 2s.'),
-  T('glaive', 'Glaive', 'warrior', 'spear', 'weapon', 1200, { cls: 'reach', type: 'strike', hits: [0, 200, 400].map((t) => hit(t, 5, { arc: 90, reach: 140, pull: 15 })) }, 'Three quick swipes, each pulling foes toward you.'),
-  T('halberd', 'Halberd', 'warrior', 'glaive', 'weapon', 1000, { cls: 'reach', type: 'strike', hits: [hit(0, 13, { arc: 70, reach: 140, root: 300 })] }, 'Chop that holds the foe in place for a moment.'),
+  T('glaive', 'Glaive', 'warrior', 'spear', 'weapon', 1200, { cls: 'reach', type: 'strike', hits: [0, 200, 400].map((t) => hit(t, 4.5, { arc: 90, reach: 140, pull: 15 })) }, 'Three quick swipes, each pulling foes toward you.'),
+  T('halberd', 'Halberd', 'warrior', 'glaive', 'weapon', 1000, { cls: 'reach', type: 'strike', hits: [hit(0, 14, { arc: 70, reach: 140, root: 300 })] }, 'Chop that holds the foe in place for a moment.'),
   T('pollaxe', 'Pollaxe', 'warrior', 'halberd', 'weapon', 1000, { cls: 'reach', type: 'strike', hits: [hit(0, 11, { line: 1, reach: 150, first: 1, pull: 60 })] }, 'Hook that drags the foe toward you.'),
   T('ranseur', 'Ranseur', 'warrior', 'glaive', 'weapon', 900, { cls: 'reach', type: 'strike', hits: [hit(0, 10, { line: 1, reach: 150, first: 1, push: 90 })] }, 'Thrust that shoves the foe far back.'),
   T('bardiche', 'Bardiche', 'warrior', 'ranseur', 'weapon', 1250, { cls: 'heavy', type: 'strike', windup: 300, hits: [hit(0, 20, { arc: 160, reach: 120 })] }, 'Short wind-up, then a wide 160° chop.'),
   T('sabre', 'Sabre', 'warrior', 'shortsword', 'weapon', 700, { cls: 'light', type: 'strike', step: 20, hits: [hit(0, 12, { arc: 100, reach: 80, push: 40 })], after: { spd: -30, dur: 400 } }, 'Slash with a step forward that pushes the foe back. You are slower for a moment after.'),
   T('rapier', 'Rapier', 'warrior', 'sabre', 'weapon', 800, { cls: 'light', type: 'strike', windup: 100, hits: [hit(0, 13, { line: 1, reach: 110, first: 1 })] }, 'Quick, precise thrust.'),
-  T('battleaxe', 'Battleaxe', 'warrior', 'shortsword', 'weapon', 2400, { cls: 'heavy', type: 'strike', hits: [[0, 8], [400, 8], [800, 10], [1200, 14]].map(([t, d]) => hit(t, d, { arc: 110, reach: 90 })) }, 'Four swings in a row, each harder. Only foes still in the arc are hit.'),
-  T('greatsword', 'Greatsword', 'warrior', 'battleaxe', 'weapon', 1600, { cls: 'heavy', type: 'strike', windup: 450, hits: [hit(0, 26, { arc: 150, reach: 105 })] }, 'Slow wind-up, then a huge 150° sweep.'),
-  T('flail', 'Flail', 'warrior', 'battleaxe', 'weapon', 1900, { cls: 'heavy', type: 'strike', hits: [0, 400, 800].map((t) => hit(t, 11, { arc: 360, reach: 95 })) }, 'Three full spins that hit everything around you. Once started it can\'t be stopped.'),
+  T('battleaxe', 'Battleaxe', 'warrior', 'shortsword', 'weapon', 2400, { cls: 'heavy', type: 'strike', hits: [[0, 9], [400, 9], [800, 11], [1200, 15]].map(([t, d]) => hit(t, d, { arc: 110, reach: 90 })) }, 'Four swings in a row, each harder. Only foes still in the arc are hit.'),
+  T('greatsword', 'Greatsword', 'warrior', 'battleaxe', 'weapon', 1600, { cls: 'heavy', type: 'strike', windup: 450, hits: [hit(0, 30, { arc: 150, reach: 105 })] }, 'Slow wind-up, then a huge 150° sweep.'),
+  T('flail', 'Flail', 'warrior', 'battleaxe', 'weapon', 2400, { cls: 'heavy', type: 'strike', hits: [0, 400, 800].map((t) => hit(t, 11, { arc: 360, reach: 95 })) }, 'Three full spins that hit everything around you. Once started it can\'t be stopped.'),
   T('quarterstaff', 'Quarterstaff', 'warrior', 'shortsword', 'sidearm', 1600, { cls: 'side', type: 'strike', hits: [0, 250].map((t) => hit(t, 4, { arc: 90, reach: 95, push: 15 })) }, 'Sidearm: two quick strikes with a small push. Use it between weapon swings.'),
   // ------------------------------------------------------------- Warrior: shields
   T('buckler', 'Buckler', 'warrior', null, 'shield', 3500, { type: 'shield', def: 40, dur: 2000, spd: -10 }, 'Small, quick shield.'),
   T('targe', 'Targe', 'warrior', 'buckler', 'shield', 4500, { type: 'shield', def: 45, dur: 2000, atk: -10 }, 'Round shield.'),
-  T('kite', 'Kite Shield', 'warrior', 'targe', 'shield', 7000, { type: 'shield', def: 50, dur: 2500, atk: -35, spd: -10 }, 'Tall shield.'),
+  T('kite', 'Kite Shield', 'warrior', 'targe', 'shield', 7000, { type: 'shield', def: 60, dur: 2500, atk: -15, spd: -10 }, 'Tall shield.'),
   T('pavise', 'Pavise', 'warrior', 'kite', 'shield', 9000, { type: 'shield', def: 85, dur: 2500, atk: -40, spd: -40, shove: 30 }, 'The strongest shield: shoves away foes that touch you, but you can barely move or hurt anyone behind it.'),
   T('parma', 'Parma', 'warrior', 'buckler', 'shield', 2500, { type: 'shield', def: 50, dur: 1000 }, 'Fast shield. The half-second gap between raises is its weakness.'),
   T('round', 'Round Shield', 'warrior', 'parma', 'shield', 5000, { type: 'shield', def: 75, dur: 1500, atk: -60 }, 'Very strong, but your attacks are crippled while it is up: strike in the gaps, then raise it again.'),
@@ -60,11 +60,11 @@ export const TOOL_LIST = [
   T('crossover', 'Cross Over', 'warrior', 'retreat', 'maneuver', 6000, { type: 'move', dir: 'cross', target: 160, dist: 120 }, 'Needs a foe within 160: step back and to the side while still facing it.'),
   T('redemption', 'Redemption', 'warrior', 'parry', 'buff', 20000, { type: 'buff', eff: { atk: 30, spd: 15, def: -35 }, dur: 4000 }, '+30 attack and +15% speed for 4s, but -35 defence.'),
   // ------------------------------------------------------------- Hunter: ranged
-  T('sling', 'Sling', 'hunter', null, 'weapon', 550, { cls: 'ranged', type: 'shoot', dmg: 7, speed: 700, range: 450, proj: 'stone' }, 'Stone shot. No movement penalty.'),
-  T('flatbow', 'Flatbow', 'hunter', 'sling', 'weapon', 800, { cls: 'ranged', type: 'shoot', dmg: 10, speed: 760, range: 550, during: { spd: -10, dur: 300 } }, 'Arrow. You are a little slower while drawing.'),
-  T('longbow', 'Longbow', 'hunter', 'flatbow', 'weapon', 1300, { cls: 'ranged', type: 'shoot', windup: 500, dmg: 16, speed: 900, range: 800, during: { spd: -40, dur: 500 }, maim: { spd: -15, dur: 800 } }, 'Long draw (40% slower while drawing), then a long-range arrow that maims (target 15% slower for 0.8s).'),
-  T('crossbow', 'Crossbow', 'hunter', 'flatbow', 'weapon', 1800, { cls: 'ranged', type: 'shoot', dmg: 20, speed: 1000, range: 650, proj: 'bolt' }, 'Fast, heavy bolt.'),
-  T('repeater', 'Repeating Crossbow', 'hunter', 'crossbow', 'weapon', 1800, { cls: 'ranged', type: 'shoot', count: 4, every: 200, dmg: 5, speed: 900, range: 500, proj: 'bolt', during: { spd: -35, dur: 800 } }, 'Four bolts in quick succession. You are slower while firing.'),
+  T('sling', 'Sling', 'hunter', null, 'weapon', 550, { cls: 'ranged', type: 'shoot', dmg: 7, speed: 700, range: 450, proj: 'stone', during: { spd: -45, dur: 400 } }, 'Stone shot. You are slower for a moment as you sling it.'),
+  T('flatbow', 'Flatbow', 'hunter', 'sling', 'weapon', 800, { cls: 'ranged', type: 'shoot', dmg: 10, speed: 760, range: 550, during: { spd: -55, dur: 500 } }, 'Arrow. You are much slower while drawing: plant your feet to shoot.'),
+  T('longbow', 'Longbow', 'hunter', 'flatbow', 'weapon', 1500, { cls: 'ranged', type: 'shoot', windup: 500, dmg: 15, speed: 900, range: 800, during: { spd: -70, dur: 900 } }, 'Long draw that nearly roots you (70% slower), then a heavy arrow that flies 800.'),
+  T('crossbow', 'Crossbow', 'hunter', 'flatbow', 'weapon', 1800, { cls: 'ranged', type: 'shoot', dmg: 20, speed: 1000, range: 650, proj: 'bolt', during: { spd: -55, dur: 700 } }, 'Fast, heavy bolt. You are slower while you aim and loose it.'),
+  T('repeater', 'Repeating Crossbow', 'hunter', 'crossbow', 'weapon', 2100, { cls: 'ranged', type: 'shoot', count: 4, every: 200, dmg: 5, speed: 900, range: 500, proj: 'bolt', during: { spd: -55, dur: 900 } }, 'Four bolts in quick succession. You are slower while firing.'),
   T('pilum', 'Pilum', 'hunter', 'sling', 'sidearm', 4000, { cls: 'side', type: 'shoot', dmg: 4, speed: 650, range: 400, proj: 'pilum', eff: { def: -20, spd: -20, dur: 2000 } }, 'Sidearm: thrown spear. The target gets -20 defence and is 20% slower for 2s. The answer to shields.'),
   T('plumbata', 'Plumbata', 'hunter', 'pilum', 'weapon', 2200, { cls: 'ranged', type: 'shoot', dmg: 28, speed: 750, range: 600, proj: 'dart', small: 1, arm: 200 }, 'Weighted dart with a tiny hitbox. It only hurts after flying 200 px.'),
   // ------------------------------------------------------------- Hunter: blades and footwork
@@ -114,6 +114,17 @@ export const TOOL_LIST = [
   T('hire_healer', 'Hire Healer', 'auxiliary', 'hire_archer', 'troops', 3000, { type: 'hire', npc: 'hire_healer', gold: 120 }, "Hire a healer (50 HP) who throws Mender's Tincture at hurt allies, for 120 banked gold."),
 ];
 export const TOOLS = Object.fromEntries(TOOL_LIST.map((t) => [t.id, t]));
+// Every tool has its own cooldown. An attack also keeps you busy while it plays out (wind-up, every swing
+// or shot, and a moment to recover), so you can weave a second weapon between swings but never swing two at once.
+export const isAttack = (t) => t.type === 'strike' || t.type === 'shoot' || t.type === 'charge';
+export function actionTime(t) {
+  const w = t.windup || 0;
+  if (t.type === 'strike') return w + t.hits[t.hits.length - 1].t + ATTACK_RECOVER;
+  if (t.type === 'shoot') return w + ((t.count || 1) - 1) * (t.every || 0) + ATTACK_RECOVER;
+  if (t.type === 'charge') return w + t.dur + ATTACK_RECOVER;
+  return 0;
+}
+export const ATTACK_RECOVER = 350;
 // Eight free tools. New players start with a sidearm too, so a veteran's sidearm is no edge.
 export const START_KIT = ['spear', 'shortsword', 'buckler', 'lunge', 'sling', 'rations', 'pennon', 'bollock'];
 export const START_BELT = ['spear', 'bollock', 'buckler', 'lunge', 'sling', 'rations'];
@@ -194,7 +205,7 @@ export function attackBuffs() {
 // ------------------------------------------------------------------ descriptions
 const sec = (ms) => `${+(ms / 1000).toFixed(2)}s`;
 export function toolStats(t) {
-  const out = [`${GROUPS[t.group]} group`, `cycle ${sec(t.cd)}`];
+  const out = [GROUPS[t.group], `cooldown ${sec(t.cd)}`];
   const d = damagePerUse(t);
   if (d) out.push(`${t.type === 'strike' && t.hits.length > 1 ? t.hits.map((h) => h.dmg).join('+') : t.count ? `${t.dmg}×${t.count}` : d} damage`);
   if (t.cls) { const k = ttk(t); if (Number.isFinite(k)) out.push(`kills in ${k.toFixed(1)}s`); }

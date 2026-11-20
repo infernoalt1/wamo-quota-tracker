@@ -445,7 +445,7 @@ export function creature(kind, color, step, atk, look) {
     if (kind === 'forgelord') return golem(st, a, 1.75, true);
     if (kind === 'fire_elemental' || kind === 'frost_wisp') return elemental(kind, st, a);
     const lf = MOB_LOOK[kind] || MOB_LOOK.guard, o = lf(color || WILD);
-    if (look && look.weapon) o.weapon = look.weapon;
+    if (look && look.weapon) o.weapon = look.weapon === 'none' ? null : look.weapon;
     if (look && look.shieldKind) { o.shield = o.shield || o.tunic; o.shieldKind = look.shieldKind; o.raised = true; }
     return humanoid(o, st, a);
   });
@@ -906,5 +906,18 @@ export function villageTop() {
 }
 export const VILLAGE_SPRITE_SIZE = VSIZE;
 
+// Melee weapons are drawn on their own so they can swing; bows, slings and casters' staves stay in the body sprite.
+export const SWINGS = new Set(['sword', 'rapier', 'axe', 'greataxe', 'dagger', 'club', 'spear', 'staffplain', 'greatsword', 'flail', 'mace', ...Object.keys(POLE)]);
+// A weapon on its own canvas, held at (px, py): the grip. Units match the body sprites.
+export function weaponSprite(kind) {
+  return memo('wpn|' + kind, () => {
+    const [c, x] = canvas(104, 48); x.translate(24, 24);
+    x.shadowColor = 'rgba(0,0,0,.35)'; x.shadowOffsetX = 1.5; x.shadowOffsetY = 2; x.shadowBlur = 1.5;
+    weapon(x, kind, true);
+    return { c, px: 24, py: 24, w: 104, h: 48 };
+  });
+}
+// How big a creature's body is drawn (so a held weapon sits in its hand).
+export const lookScale = (kind) => { const lf = MOB_LOOK[kind]; return lf ? lf('#888').scale || 1 : 1; };
 // Shared with the icon painter.
 export { weapon as drawWeapon, bow as drawBow, shade, radial, blob, OUT };

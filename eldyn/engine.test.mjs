@@ -5,14 +5,14 @@ import express from 'express';
 import { WebSocket } from 'ws';
 import {
   CASTLES, CASTLE_TYPES, VILLAGE, DUNGEONS, CAVES, MOBS, RANKS, landValue, moveBody, inCastleWalls, losClear, passable, dungeonAt, tierOf, somaForTier,
-  valorGain, somaGain, NPC_REWARD, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS, MAP_ID, ISLANDS, BRIDGES, REGIONS, ISLAND_REGIONS, landBase, bridgeAt, regionAt,
+  valorGain, somaGain, NPC_REWARD, NPC_SOMA, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS, MAP_ID, ISLANDS, BRIDGES, REGIONS, ISLAND_REGIONS, landBase, bridgeAt, regionAt,
 } from './shared.mjs';
 import { Game, CAPTURE_TIME, SEASON, migrateProgress, DT } from './engine.mjs';
 import {
   TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, START_BELT, UNLOCKABLE, TTK_BANDS, TURN_RATE, BASE_HP, ATK_CAP,
-  ttk, damagePerUse, burstTime, attackBuffs, keysFor,
+  ttk, damagePerUse, burstTime, attackBuffs, keysFor, actionTime,
 } from './builds.mjs';
-import { ARCHETYPES, roundRobin, seeded } from './balance.mjs';
+import { ARCHETYPES, roundRobin, seeded, firstFights } from './balance.mjs';
 import { memoryStore, accountService } from './accounts.mjs';
 import { setupEldyn } from './server.mjs';
 
@@ -129,26 +129,35 @@ test('balance: in the duel simulator no kit wins more than 60% against the field
   assert.ok(rate.starter >= 0.35, `starter wins ${(rate.starter * 100).toFixed(0)}%`);
 });
 
-test('the grind: an average player reaches tier 10 in 8-12 hours and tier 30 in 130-180 hours', () => {
+test('a new player wins their first fights: the starting toolbelt beats the enemies of the safest regions', () => {
+  seeded(5, () => {
+    for (const foes of [['vagabond'], ['farmer', 'farmer'], ['wolf'], ['boar']]) assert.ok(firstFights(foes, 10) >= 0.9, foes.join(' + '));
+    assert.ok(firstFights(['farmer', 'farmer', 'farmer'], 10) >= 0.6, 'even three Farmers at once, most of the time');
+  });
+});
+
+test('the grind: tier 1 in a few minutes and tier 3 within half an hour; tier 10 takes 6-12 hours and tier 30 120-180', () => {
   // Minute by minute: 2.5 NPC kills a minute, a death about every 28 minutes, 10% territory bonus.
-  const hours = { 10: [], 30: [] };
+  const hours = { 1: [], 3: [], 10: [], 30: [] };
   for (let run = 1; run <= 120; run++) {
     let s = 0, V = 0, tier = 0, r = run * 7919 + 13;
     const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647;
     for (let min = 1; min < 60 * 400 && tier < 30; min++) {
       const vn = 20 + 12 * tier, cap = 6000 + 400 * tier;
-      for (let k = 0; k < 2.5; k++) { s += somaGain(V, vn, NPC_REWARD, 0.1); V = Math.min(cap, V + valorGain(V, vn, NPC_REWARD, 0.1)); }
+      for (let k = 0; k < 2.5; k++) { s += somaGain(V, vn, NPC_REWARD, 0.1) + NPC_SOMA * 1.1; V = Math.min(cap, V + valorGain(V, vn, NPC_REWARD, 0.1)); }
       if (rnd() < 1 / 28) V = 0;
       while (somaForTier(tier + 1) <= s) { tier++; if (hours[tier]) hours[tier].push(min / 60); }
     }
   }
   const med = (a) => a.sort((x, y) => x - y)[a.length >> 1];
-  assert.ok(med(hours[10]) >= 8 && med(hours[10]) <= 12, `tier 10 in ${med(hours[10]).toFixed(1)}h`);
-  assert.ok(med(hours[30]) >= 130 && med(hours[30]) <= 180, `tier 30 in ${med(hours[30]).toFixed(1)}h`);
+  assert.ok(med(hours[1]) <= 5 / 60, `tier 1 in ${(med(hours[1]) * 60).toFixed(0)} min`);
+  assert.ok(med(hours[3]) <= 0.5, `tier 3 in ${(med(hours[3]) * 60).toFixed(0)} min`);
+  assert.ok(med(hours[10]) >= 6 && med(hours[10]) <= 12, `tier 10 in ${med(hours[10]).toFixed(1)}h`);
+  assert.ok(med(hours[30]) >= 120 && med(hours[30]) <= 180, `tier 30 in ${med(hours[30]).toFixed(1)}h`);
 });
 
-test('soma tiers: 69 for tier 1, 23,220 for tier 10, 970,642 for tier 30, and tierOf inverts the curve', () => {
-  assert.equal(somaForTier(1), 69); assert.equal(somaForTier(10), 23220); assert.equal(somaForTier(30), 970642);
+test('soma tiers: 11 for tier 1, 22,720 for tier 10, 969,142 for tier 30, and tierOf inverts the curve', () => {
+  assert.equal(somaForTier(1), 11); assert.equal(somaForTier(10), 22720); assert.equal(somaForTier(30), 969142);
   for (const t of [1, 5, 10, 25, 50]) { assert.equal(tierOf(somaForTier(t)), t); assert.equal(tierOf(somaForTier(t) - 1), t - 1); }
 });
 
@@ -197,17 +206,19 @@ test('respec returns every key for 5% of your soma, only in the Haven', () => {
 });
 
 // ------------------------------------------------------------------ combat rules
-test('tools in the same group share a cooldown; tools in different groups work together', () => {
+test('every tool has its own cooldown; an attack keeps you busy until it has played out', () => {
   const { game, p, advance } = arena();
-  p.belt = ['spear', 'shortsword', 'buckler', 'bollock', null, null, null];
+  p.belt = ['spear', 'shortsword', 'buckler', 'bollock', null, null, null, null, null, null];
   game.handle(p, { t: 'use', s: 0, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 0, on: 0 });
-  assert.ok(p.gcd.weapon > game.T);
-  const until = p.gcd.weapon;
+  assert.ok(p.gcd.spear > game.T && !p.gcd.shortsword);
   game.handle(p, { t: 'use', s: 1, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 1, on: 0 });
-  assert.equal(p.gcd.weapon, until, 'the Shortsword waits for the Spear');
-  game.handle(p, { t: 'use', s: 2, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 3, on: 1, a: 0 });
-  assert.ok(p.gcd.shield > game.T && p.gcd.sidearm > game.T, 'shield and sidearm alongside the weapon');
-  void advance;
+  assert.ok(!p.gcd.shortsword, 'no second swing while the Spear thrust plays out');
+  game.handle(p, { t: 'use', s: 2, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 2, on: 0 });
+  assert.ok(p.gcd.buckler > game.T, 'a shield goes up at once, even mid-attack');
+  run(game, advance, actionTime(TOOLS.spear) + 60);
+  game.handle(p, { t: 'use', s: 1, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 1, on: 0 });
+  assert.ok(p.gcd.shortsword > game.T, 'then the Shortsword swings, on its own cooldown');
+  assert.ok(p.gcd.spear > game.T, 'while the Spear is still cooling down');
 });
 
 test('damage = base × (1 + attack/100) × (1 − defence/100), with caps, unrounded', () => {
@@ -238,7 +249,7 @@ test('a Battleaxe swings four times and only hits foes still in the arc', () => 
   game.handle(p, { t: 'use', s: 0, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 0, on: 0 });
   run(game, advance, 500);
   const after2 = n.hp;
-  assert.ok(Math.abs(500 - after2 - 16) < 1, `two swings of 8 landed (${500 - after2})`);
+  assert.ok(Math.abs(500 - after2 - 18) < 1, `two swings of 9 landed (${500 - after2})`);
   n.x += 400; game.gridBuild();
   run(game, advance, 1200);
   assert.equal(n.hp, after2, 'the last two swings missed');
@@ -255,7 +266,7 @@ test('Parry blocks the next melee hit and weakens the attacker; Riposte only wor
   assert.ok(game.atkOf(n) < 0 && game.atkOf(p) > 0);
   assert.ok(game.dealDamage(n, p, 20, { melee: true }) > 0, 'only one hit is parried');
   game.handle(p, { t: 'use', s: 2, on: 1, a: 0 });
-  assert.ok(p.gcd.maneuver > game.T);
+  assert.ok(p.gcd.riposte > game.T);
   void advance;
 });
 
@@ -288,7 +299,7 @@ test('kills pay Valor and Soma from the formulas: NPCs a fifth of players, more 
   const n = game.mkNpc('reiver', p.x + 40, p.y, {}); game.gridBuild();
   game.killNpc(n, p);
   assert.ok(Math.abs(p.valor - valorGain(0, 60, NPC_REWARD, 0)) < 1e-9);
-  assert.ok(Math.abs(p.soma - somaGain(0, 60, NPC_REWARD, 0)) < 1e-9);
+  assert.ok(Math.abs(p.soma - somaGain(0, 60, NPC_REWARD, 0) - NPC_SOMA) < 1e-9, 'plus the flat Soma every NPC gives');
   p.valor = 1000; const s0 = p.soma;
   game.killNpc(game.mkNpc('reiver', p.x + 40, p.y, {}), p);
   assert.ok(p.soma - s0 > 20, 'carrying Valor multiplies Soma');
@@ -495,14 +506,14 @@ test('logging out mid-fight leaves your character for 10 seconds', () => {
   assert.ok(!game.players.has(p.id));
 });
 
-test('client movement is limited by speed and walls; backpedalling costs more; stale positions are ignored', () => {
+test('client movement is limited by speed and walls; walking backwards is as fast as forwards; stale positions are ignored', () => {
   const { game, p, advance } = setup();
   const c = CASTLES[0], L = CASTLE_TYPES[c.type];
   p.x = c.x - L.outer - 60; p.y = c.y; p.ang = p.aim = 0;
   for (let i = 0; i < 10; i++) { advance(50); game.tick(); }
   const x0 = p.x;
   game.handle(p, { t: 'in', a: 0, x: p.x - 1000, y: p.y, tp: p.tp });
-  assert.ok(x0 - p.x <= 190 * 0.5 * 0.75 + 1, 'backpedalling');
+  assert.ok(x0 - p.x <= 190 * 0.5 + 1 && x0 - p.x > 190 * 0.5 * 0.9, 'backwards at full speed');
   for (let i = 0; i < 20; i++) { advance(50); game.tick(); }
   game.handle(p, { t: 'in', a: 0, x: p.x + 1000, y: p.y, tp: p.tp });
   for (let i = 0; i < 20; i++) { advance(50); game.tick(); game.handle(p, { t: 'in', a: 0, x: p.x + 20, y: p.y, tp: p.tp }); }

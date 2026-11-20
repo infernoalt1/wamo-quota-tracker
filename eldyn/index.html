@@ -4,13 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hanbin Island</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div id="tl" class="abs box">
+  <div id="topbar" class="abs">
+    <div id="hotbar"></div>
+    <div class="menu">
+      <button data-open="skills" data-label="Tools" title="Unlock tools and set your toolbelt">K Tools</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Ranks and leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
+    </div>
+  </div>
+  <div id="tl" class="abs">
+    <div class="bignum">Valor : <span id="valnum">0</span></div>
+    <div class="bignum">Soma : <span id="somanum">0</span></div>
     <div class="namerow"><span id="pname"></span><span id="prank"></span></div>
     <div class="bar"><i id="valbar" class="valor"></i><span id="valtxt"></span></div>
     <div class="bar"><i id="somabar" class="soma"></i><span id="somatxt"></span></div>
@@ -22,18 +32,11 @@
     <div id="chatlog"></div>
     <input id="chatin" maxlength="120" placeholder="Say something nearby... (orders like 'follow' reach your troops; /f faction, /w world)" autocomplete="off">
   </div>
-  <div id="bottom" class="abs">
-    <div id="bars">
-      <div class="bar big"><i id="hpbar" class="hp"></i><span id="hptxt"></span></div>
-    </div>
-    <div id="hotbar"></div>
-  </div>
+  <div id="bars" class="abs"><div class="bar big seg"><i id="hpbar" class="hp"></i><span id="hptxt"></span></div></div>
+  <div id="rankings" class="abs"></div>
   <div id="tr" class="abs box">
     <canvas id="mini" width="236" height="157"></canvas>
     <div id="regionlbl"></div>
-    <div class="menu">
-      <button data-open="skills" data-label="Tools" title="Unlock tools and set your toolbelt">K Tools</button><button data-open="factions" data-label="Factions" title="Factions">F Factions</button><button data-open="map" data-label="Map" title="World map">M Map</button><button data-open="board" data-label="Ranks" title="Ranks and leaderboard">Tab Ranks</button><button data-open="keys" data-label="Keys" title="Change keybinds">O Keys</button><button data-open="help" data-label="Help" title="How to play">H Help</button>
-    </div>
   </div>
   <div id="capture" class="abs box"><div id="captxt"></div><div class="bar"><i id="capbar" class="cap"></i></div></div>
   <div id="rallybox" class="abs box"></div>
@@ -56,8 +59,8 @@
   <p><b>Move</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <b>Aim</b> with the mouse · <b>Toolbelt</b>: <kbd>Left click</kbd> <kbd>Space</kbd> <kbd>Shift</kbd> <kbd>V</kbd> <kbd>Right click</kbd> <kbd>Middle click</kbd>, then <kbd>Q</kbd> <kbd>E</kbd> <kbd>R</kbd> <kbd>C</kbd> as more slots open</p>
   <p><kbd>K</kbd> tools · <kbd>F</kbd> factions · <kbd>M</kbd> map · <kbd>Tab</kbd> ranks · <kbd>Enter</kbd> chat · <kbd>[</kbd> <kbd>]</kbd> turn · <kbd>Esc</kbd> close. Change any key under <b>Keybinds</b> (<kbd>O</kbd>).</p>
   <h3>Fighting</h3>
-  <p>You fight with the <b>tools in your toolbelt</b>: weapons, shields, maneuvers, heals, thrown concoctions, traps and banners. Every tool has a wind-up, a timed sequence and a cooldown. <b>Tools in the same group share a cooldown</b> (all weapons, all shields, all heals...), so one weapon swing and one shield at a time, but a weapon, a shield and a sidearm can all work together.</p>
-  <p>Your facing <b>turns toward the mouse at a fixed speed</b>, and attacks go where you face. You can back away while attacking forward, but backpedalling is slower.</p>
+  <p>You fight with the <b>tools in your toolbelt</b>: weapons, shields, maneuvers, heals, thrown concoctions, traps and banners. Every tool has a wind-up, a timed sequence and a cooldown. <b>Every tool has its own cooldown.</b> An attack keeps you busy while it plays out, so you can weave a second weapon or a sidearm between swings, and raise a shield at any moment.</p>
+  <p>Your facing <b>turns toward the mouse at a fixed speed</b>, and attacks go where you face. You can walk backwards at full speed, but drawing a bow or a sling slows you down: plant your feet to shoot.</p>
   <p><b>Hold</b> a key to repeat a tool as soon as it is ready. A single press while it cools down does nothing; a <b>double press</b> queues one use. Hold <kbd>Alt</kbd> and press a keyboard slot to <b>toggle</b> auto-repeat. Traps, banners and thrown flasks aim at your cursor.</p>
   <p><b>Damage</b> = base × (1 + attack/100) × (1 − defence/100). Shields add defence for a few seconds; heals make you slower and easier to hurt while they work, so heal behind a shield, a wall or a friend. Everyone has 80 health (Guard and Knight ranks add 10 each). Out of combat for 8 seconds, you slowly heal.</p>
   <h3>Progress</h3>
