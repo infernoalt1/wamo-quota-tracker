@@ -179,7 +179,7 @@ function humanoid(o, step, atk) {
   x.save(); x.translate(hx, hy);
   if (o.weapon && o.weapon !== 'bow' && o.weapon !== 'crossbow' && o.weapon !== 'sling') weapon(x, o.weapon, atk);
   x.restore();
-  blob(x, hx, hy, 3.2, 3.2, o.armor === 'plate' ? '#9aa3b2' : skin, OUT, 1);
+  if (!o.noHand) blob(x, hx, hy, 3.2, 3.2, o.armor === 'plate' ? '#9aa3b2' : skin, OUT, 1);
   if (o.weapon === 'bow') blob(x, 9 + swing * 2, -3, 3, 3, skin, OUT, 1);
   // head
   head(x, o);
@@ -429,7 +429,7 @@ export function creature(kind, color, step, atk, look) {
   const st = step > 0.3 ? 1 : step < -0.3 ? -1 : 0, a = atk ? 1 : 0;
   if (kind === 'player') {
     const key = `p|${look.skin}|${look.hair}|${look.tunic}|${look.armor}|${look.head}|${look.weapon}|${look.shield}|${look.shieldKind}|${look.cape}|${st}|${a}`;
-    return memo(key, () => humanoid(look, st, a));
+    return memo(key, () => humanoid(look.weapon === 'none' ? { ...look, weapon: null, noHand: true } : look, st, a));
   }
   const key = `${kind}|${color}|${st}|${a}|${look ? look.weapon + '|' + (look.shieldKind || '') : ''}`;
   return memo(key, () => {
@@ -445,7 +445,7 @@ export function creature(kind, color, step, atk, look) {
     if (kind === 'forgelord') return golem(st, a, 1.75, true);
     if (kind === 'fire_elemental' || kind === 'frost_wisp') return elemental(kind, st, a);
     const lf = MOB_LOOK[kind] || MOB_LOOK.guard, o = lf(color || WILD);
-    if (look && look.weapon) o.weapon = look.weapon === 'none' ? null : look.weapon;
+    if (look && look.weapon) { o.noHand = look.weapon === 'none'; o.weapon = o.noHand ? null : look.weapon; }
     if (look && look.shieldKind) { o.shield = o.shield || o.tunic; o.shieldKind = look.shieldKind; o.raised = true; }
     return humanoid(o, st, a);
   });
@@ -919,5 +919,11 @@ export function weaponSprite(kind) {
 }
 // How big a creature's body is drawn (so a held weapon sits in its hand).
 export const lookScale = (kind) => { const lf = MOB_LOOK[kind]; return lf ? lf('#888').scale || 1 : 1; };
+// The colours of a fighter's sleeve and hand, for drawing the arm that holds a swinging weapon.
+export function armColors(kind, color, look) {
+  const o = kind === 'player' ? look : (MOB_LOOK[kind] || MOB_LOOK.guard)(color || WILD);
+  const sleeve = o.armor === 'plate' ? '#9aa3b2' : o.armor === 'chain' ? '#8c939c' : o.armor === 'leather' ? '#8a5a32' : o.robe ? shade(o.tunic, -0.15) : o.tunic || '#6a5a4a';
+  return { sleeve, skin: o.armor === 'plate' ? '#9aa3b2' : o.skin || '#e0b890', scale: o.scale || 1 };
+}
 // Shared with the icon painter.
 export { weapon as drawWeapon, bow as drawBow, shade, radial, blob, OUT };

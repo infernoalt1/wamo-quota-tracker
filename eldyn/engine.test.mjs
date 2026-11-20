@@ -5,12 +5,12 @@ import express from 'express';
 import { WebSocket } from 'ws';
 import {
   CASTLES, CASTLE_TYPES, VILLAGE, DUNGEONS, CAVES, MOBS, RANKS, landValue, moveBody, inCastleWalls, losClear, passable, dungeonAt, tierOf, somaForTier,
-  valorGain, somaGain, NPC_REWARD, NPC_SOMA, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS, MAP_ID, ISLANDS, BRIDGES, REGIONS, ISLAND_REGIONS, landBase, bridgeAt, regionAt,
+  valorGain, somaGain, rankHp, NPC_REWARD, NPC_SOMA, CAP_BASE, CAP_LIFT, PUBLIC_FACTIONS, MAP_ID, ISLANDS, BRIDGES, REGIONS, ISLAND_REGIONS, landBase, bridgeAt, regionAt,
 } from './shared.mjs';
 import { Game, CAPTURE_TIME, SEASON, migrateProgress, DT } from './engine.mjs';
 import {
   TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, START_BELT, UNLOCKABLE, TTK_BANDS, TURN_RATE, BASE_HP, ATK_CAP,
-  ttk, damagePerUse, burstTime, attackBuffs, keysFor, actionTime,
+  ttk, damagePerUse, burstTime, attackBuffs, keysFor, actionTime, DMG_SCALE, tierAtk, tierHp,
 } from './builds.mjs';
 import { ARCHETYPES, roundRobin, seeded, firstFights } from './balance.mjs';
 import { memoryStore, accountService } from './accounts.mjs';
@@ -221,14 +221,14 @@ test('every tool has its own cooldown; an attack keeps you busy until it has pla
   assert.ok(p.gcd.spear > game.T, 'while the Spear is still cooling down');
 });
 
-test('damage = base × (1 + attack/100) × (1 − defence/100), with caps, unrounded', () => {
+test('damage = base × DMG_SCALE × (1 + attack/100) × (1 − defence/100), with caps, unrounded', () => {
   const { game, p } = arena();
   const n = game.mkNpc('reiver', p.x + 40, p.y, {}); n.target = null; game.gridBuild();
   game.addEff(p, { atk: 30 }, 5000); game.addEff(n, { def: 35 }, 5000);
   const hp = n.hp, dealt = game.dealDamage(p, n, 10, {});
-  assert.ok(Math.abs(dealt - 10 * 1.3 * 0.65) < 1e-9); assert.ok(Math.abs(n.hp - (hp - dealt)) < 1e-9);
+  assert.ok(Math.abs(dealt - 10 * DMG_SCALE * 1.3 * 0.65) < 1e-9); assert.ok(Math.abs(n.hp - (hp - dealt)) < 1e-9);
   game.addEff(p, { atk: 500 }, 5000); game.addEff(n, { def: 500 }, 5000);
-  assert.ok(Math.abs(game.dealDamage(p, n, 10, {}) - 10 * 1.75 * 0.1) < 1e-9, 'attack capped at +75, defence at 90');
+  assert.ok(Math.abs(game.dealDamage(p, n, 10, {}) - 10 * DMG_SCALE * 1.75 * 0.1) < 1e-9, 'attack capped at +75, defence at 90');
   game.addEff(n, { def: -1000 }, 5000);
   assert.equal(game.defOf(n), -50);
 });
@@ -249,7 +249,7 @@ test('a Battleaxe swings four times and only hits foes still in the arc', () => 
   game.handle(p, { t: 'use', s: 0, on: 1, a: 0 }); game.handle(p, { t: 'use', s: 0, on: 0 });
   run(game, advance, 500);
   const after2 = n.hp;
-  assert.ok(Math.abs(500 - after2 - 18) < 1, `two swings of 9 landed (${500 - after2})`);
+  assert.ok(Math.abs(500 - after2 - 18 * DMG_SCALE * (1 + tierAtk(1) / 100)) < 1, `two swings of 18 landed (${500 - after2})`);
   n.x += 400; game.gridBuild();
   run(game, advance, 1200);
   assert.equal(n.hp, after2, 'the last two swings missed');
@@ -277,7 +277,7 @@ test('shields and heals have costs: a Poultice heals but lowers your defence and
   game.handle(p, { t: 'use', s: 2, on: 1 }); game.handle(p, { t: 'use', s: 2, on: 0 });
   assert.equal(game.defOf(p), -25); assert.ok(game.speedOf(p) < 190);
   run(game, advance, 5000);
-  assert.ok(p.hp >= 54 && p.hp <= 61, `healed to ${p.hp} (25 from the Poultice, plus resting)`);
+  assert.ok(p.hp >= 80 && p.hp <= 92, `healed to ${p.hp} (50 from the Poultice, plus resting)`);
   game.handle(p, { t: 'use', s: 1, on: 1 });
   assert.equal(game.defOf(p), 40);
 });
@@ -311,11 +311,11 @@ test('kills pay Valor and Soma from the formulas: NPCs a fifth of players, more 
 test('dying loses all Valor (and half the carried gold and wood) but never Soma or unlocks', () => {
   const { game, p, msgs } = arena({ soma: somaForTier(3), unlocked: ['pike'] });
   p.valor = 700; game.recalc(p); p.gold = 40; p.wood = 9;
-  assert.equal(p.maxhp, 100, 'Guard and Knight add 10 health each');
+  assert.equal(p.maxhp, rankHp(p.rank) + tierHp(3), 'rank and Soma tier add health'); assert.equal(rankHp(4) - rankHp(0), 24, 'Guard and Knight add 12 each');
   const soma = p.soma;
   game.killPlayer(p, null);
   assert.equal(p.valor, 0); assert.equal(p.soma, soma); assert.deepEqual(p.unlocked, ['pike']);
-  assert.equal(p.gold, 20); assert.equal(p.wood, 5); assert.equal(p.maxhp, 80);
+  assert.equal(p.gold, 20); assert.equal(p.wood, 5); assert.equal(p.maxhp, 100 + tierHp(3), 'back to base health (plus Soma tier)');
   assert.ok(msgs.some((m) => m.t === 'died'));
   assert.ok([...game.loot.values()].some((l) => l.gold === 20 && l.wood === 4));
 });
@@ -450,7 +450,7 @@ test('quick travel needs Marshall, takes 20s standing still and you take 4× dam
   game.handle(p, { t: 'travel', id: c.id });
   assert.ok(p.channel && p.channel.vuln);
   const n = game.mkNpc('reiver', p.x + 40, p.y, {}); n.target = null; n.atkBase = 0; game.gridBuild();
-  assert.ok(Math.abs(game.dealDamage(n, p, 5, {}) - 20) < 1e-9);
+  assert.ok(Math.abs(game.dealDamage(n, p, 5, {}) - 5 * DMG_SCALE * 4) < 1e-9);
   game.killNpc(n, null, true); p.hp = p.maxhp;
   run(game, advance, 20100);
   assert.ok(inCastleWalls(c, p.x, p.y));

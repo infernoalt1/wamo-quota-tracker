@@ -6,12 +6,12 @@ import {
   WORLD, VILLAGE, REGIONS, CASTLES, CASTLE_TYPES, SANCTUARY, REGION_CELLS, RC, GW, MOBS, WILD_BY_BIOME, ELITE_AFFIXES,
   DUNGEONS, CAVES, CASTLE_LEVEL_COST, CASTLE_TAX, HOUSES,
   rankOf, tierOf, garrisonFor, inCastleWalls, moveBody, freeAt, shotBlocked, losClear, dungeonAt, regionAt, propsIn,
-  CAP_BASE, CAP_LIFT, TERR_BONUS, TERR_MAX, NPC_REWARD, NPC_SOMA, CAPTURE_VALOR, valorGain, somaGain, RANK, rankHp, COMMAND_RANK, TROOP_NAMES,
+  CAP_BASE, CAP_LIFT, TERR_BONUS, TERR_MAX, NPC_REWARD, NPC_SOMA, CAPTURE_VALOR, valorGain, somaGain, RANK, rankHp, NPC_HP_SCALE, COMMAND_RANK, TROOP_NAMES,
   PUBLIC_FACTIONS, MAP_ID, PRIVATE_MAX,
 } from './shared.mjs';
 import {
   TOOLS, SLOTS, SLOT_TIERS, START_KIT, START_BELT, slotsFor, TURN_RATE, ATK_CAP, DEF_CAP, SPD_CAP, ALLY_SHIELD_CAP, AURA_GAP, RESPEC_COST, MAX_TRAPS, MAX_TROOPS,
-  owns, unlockCheck, sanitizeUnlocks, keysFor, BACKPEDAL, BACKPEDAL_ANGLE, isAttack, actionTime,
+  owns, unlockCheck, sanitizeUnlocks, keysFor, BACKPEDAL, BACKPEDAL_ANGLE, isAttack, actionTime, DMG_SCALE, HEAL_SCALE, tierAtk, tierHp,
 } from './builds.mjs';
 
 const { W } = WORLD;
@@ -120,7 +120,7 @@ export class Game {
   sumEff(e, k) { let s = 0; if (e.effs) for (const f of e.effs) if (f.until > this.T && f[k]) s += f[k]; return s; }
   atkOf(e, ranged) {
     if (!e || !e.effs) return 0;
-    let a = (e.atkBase || 0) + this.sumEff(e, 'atk') + (ranged ? this.sumEff(e, 'ratk') : 0);
+    let a = (e.atkBase || 0) + (e.isPlayer ? tierAtk(e.tier) : 0) + this.sumEff(e, 'atk') + (ranged ? this.sumEff(e, 'ratk') : 0);
     if (e.elite === 'frenzied' && e.hp < e.maxhp * 0.5) a += 50;
     return clamp(a, ATK_CAP[0], ATK_CAP[1]);
   }
@@ -154,7 +154,7 @@ export class Game {
   heal(e, amt) {
     if (!e || e.dead || e.hp <= 0 || amt <= 0 || this.isObj(e)) return;
     const before = e.hp; e.hp = Math.min(e.maxhp, e.hp + amt);
-    if (e.hp - before >= 0.5) this.fx({ t: 'heal', x: e.x, y: e.y - 14, v: Math.round((e.hp - before) * 10) / 10 });
+    if (e.hp - before >= 0.5) this.fx({ t: 'heal', x: e.x, y: e.y - 14, v: Math.round(e.hp - before) });
   }
   addHot(e, rate, dur) { if (e.hots && !e.dead && !this.isObj(e)) e.hots.push({ rate, until: this.T + dur }); }
   addDot(e, dps, dur, stub, leech = 0) { if (e.dots && !e.dead) e.dots.push({ dps, until: this.T + dur, next: this.T + 500, stub, leech }); }
@@ -213,7 +213,7 @@ export class Game {
       return 0;
     }
     const A = o.atk ?? this.atkOf(actor, o.ranged), D = this.defOf(tgt);
-    let amt = base * (1 + A / 100) * (1 - D / 100);
+    let amt = base * DMG_SCALE * (1 + A / 100) * (1 - D / 100);
     if (tgt.channel && tgt.channel.vuln) amt *= 4;
     if (amt <= 0) return 0;
     if (D >= DEF_CAP[1] && T > (tgt.blockedAt || 0)) { tgt.blockedAt = T + 600; this.combo(tgt, 'BLOCKED'); }
@@ -223,7 +223,7 @@ export class Game {
     if (!o.dot) { tgt.lastHurtAt = T; tgt.lastHurtBy = actor ? actor.id : null; }
     if (actor) actor.combatAt = T;
     if (root && tgt.hitters) tgt.hitters.set(root.id, T);
-    this.fx({ t: 'dmg', x: tgt.x, y: tgt.y - 10, v: amt < 10 ? Math.round(amt * 10) / 10 : Math.round(amt), to: tgt.id, by: root ? root.id : 0, a: +Math.atan2(tgt.y - src.y, tgt.x - src.x).toFixed(2), sh: D >= 35 ? 1 : 0, k: tgt.kind, dot: o.dot ? 1 : 0 });
+    this.fx({ t: 'dmg', x: tgt.x, y: tgt.y - 10, v: Math.max(1, Math.round(amt)), to: tgt.id, by: root ? root.id : 0, a: +Math.atan2(tgt.y - src.y, tgt.x - src.x).toFixed(2), sh: D >= 35 ? 1 : 0, k: tgt.kind, dot: o.dot ? 1 : 0 });
     if (tgt.effs && tgt.effs.some((f) => f.breakHit)) this.breakStealth(tgt, 'hit');
     if (o.leech && actor && !actor.dead) this.heal(actor, amt * o.leech * (1 + this.sumEff(actor, 'leech') / 100));
     if (actor && actor.isNpc && !o.secondary) {
@@ -303,7 +303,7 @@ export class Game {
     if (n.master) { const m = this.npcs.get(n.master); if (m && m.minions) m.minions.delete(n.id); }
     if (n.kind === 'logs') { this.logRespawn(n.spot); if (killer && !silent) { killer.wood += 2; killer.dirty = true; this.send(killer, { t: 'gain', v: 0, s: 0, g: 0, w: 2 }); } }
     if (this.isObj(n) || silent) this.fx({ t: 'poof', x: n.x, y: n.y });
-    else this.fx({ t: 'die', x: Math.round(n.x), y: Math.round(n.y), k: n.kind, a: +n.ang.toFixed(2), f: n.owner ? (this.players.get(n.owner)?.fac || 0) : n.fac || 0, wp: n.wp || '' });
+    else this.fx({ t: 'die', i: n.id, x: Math.round(n.x), y: Math.round(n.y), k: n.kind, a: +n.ang.toFixed(2), f: n.owner ? (this.players.get(n.owner)?.fac || 0) : n.fac || 0, wp: n.wp || '' });
     if (n.elite === 'volatile') this.zones.push({ type: 'blast', x: n.x, y: n.y, r: 120, at: this.T + 900, d: 900, dmg: n.def.dmg * 2, team: n.team, stub: this.mkStub(n) });
     if (silent || !killer || this.isObj(n) || n.minionOf || n.owner === killer.id) return;
     const valor = (n.valor || 0) * (n.elite ? 3 : 1);
@@ -315,7 +315,7 @@ export class Game {
   killPlayer(p, killer) {
     if (p.dead) return;
     const T = this.T;
-    this.fx({ t: 'die', x: Math.round(p.x), y: Math.round(p.y), k: 'player', a: +p.ang.toFixed(2), f: p.fac || 0, n: p.name, rk: p.rank, wp: p.wp || '' });
+    this.fx({ t: 'die', i: p.id, x: Math.round(p.x), y: Math.round(p.y), k: 'player', a: +p.ang.toFixed(2), f: p.fac || 0, n: p.name, rk: p.rank, wp: p.wp || '' });
     p.dead = true; p.respawnAt = T + DYING_MS; p.channel = null; p.dots = []; p.hots = []; p.effs = []; p.held.clear(); p.queued = -1;
     const lost = Math.floor(p.valor), wasRank = p.rank;
     const dg = Math.floor(p.gold / 2), dw = Math.floor(p.wood / 2);
@@ -391,7 +391,7 @@ export class Game {
   // ---------------------------------------------------------------- players
   recalc(p) {
     p.rank = rankOf(p.valor).idx;
-    const mh = rankHp(p.rank);
+    const mh = rankHp(p.rank) + tierHp(p.tier);
     if (p.maxhp && mh > p.maxhp) p.hp += mh - p.maxhp;
     p.maxhp = mh; p.hp = Math.min(p.hp, p.maxhp);
     p.keys = keysFor(p.tier, p.unlocked);
@@ -559,7 +559,7 @@ export class Game {
     const def = MOBS[kind], sc = o.sc || 1, danger = o.danger || 1;
     const kit = def.kits ? def.kits[Math.floor(Math.random() * def.kits.length)] : def.kit;
     const n = {
-      id: this.nid(), isNpc: true, kind, def, x, y, ang: Math.random() * 6.28, hp: def.hp * sc, maxhp: def.hp * sc, r: def.r, sc,
+      id: this.nid(), isNpc: true, kind, def, x, y, ang: Math.random() * 6.28, hp: def.hp * sc * NPC_HP_SCALE, maxhp: def.hp * sc * NPC_HP_SCALE, r: def.r, sc,
       team: o.team || (def.obj && !o.owner ? kind : 'wild'), home: { x, y }, anchor: { x, y }, leash: o.leash || 550, owner: o.owner || null, ttl: o.ttl || (def.ttl ? this.T + def.ttl : 0), danger,
       castle: o.castle ?? -1, slot: o.slot ?? -1, region: o.region ?? -1, fac: o.fac || 0, master: o.master || 0, minionOf: o.minionOf || 0,
       kit: kit ? kit.slice() : null, valor: def.valor || 0, atkBase: def.obj ? 0 : def.ai === 'kit' ? -25 + 10 * (danger - 1) : 10 * (danger - 1), defBase: def.armor || 0,
@@ -766,9 +766,9 @@ export class Game {
     if (this.tickNo % 4) return;
     if (d.banner) for (const e of this.alliesNear(n, n.x, n.y, d.banner.r)) {
       if (d.banner.def) this.addEff(e, { def: d.banner.def, tag: 'gonfalon' }, 400);
-      if (d.banner.hot) e.hp = Math.min(e.maxhp, e.hp + d.banner.hot * DT * 4);
+      if (d.banner.hot) e.hp = Math.min(e.maxhp, e.hp + d.banner.hot * HEAL_SCALE * DT * 4);
     }
-    if (d.fire) for (const e of this.alliesNear(n, n.x, n.y, d.fire.r)) e.hp = Math.min(e.maxhp, e.hp + d.fire.hot * DT * 4);
+    if (d.fire) for (const e of this.alliesNear(n, n.x, n.y, d.fire.r)) e.hp = Math.min(e.maxhp, e.hp + d.fire.hot * HEAL_SCALE * DT * 4);
   }
   updateNpc(n, awake) {
     const T = this.T;
@@ -1098,7 +1098,7 @@ export class Game {
           if (c) { who = c; this.fx({ t: 'line', x: e.x, y: e.y, x2: c.x, y2: c.y, c: 'rgba(130,240,160,.8)', w: 3 }); }
         }
         const targets = t.allies ? this.alliesNear(e, e.x, e.y, t.allies) : [who];
-        for (const a of targets) { if (t.amt) this.heal(a, t.amt); if (t.hot) this.addHot(a, t.hot.rate, t.hot.dur); }
+        for (const a of targets) { if (t.amt) this.heal(a, t.amt * HEAL_SCALE); if (t.hot) this.addHot(a, t.hot.rate * HEAL_SCALE, t.hot.dur); }
         if (t.self) this.addEff(e, { def: t.self.def || 0, spd: t.self.spd || 0, root: t.self.root ? 1 : 0, still: t.self.root ? 1 : 0, tag: 'healing' }, t.self.dur);
         this.selfAfter(e, t.after);
         this.fx({ t: 'ring', x: e.x, y: e.y, r: t.allies || 30, c: '#5fe08a' });
@@ -1130,7 +1130,7 @@ export class Game {
         return;
       }
       case 'aura': {
-        for (const a of this.alliesNear(e, e.x, e.y, t.r)) { this.addEff(a, { ...t.eff, tag: t.id }, t.dur); if (t.hot) this.addHot(a, t.hot, t.dur); }
+        for (const a of this.alliesNear(e, e.x, e.y, t.r)) { this.addEff(a, { ...t.eff, tag: t.id }, t.dur); if (t.hot) this.addHot(a, t.hot * HEAL_SCALE, t.dur); }
         this.fx({ t: 'ring', x: e.x, y: e.y, r: t.r, c: '#f0d070', fill: 1 });
         return;
       }
@@ -1164,6 +1164,9 @@ export class Game {
   strike(e, h) {
     if (e.dead) return;
     const ang = e.ang, cos = Math.cos(ang), sin = Math.sin(ang);
+    // Players see everyone else a moment in the past, so their blows get a little leeway in reach and arc.
+    const slack = e.isPlayer ? 1 : 0;
+    h = slack ? { ...h, reach: h.reach + 12, arc: h.arc ? Math.min(360, h.arc + 16) : h.arc } : h;
     let hits = [];
     if (h.line) {
       this.fx({ t: 'thrust', i: e.id, wp: e.wp, x: e.x, y: e.y, a: +ang.toFixed(3), r0: 14, r1: h.reach });

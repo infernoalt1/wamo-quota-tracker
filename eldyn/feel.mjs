@@ -50,6 +50,7 @@ const SOUNDS = {
   level: (d, t) => { [523, 659, 784, 1046].forEach((f, i) => tone(d, t + i * 0.09, 0.4, 'triangle', f, f, 0.3)); },
   click: (d, t) => tone(d, t, 0.04, 'square', 900, 700, 0.12),
   boom: (d, t) => { burst(d, t, 0.6, 'lowpass', 1200, 60, 0.7, 1.2, 0.01); tone(d, t, 0.4, 'sine', 80, 30, 1); },
+  kill: (d, t) => { tone(d, t, 0.35, 'sine', 90, 35, 1.3); burst(d, t, 0.25, 'lowpass', 2000, 120, 0.7, 0.9); tone(d, t + 0.05, 0.3, 'triangle', 660, 640, 0.18); tone(d, t + 0.1, 0.35, 'triangle', 990, 980, 0.14); },
   wood: (d, t) => { tone(d, t, 0.08, 'triangle', 260, 180, 0.5); burst(d, t, 0.05, 'bandpass', 1200, 700, 2, 0.6); },
 };
 // Plays a sound; dx/dist place it in the world relative to you (farther is quieter and panned).
@@ -134,9 +135,8 @@ export function drawBodies(ctx, now, x0, y0, x1, y1, spriteOf) {
     const age = now - b.t0, fall = Math.min(1, age / 260), alpha = Math.min(1, (9000 - age) / 2500);
     const img = spriteOf(b); if (!img) continue;
     const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
-    ctx.save(); ctx.globalAlpha = alpha; ctx.translate(b.x, b.y); ctx.rotate(b.a + Math.PI + fall * 0.9);
+    ctx.save(); ctx.globalAlpha = alpha * (1 - 0.25 * fall); ctx.translate(b.x, b.y); ctx.rotate(b.a + Math.PI + fall * 0.9);
     ctx.scale(1, 1 - 0.25 * fall);
-    ctx.filter = `brightness(${1 - 0.35 * fall}) saturate(${1 - 0.4 * fall})`;
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
     ctx.restore();
   }

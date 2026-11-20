@@ -7,7 +7,8 @@ import {
 import { TOOLS, TOOL_LIST, PATHS, GROUPS, SLOTS, SLOT_TIERS, slotsFor, START_KIT, TURN_RATE, BACKPEDAL, BACKPEDAL_ANGLE, owns, unlockCheck, toolStats, isPlaced, RESPEC_COST, isAttack, actionTime } from './builds.mjs';
 import { BIOME_RGB, chunkPixels } from './terrain.mjs';
 import { toolImg, statusCanvas, uiImg, uiIcon } from './icons.mjs';
-import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE, weaponSprite, SWINGS, lookScale } from './sprites.mjs';
+import { creature, playerLook, banner, prop, castleBase, castleTop, castleSize, caveSprite, portalSprite, villageBase, villageTop, VILLAGE_SPRITE_SIZE, TOOL_SPRITE, weaponSprite, SWINGS, lookScale, armColors } from './sprites.mjs';
+import * as rig from './rig.mjs';
 import * as feel from './feel.mjs';
 
 const { W: WW, H: WORLD_H, IH: WH } = WORLD;
@@ -18,7 +19,8 @@ let VW = innerWidth, VH = innerHeight, DPR = 1, zoom = 1;
 function resize() {
   DPR = Math.min(1.5, devicePixelRatio || 1); VW = innerWidth; VH = innerHeight;
   cv.width = VW * DPR; cv.height = VH * DPR; cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
-  zoom = Math.max(0.55, Math.min(1.6, Math.min(VW / 1500, VH / 840)));
+  // a close camera: fighters are big on screen, so every blow reads
+  zoom = Math.max(0.7, Math.min(2, Math.min(VW / 1150, VH / 650)));
   vignette = null;
 }
 let vignette = null, vignetteHurt = false;
@@ -172,7 +174,10 @@ function onSnap(m) {
   for (const f of m.fx) {
     const ddx = f.x - me.x, dd = Math.hypot(ddx, f.y - me.y);
     if (f.t === 'dmg') {
-      const mine = f.by === myId, onMe = f.to === myId, big = f.v >= 14;
+      const mine = f.by === myId, onMe = f.to === myId, big = f.v >= 28, hitEnt = ents.get(f.to);
+      if (hitEnt && !f.dot) { hitEnt.hitT = now; hitEnt.hitA = f.a || 0; }
+      if (mine) lastMyHit.set(f.to, now);
+      if (mine && !f.dot && now - (predictedHit.get(f.to) || 0) < 600) { floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: big ? '#ffd040' : '#fff0d0', t0: now, life: 900, big: big ? 1 : 0, pop: true }); continue; }
       floaters.push({ x: f.x + (Math.random() * 14 - 7), y: f.y, txt: String(f.v), c: onMe ? '#ff6050' : mine ? (big ? '#ffd040' : '#fff0d0') : '#e0b8a8', t0: now, life: 900, big: mine && big ? 1 : 0, pop: mine || onMe });
       if (!f.dot) feel.spill(f.x, f.y + 10, f.a || 0, f.v, f.k, now);
       if (mine) { feel.sfx(f.sh ? 'block' : big ? 'hithard' : 'hit'); feel.shake(f.dot ? 0 : 2 + Math.min(5, f.v / 5)); if (!f.dot) feel.stop(big ? 75 : 50, now); }
@@ -180,7 +185,9 @@ function onSnap(m) {
       else if (!f.dot) feel.sfx(f.sh ? 'block' : 'hit', ddx, dd, 0.55);
       continue;
     }
-    if (f.t === 'die') { feel.addBody(f, now); feel.sfx('die', ddx, dd, f.k === 'player' ? 1 : 0.6); if (f.k === 'logs') feel.sfx('wood', ddx, dd); continue; }
+    if (f.t === 'die') {
+      if (f.i && now - (lastMyHit.get(f.i) || 0) < 1500) killConfirm(f, now);
+      feel.addBody(f, now); feel.sfx('die', ddx, dd, f.k === 'player' ? 1 : 0.6); if (f.k === 'logs') feel.sfx('wood', ddx, dd); continue; }
     if ((f.t === 'arc' || f.t === 'thrust') && f.i === myId && now - lastPredict < 2500) continue; // already shown when you pressed
     if (f.t === 'arc') feel.sfx(f.w > 2.5 ? 'heavy' : 'swing', ddx, dd, 0.6);
     else if (f.t === 'thrust') feel.sfx('thrust', ddx, dd, 0.6);
@@ -704,14 +711,34 @@ function bindTo(code) {
 // Pressing a slot: hold to repeat; a second press within 0.35s while it cools down queues one use;
 // the toggle key + a slot key keeps it repeating until toggled off.
 function aimMsg() { const w = worldMouse(); return { a: +aimAngle().toFixed(3), x: Math.round(w.x), y: Math.round(w.y) }; }
-// Your attacks are shown at once (swing, sound, effect) instead of waiting for the server's echo.
+// Your attacks are shown at once (swing, sound, effect) instead of waiting for the server's echo, and a blow
+// that visibly connects lands at once too (sound, blood, hit-stop); the server's number follows.
+const predictedHit = new Map(), lastMyHit = new Map();
+let streak = 0, streakAt = 0;
+function predictHits(h) {
+  const reach = h.reach, out = [];
+  for (const o of ents.values()) {
+    if (o.id === myId || isAlly(o) || o.h <= 0 || (OBJ(o) && o.k !== 'logs') || o.iv >= 0.9) continue;
+    const dx = o.x - me.x, dy = o.y - me.y, r = RADIUS(o), c = Math.cos(me.ang), sn = Math.sin(me.ang);
+    if (h.line) { const along = dx * c + dy * sn, side = Math.abs(-dx * sn + dy * c); if (along > -r && along < reach + r && side < 16 + r) out.push([along, o]); }
+    else if (Math.hypot(dx, dy) < reach + r && (h.arc >= 360 || angDiff(Math.atan2(dy, dx), me.ang) < ((h.arc * Math.PI) / 360) + 0.15)) out.push([Math.hypot(dx, dy), o]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return (h.first ? out.slice(0, 1) : out).map((x) => x[1]);
+}
+function killConfirm(f, now) {
+  streak = now - streakAt < 5000 ? streak + 1 : 1; streakAt = now;
+  feel.sfx('kill'); feel.stop(120, now); feel.shake(7);
+  floaters.push({ x: f.x, y: f.y - 46, txt: streak > 1 ? `${['', '', 'Double', 'Triple', 'Quadruple'][streak] || streak + '×'} kill!` : 'Slain', c: streak > 1 ? '#ffb030' : '#f0e0c0', t0: now, life: 1300, big: 1 });
+}
 let lastPredict = 0, animNow = 0, pausedMs = 0;
 const localCd = {}, pendingFx = [];
 function predictAttack(t, now) {
   if (!isAttack(t) || me.dead || now < (me.busyEnd || 0) || (gcdEnd[t.id] || 0) > now || (localCd[t.id] || 0) > now) return;
   me.atk = { tool: t, start: animNow }; me.busyEnd = now + actionTime(t); localCd[t.id] = now + t.cd; lastPredict = now;
   const w = t.windup || 0;
-  if (t.type === 'strike') for (const h of t.hits) pendingFx.push({ at: now + w + h.t, h, tool: t });
+  // the blow is shown mid-swing, a few frames after the hit starts
+  if (t.type === 'strike') for (const h of t.hits) pendingFx.push({ at: now + w + h.t + (h.line ? 35 : 45), h, tool: t });
   else if (t.type === 'shoot') pendingFx.push({ at: now + w, shot: t });
 }
 function firePending(now) {
@@ -723,6 +750,12 @@ function firePending(now) {
     const h = p.h, arc = Math.min(6.4, ((h.arc || 0) * Math.PI) / 180);
     if (h.line) { fxs.push({ t: 'thrust', i: myId, x: me.x, y: me.y, a: me.ang, r0: 14, r1: h.reach, t0: now, seed: 0 }); feel.sfx('thrust'); }
     else { fxs.push({ t: 'arc', i: myId, x: me.x, y: me.y, a: me.ang, r: h.reach, w: arc, t0: now, seed: 0 }); feel.sfx(arc >= 6.2 ? 'spin' : arc > 2.5 || h.dmg >= 15 ? 'heavy' : 'swing'); }
+    const hit = predictHits(h);
+    if (hit.length) {
+      const big = h.dmg >= 13;
+      feel.sfx(big ? 'hithard' : 'hit'); feel.stop(big ? 80 : 55, now); feel.shake(2.5 + h.dmg / 5);
+      for (const o of hit) { predictedHit.set(o.id, now); o.hitT = now; o.hitA = Math.atan2(o.y - me.y, o.x - me.x); o.flash = now; feel.spill(o.x, o.y + 10, o.hitA, h.dmg * 2, o.k, now); }
+    }
   }
 }
 function slotDown(s, mouse) {
@@ -890,6 +923,33 @@ function drawBridges(x0, y0, x1, y1) {
 }
 
 // ------------------------------------------------------------------ drawing helpers
+// The arm, the weapon and, while it moves fast, its smear and the trail of its tip.
+function drawRig(o, kind, tool, t, step, P, sc, look, twist) {
+  const ws = weaponSprite(kind), wsc = sc * 1.12, L = rig.tipOf(kind), col = armColors(o.k, facColor(o.f), look);
+  ctx.rotate(-twist * 0.7 + twist); // the arm turns a little further than the body
+  const place = (pp, a) => {
+    const g = rig.grip(pp);
+    ctx.save(); ctx.globalAlpha *= a; ctx.translate(g.hx * sc, g.hy * sc); ctx.rotate(g.wa);
+    ctx.drawImage(ws.c, -ws.px * wsc, -ws.py * wsc, ws.w * wsc, ws.h * wsc);
+    ctx.restore();
+  };
+  if (P.fast > 0.5 && t != null) {
+    // the tip's path over the last ~100 ms, as a tapering bright ribbon
+    const pts = [];
+    for (let k = 0; k <= 9; k++) { const g = rig.grip(rig.pose(tool, kind, t - k * 11, step)); pts.push([(g.hx + Math.cos(g.wa) * L * 1.12) * sc, (g.hy + Math.sin(g.wa) * L * 1.12) * sc]); }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (let k = 0; k < pts.length - 1; k++) { const q = 1 - k / (pts.length - 1); ctx.strokeStyle = `rgba(255,244,214,${0.55 * q})`; ctx.lineWidth = 1 + 7 * q; ctx.beginPath(); ctx.moveTo(...pts[k]); ctx.lineTo(...pts[k + 1]); ctx.stroke(); }
+    ctx.restore();
+    for (const [back, a] of [[30, 0.14], [20, 0.22], [10, 0.34]]) place(rig.pose(tool, kind, t - back, step), a);
+  }
+  const g = rig.grip(P), sx = rig.SHOULDER[0] * sc, sy = rig.SHOULDER[1] * sc, hx = g.hx * sc, hy = g.hy * sc;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(20,14,10,.9)'; ctx.lineWidth = 6.4; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  ctx.strokeStyle = col.sleeve; ctx.lineWidth = 4.2; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  place(P, 1);
+  ctx.fillStyle = col.skin; ctx.strokeStyle = 'rgba(20,14,10,.9)'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(hx, hy, 3.8, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.lineCap = 'butt';
+}
 function bodySprite(b) {
   if (b.k === 'logs' || (MOBS[b.k] && MOBS[b.k].obj)) return null;
   const look = b.k === 'player' ? playerLook(b.n || '', b.rk || 0, facColor(b.f), b.wp, null) : { weapon: 'none', shieldKind: null };
@@ -943,25 +1003,32 @@ function drawEnt(o, x, y, now, self) {
   // the attack in progress: your own from the moment you pressed, everyone else's from the server
   const atk = self && me.atk && animNow - me.atk.start < 2600 ? me.atk : o.atkTool ? { tool: TOOLS[o.atkTool], start: o.atkStart } : null;
   const at = atk ? animNow - atk.start : 1e9, wkind = o.k === 'player' || MOBS[o.k]?.ai === 'kit' ? TOOL_SPRITE[o.wp] : null, swings = wkind && SWINGS.has(wkind);
+  const tool = atk && atk.tool && atk.tool.id === o.wp ? atk.tool : null;
   const look = o.k === 'player' ? playerLook(o.n || prof.name, o.rk || 0, facColor(o.f), o.wp, o.sh) : { weapon: TOOL_SPRITE[o.wp] || null, shieldKind: o.sh || null };
   if (swings) look.weapon = 'none';
   const img = creature(o.k, facColor(o.f) || '#888', step, at < 260 || o.sp, look);
   const w = img.width / 2 * 1.3, h = img.height / 2 * 1.3;
-  // a quick step into each attack, so a swing or a thrust has weight
-  const ap = at / 240, lunge = ap < 1 ? Math.sin(ap * Math.PI) * 5 : 0;
-  ctx.save(); ctx.translate(x + Math.cos(ang) * lunge, y + Math.sin(ang) * lunge); ctx.rotate(o.sp && o.k !== 'player' ? now / 60 : ang);
+  const P = swings ? rig.pose(tool, wkind, at < 2600 ? at : null, step) : null;
+  // a step into each blow (and a twist of the torso for swords and axes), so attacks have weight
+  const ap = at / 240, lean = P ? P.lean : ap < 1 ? Math.sin(ap * Math.PI) * 5 : 0, twist = P ? P.tw : 0;
+  // knocked back a little when hit
+  const fp = o.hitT ? (now - o.hitT) / 160 : 1, knock = fp < 1 ? 8 * (1 - fp) * (1 - fp) : 0;
+  const bx = x + Math.cos(ang) * lean + (knock ? Math.cos(o.hitA) * knock : 0), by = y + Math.sin(ang) * lean + (knock ? Math.sin(o.hitA) * knock : 0);
+  // a red warning on the ground while an enemy winds up a heavy blow at you
+  if (tool && tool.windup && at < tool.windup && !isAlly(o) && tool.hits) {
+    const q = at / tool.windup, h0 = tool.hits[0], reach = h0.reach + 10;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.fillStyle = `rgba(220,30,20,${0.1 + 0.25 * q})`; ctx.beginPath();
+    if (h0.line) ctx.rect(0, -14, reach, 28); else { const a2 = Math.min(Math.PI, ((h0.arc || 90) * Math.PI) / 360); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, -a2, a2); ctx.closePath(); }
+    ctx.fill(); ctx.restore();
+  }
+  ctx.save(); ctx.translate(bx, by); ctx.rotate((o.sp && o.k !== 'player' ? now / 60 : ang) + twist * 0.7);
+  if (knock) ctx.scale(1 - knock * 0.012, 1 + knock * 0.008);
   if (o.k === 'wraith' || o.k === 'hollow_prince') ctx.globalAlpha = alpha * 0.85;
   if (o.enr) { ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; }
   ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  ctx.shadowBlur = 0;
   if (o.flash && now - o.flash < 120) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.drawImage(img, -w / 2, -h / 2, w, h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = alpha; }
-  if (swings) {
-    // the weapon is held at the right hand and moves through the attack
-    const pose = feel.weaponPose(atk && atk.tool && atk.tool.id === o.wp ? atk.tool : null, at), ws = weaponSprite(wkind), sc = 1.3 * (o.k === 'player' ? 1 : lookScale(o.k));
-    ctx.save(); ctx.translate(10 * sc, 9 * sc); ctx.rotate(pose.rot + step * 0.04); ctx.translate(pose.fwd, 0);
-    ctx.drawImage(ws.c, -ws.px * sc, -ws.py * sc, ws.w * sc, ws.h * sc);
-    ctx.restore();
-    ctx.fillStyle = '#e0b890'; ctx.strokeStyle = 'rgba(20,14,10,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(10 * sc, 9 * sc, 3.6, 0, 7); ctx.fill(); ctx.stroke();
-  }
+  if (swings) drawRig(o, wkind, tool, at < 2600 ? at : null, step, P, 1.3 * (o.k === 'player' ? 1 : lookScale(o.k)), look, twist);
   ctx.restore();
   ctx.globalAlpha = alpha;
   // A raised shield shows as a bright arc in front.
@@ -1076,13 +1143,13 @@ function drawSlash(f, t) {
   if (sweep < 0.02) return;
   ctx.save(); ctx.translate(ax, ay); ctx.globalCompositeOperation = 'lighter';
   const frac = Math.min(0.998, sweep / (Math.PI * 2)), g = ctx.createConicGradient(a0, 0, 0);
-  g.addColorStop(0, `rgba(${col},0)`); g.addColorStop(frac * 0.55, `rgba(${col},${0.16 * fade})`); g.addColorStop(frac, `rgba(${col},${0.7 * fade})`); g.addColorStop(Math.min(1, frac + 0.002), `rgba(${col},0)`);
+  g.addColorStop(0, `rgba(${col},0)`); g.addColorStop(frac * 0.55, `rgba(${col},${0.06 * fade})`); g.addColorStop(frac, `rgba(${col},${0.3 * fade})`); g.addColorStop(Math.min(1, frac + 0.002), `rgba(${col},0)`);
   ctx.fillStyle = g;
   // outer edge along the arc, inner edge closing in toward the leading end (a crescent)
   ctx.beginPath(); ctx.arc(0, 0, f.r * 1.04, a0, a0 + sweep);
   for (let k = 24; k >= 0; k--) { const q = k / 24, an = a0 + sweep * q, rr = f.r * (0.95 - 0.38 * q); ctx.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); }
   ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = `rgba(255,255,255,${0.85 * fade})`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.strokeStyle = `rgba(255,255,255,${0.45 * fade})`; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.arc(0, 0, f.r * 1.03, a0 + sweep * 0.45, a0 + sweep); ctx.stroke(); ctx.lineCap = 'butt';
   ctx.restore();
 }
@@ -1162,7 +1229,8 @@ function drawBossBar() {
 }
 
 // ------------------------------------------------------------------ frame
-let last = performance.now(), frameNo = 0;
+let last = performance.now(), frameNo = 0, prewarming = false;
+const warmed = new Set();
 // Prop sprites are looked up once per prop and kept on it.
 function propSprite(p) { return p.spr || (p.spr = prop(p.k, p.v, REGIONS[regionAt(p.x, p.y)].biome)); }
 // A ring around you while a channel (quick travel, rally, hiring) runs.
@@ -1206,7 +1274,7 @@ function frame(now) {
   const moved = Math.hypot(me.x - ox, me.y - oy);
   me.ph += moved * 0.22; me.moving = moved > 0.3;
   // Everyone else is drawn ~110ms in the past, smoothly between the two snapshots around that moment.
-  const rt = now - 110;
+  const rt = now - 75;
   for (const o of ents.values()) {
     const b = o.buf, px = o.x, py = o.y;
     let i = b.length - 1;
@@ -1234,6 +1302,8 @@ function frame(now) {
   }
   drawBridges(x0, y0, x1, y1);
   const VS = VILLAGE_SPRITE_SIZE, csz = (c) => castleSize(c.type);
+  // Castles are painted ahead of time, in idle moments, before they scroll into view (painting one takes a while).
+  if (frameNo % 20 === 0 && !prewarming) { const near = CASTLES.find((c) => !warmed.has(c.id + '|' + owners.get(c.id)) && Math.abs(c.x - me.x) < hw * 2.6 && Math.abs(c.y - me.y) < hh * 2.6); if (near) { prewarming = true; const go = () => { castleBase(near); castleTop(near, facColor(owners.get(near.id)) || '#8a5a42'); warmed.add(near.id + '|' + owners.get(near.id)); prewarming = false; }; (window.requestIdleCallback || setTimeout)(go, { timeout: 500 }); } }
   const visCastles = CASTLES.filter((c) => { const h = csz(c) / 2; return c.x + h > x0 && c.x - h < x1 && c.y + h > y0 && c.y - h < y1; });
   for (const c of visCastles) { const S = csz(c); ctx.drawImage(castleBase(c), c.x - S / 2, c.y - S / 2, S, S); }
   for (const cv2 of CAVES) if (Math.abs(cv2.x - me.x) < hw + 100 && Math.abs(cv2.y - me.y) < hh + 100) ctx.drawImage(caveSprite(DUNGEONS[cv2.dungeon].theme), cv2.x - 75, cv2.y - 70, 150, 130);

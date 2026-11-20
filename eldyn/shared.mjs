@@ -545,7 +545,9 @@ export function rankOf(valor) {
   for (let i = 0; i < RANKS.length; i++) if (valor >= RANKS[i].v) idx = i;
   return { idx, name: RANKS[idx].name, next: RANKS[idx + 1] ? RANKS[idx + 1].v : null, cur: RANKS[idx].v };
 }
-export const rankHp = (idx) => 80 + (idx >= RANK.hp1 ? 10 : 0) + (idx >= RANK.hp2 ? 10 : 0);
+export const rankHp = (idx) => 100 + (idx >= RANK.hp1 ? 12 : 0) + (idx >= RANK.hp2 ? 12 : 0);
+// NPC health is scaled with player health (which rose from 80 to 100).
+export const NPC_HP_SCALE = 1.25;
 // The rank a faction member needs to order each kind of castle troop (hired troops obey their owner).
 export const COMMAND_RANK = { farmer: 4, ranger: 4, reiver: 5, alchemist: 5, healer: 5, brigand: 6, forest_steward: 6, honourguard: 11, cearl: 11, captain: 11 };
 
@@ -605,10 +607,10 @@ export const MOBS = {
   honourguard: P({ name: 'Honourguard', hp: 140, spd: 160, valor: 300, kit: ['greatsword', 'kite', 'parry'] }),
   captain: P({ name: 'Captain', hp: 180, spd: 160, r: 16, valor: 500, kit: ['halberd', 'scutum', 'riposte'], gold: 20 }),
   dweller: P({ name: 'Dweller', hp: 150, valor: 350, kits: [['flail', 'targe'], ['crossbow', 'rondel'], ['glaive', 'parry'], ['battleaxe', 'leeches']] }),
-  hire_archer: P({ name: 'Hired Archer', hp: 50, valor: 0, kit: ['sling'] }),
-  hire_merc: P({ name: 'Mercenary', hp: 70, valor: 0, kit: ['shortsword'] }),
-  hire_guard: P({ name: 'Hired Guard', hp: 90, valor: 0, kit: ['spear', 'buckler'] }),
-  hire_healer: P({ name: 'Hired Healer', hp: 50, valor: 0, kit: ['bollock', 'tincture'], healer: 1 }),
+  hire_archer: P({ name: 'Hired Archer', hp: 40, valor: 0, kit: ['sling'] }),
+  hire_merc: P({ name: 'Mercenary', hp: 56, valor: 0, kit: ['shortsword'] }),
+  hire_guard: P({ name: 'Hired Guard', hp: 72, valor: 0, kit: ['spear', 'buckler'] }),
+  hire_healer: P({ name: 'Hired Healer', hp: 40, valor: 0, kit: ['bollock', 'tincture'], healer: 1 }),
   // objects: logs to break for Wood, traps, deployed banners and bonfires
   logs: O({ name: 'Log Pile', hp: 10, r: 16 }),
   tripwire: O({ name: 'Tripwire', hp: 10, r: 12, trap: { r: 30, uses: 3, dmg: 5 } }),
@@ -616,8 +618,8 @@ export const MOBS = {
   sulphur: O({ name: 'Sulphur Trap', hp: 20, r: 12, trap: { r: 30, cloud: { r: 80, dps: 3, dur: 4000 } } }),
   brimstone: O({ name: 'Brimstone Trap', hp: 20, r: 12, trap: { r: 30, burst: { r: 60, dmg: 14 }, burn: { dps: 2, dur: 3000 } } }),
   spinner: O({ name: 'Spinner Trap', hp: 60, r: 14, trap: { r: 70, spin: { dmg: 6, every: 600, dur: 15000 } } }),
-  gonfalon: O({ name: 'Gonfalon', hp: 120, r: 12, banner: { r: 180, def: 15 }, holds: 1, ttl: 120000 }),
-  ensign: O({ name: 'Ensign', hp: 80, r: 12, banner: { r: 180, hot: 1 }, holds: 1, ttl: 120000 }),
+  gonfalon: O({ name: 'Gonfalon', hp: 96, r: 12, banner: { r: 180, def: 15 }, holds: 1, ttl: 120000 }),
+  ensign: O({ name: 'Ensign', hp: 64, r: 12, banner: { r: 180, hot: 1 }, holds: 1, ttl: 120000 }),
   bonfire: O({ name: 'Bonfire', hp: 30, r: 14, fire: { r: 120, hot: 1.5 }, ttl: 60000 }),
   // dungeon bosses
   broodmother: M({ name: 'The Broodmother', hp: 1300, dmg: 11, spd: 115, r: 34, range: 52, cd: 1200, aggro: 520, valor: 2000, gold: 175, ai: 'boss', boss: 1, abilities: ['summon', 'charge', 'slam'], minion: 'rat' }),
