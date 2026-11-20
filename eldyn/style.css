@@ -34,7 +34,7 @@ i.hp { background:linear-gradient(#e0504a,#9a1e18); } i.en { background:linear-g
 #chatin { display:none; width:100%; pointer-events:auto; background:#000c; border:1px solid var(--line); color:#fff; padding:7px; font:inherit; border-radius:5px; margin-top:6px; }
 
 #bottom { bottom:10px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:6px; }
-#bars { width:min(580px,92vw); display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+#bars { width:min(420px,92vw); display:grid; grid-template-columns:1fr; gap:6px; }
 #bars .bar { margin:0; border-color:#2a2010; }
 #hotbar { display:flex; gap:5px; pointer-events:auto; }
 .slot { width:54px; height:54px; background:radial-gradient(#3a301c,#1a140c); border:2px solid var(--tc,#5a4a2a); border-radius:8px; position:relative; cursor:pointer; text-align:center; box-shadow:inset 0 0 8px #000; }
@@ -66,13 +66,13 @@ i.hp { background:linear-gradient(#e0504a,#9a1e18); } i.en { background:linear-g
 .panel h2 small { color:#9fe07a; font-size:13px; font-weight:normal; margin-left:8px; }
 .panel h2 .x { cursor:pointer; color:#aaa; }
 .panel h4 { margin:14px 0 6px; color:var(--gold); font-weight:normal; }
-#skills { width:min(860px,96vw); }
+#skills { width:min(1120px,96vw); }
 #treetabs { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
 .treetab { border-color:var(--tc); color:var(--tc); }
 .treetab.on { background:var(--tc); color:#1a120a; font-weight:bold; }
 .treetab.glow { box-shadow:0 0 8px #9fe07a; }
 .skillwrap { display:flex; gap:14px; align-items:flex-start; }
-#treeview { position:relative; width:490px; height:534px; flex:none; background:radial-gradient(ellipse at top,rgba(255,255,255,.05),transparent 70%); border:1px solid #3a2e18; border-radius:8px; }
+#treeview { position:relative; width:660px; height:534px; flex:none; background:radial-gradient(ellipse at top,rgba(255,255,255,.05),transparent 70%); border:1px solid #3a2e18; border-radius:8px; }
 #treeview svg { position:absolute; inset:0; }
 #treeview .edge { fill:none; stroke:#4a3e28; stroke-width:3; }
 #treeview .edge.lit { stroke:var(--tc); }
@@ -186,3 +186,21 @@ i.mast { background:linear-gradient(#d8c070,#8a6a20); }
 .wcard .slotpick { margin-top:6px; }
 .wcard .slotpick button { font-size:12px; padding:3px 7px; }
 @media (max-width:900px) { .wbox { width:36px; height:42px; } .wbox .ico { font-size:18px; line-height:42px; } }
+
+/* toolbelt */
+.slot.tog { border-color:#9fe07a; box-shadow:0 0 10px #9fe07a88; }
+.slot .en { color:#e8c890; }
+#rallybox { top:70px; left:50%; transform:translateX(-50%); display:none; pointer-events:auto; text-align:center; font-size:14px; }
+#rallybox button { margin:6px 4px 0; }
+#death { pointer-events:auto; }
+#deathbtns { margin-top:16px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+/* tools panel */
+#treeview { overflow:auto; }
+.treeinner { position:relative; }
+.treeinner svg { position:absolute; inset:0; }
+.node.tnode { width:90px; height:48px; padding-left:24px; }
+.node.tnode .ni { font-size:18px; left:4px; }
+.node.tnode .nn { font-size:11px; }
+.node.worn::after { content:'●'; position:absolute; top:2px; right:5px; font-size:9px; color:#9fe07a; }
+#goldrow .carry { color:#f0c070; }
+#treetabs .treetab { flex:1; }

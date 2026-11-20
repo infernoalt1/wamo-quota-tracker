@@ -1,224 +1,205 @@
-// Hanbin Island builds: weapons, talent trees and weapon mastery trees.
-// You fight mostly with your weapon (hold the mouse to attack). Talents and mastery shape how those
-// attacks behave; a handful of abilities with real cooldowns sit on top.
+// Hanbin Island tools: the toolbelt combat system (modelled on Eldyn's tool-based combat).
+// Every number the game uses for a tool lives here; the in-game descriptions are generated from it.
+// Damage is per hit against 80 HP. Times are in ms, distances in px, modifiers in percent.
 
-// ------------------------------------------------------------------ weapons
-// type: melee (arc) | thrust (line) | shot (arrow) | bolt (bursting magic). every = ms between attacks.
-export const WEAPONS = {
-  sword: { name: 'Longsword', icon: '⚔️', type: 'melee', every: 430, dmg: 20, range: 84, arc: 1.9, desc: 'Sword and shield. Balanced swings; every third swing is a wide, heavy cleave that knocks foes back.' },
-  greataxe: { name: 'Greataxe', icon: '🪓', type: 'melee', every: 820, dmg: 48, range: 100, arc: 2.7, knock: 40, desc: 'Slow, crushing arcs that hit everything in front of you and shove foes back.' },
-  daggers: { name: 'Twin Daggers', icon: '🗡️', type: 'melee', every: 250, dmg: 10, range: 62, arc: 1.4, crit: 0.1, back: 0.3, desc: 'Very fast stabs with 10% base critical chance. Strikes on foes that are not facing you (or are stunned) deal +30%.' },
-  spear: { name: 'War Spear', icon: '🔱', type: 'thrust', every: 580, dmg: 27, range: 150, width: 24, desc: 'Long thrusts that pierce every foe in a line. Keep enemies at the tip.' },
-  bow: { name: 'Longbow', icon: '🏹', type: 'shot', every: 620, dmg: 19, speed: 720, life: 0.85, desc: 'Arrows from long range. Fragile up close.' },
-  staff: { name: 'Runestaff', icon: '🪄', type: 'bolt', every: 740, dmg: 20, speed: 520, life: 0.95, aoe: 55, splash: 0.5, desc: 'Arcane bolts that burst on impact, splashing half their damage onto foes nearby.' },
+export const BASE_HP = 80, SLOTS = 7, TURN_RATE = (600 * Math.PI) / 180; // rad per second
+export const ATK_CAP = [-90, 75], DEF_CAP = [-50, 90], SPD_CAP = [0.2, 2], ALLY_SHIELD_CAP = 20, AURA_GAP = 300;
+// Moving away from where you face (more than 100° off) is slower, so kiting has a cost.
+export const BACKPEDAL = 0.75, BACKPEDAL_ANGLE = (100 * Math.PI) / 180;
+export const RESPEC_COST = 0.05, MAX_TRAPS = 10, MAX_TROOPS = 5;
+
+export const PATHS = [
+  { id: 'warrior', name: 'Warrior', color: '#e0584f', blurb: 'Melee weapons, shields and duellist maneuvers.' },
+  { id: 'hunter', name: 'Hunter', color: '#6fbf5a', blurb: 'Ranged weapons, short blades, traps and moving unseen.' },
+  { id: 'alchemist', name: 'Alchemist', color: '#a56ae0', blurb: 'Thrown concoctions, crowd control, leech, heals and disguise.' },
+  { id: 'auxiliary', name: 'Auxiliary', color: '#e0b84f', blurb: 'Banners for your team, banners that hold forts, and a hired army.' },
+];
+export const GROUPS = {
+  weapon: 'Weapon', sidearm: 'Sidearm', shield: 'Shield', maneuver: 'Maneuver', thrown: 'Thrown', heal: 'Heal',
+  buff: 'Buff', stealth: 'Stealth', banner: 'Banner', trap: 'Trap', troops: 'Troops',
 };
-export const WEAPON_IDS = Object.keys(WEAPONS);
-export const DEFAULT_WSET = ['sword', 'bow'];
+// Time-to-kill bands (seconds against 80 HP, no defence, attacking non-stop) every weapon must sit in.
+export const TTK_BANDS = { light: [4.4, 5.0], heavy: [4.6, 5.2], reach: [5.4, 7.5], ranged: [5.5, 7.5], side: [14, Infinity] };
 
-// Mastery: soma you earn while wielding a weapon also trains it. Each mastery level is a point for
-// that weapon's tree. Level 1 takes 40 soma, level 10 about 1,330, level 20 about 13,700.
-export const MAX_MASTERY = 20;
-export const masteryXp = (L) => (L <= 0 ? 0 : Math.round((40 * (1.25 ** L - 1)) / 0.25));
-export function masteryOf(xp) {
-  let L = 0;
-  while (L < MAX_MASTERY && masteryXp(L + 1) <= xp) L++;
-  return L;
-}
-// The blacksmith in the Haven forges weapons with banked gold: +6% weapon damage per level.
-export const FORGE_MAX = 10, FORGE_BONUS = 0.06;
-export const forgeCost = (lv) => 80 * lv * lv; // cost to reach level lv
-export const HOTBAR_SLOTS = 6;
-export const ROLL_CD = 3500, ROLL_DIST = 150, ROLL_MS = 260;
-export const PVP_MUL = 0.7; // players hit other players for 70%
-
-// ------------------------------------------------------------------ trees
-export const TREES = [
-  { id: 'warfare', name: 'Warfare', color: '#e0584f', blurb: 'Melee power: wider swings, lifesteal, stuns, and a berserker finish.' },
-  { id: 'precision', name: 'Precision', color: '#6fbf5a', blurb: 'Ranged damage and critical strikes: split shots, piercing, traps and marks.' },
-  { id: 'arcana', name: 'Arcana', color: '#a56ae0', blurb: 'Elements and energy: burns, chills, static, and the big spells.' },
-  { id: 'command', name: 'Command', color: '#e0b84f', blurb: 'Lead the field: summons, auras and war banners.' },
-  { id: 'finesse', name: 'Finesse', color: '#4fc3e0', blurb: 'Footwork and defence: dodging, evasion, parries and vanishing.' },
-  ...WEAPON_IDS.map((w) => ({ id: 'w_' + w, weapon: w, name: WEAPONS[w].name, color: '#d8c8a0', blurb: `${WEAPONS[w].desc} Mastery points come from soma earned while wielding it; its talents only work while it is in your hands.` })),
+const T = (id, name, path, req, group, cd, icon, spec, desc) => ({ id, name, path, req, group, cd, icon, ...spec, desc });
+const hit = (t, dmg, o = {}) => ({ t, dmg, ...o });
+export const TOOL_LIST = [
+  // ------------------------------------------------------------- Warrior: melee weapons
+  T('spear', 'Spear', 'warrior', null, 'weapon', 700, '🔱', { cls: 'reach', type: 'strike', hits: [hit(0, 10, { line: 1, reach: 130, first: 1 })] }, 'Straight thrust that hits the first foe.'),
+  T('shortsword', 'Shortsword', 'warrior', null, 'weapon', 450, '🗡️', { cls: 'light', type: 'strike', hits: [hit(0, 8, { arc: 100, reach: 70 })] }, 'Quick 100° slash.'),
+  T('pike', 'Pike', 'warrior', 'spear', 'weapon', 700, '📍', { cls: 'reach', type: 'strike', hits: [hit(0, 10, { line: 1, reach: 190, first: 1, push: 60 })], after: { spd: -15, dur: 500 } }, 'Long thrust that pushes the foe back. You are slower for a moment after each thrust.'),
+  T('partisan', 'Partisan', 'warrior', 'pike', 'weapon', 950, '⚜️', { cls: 'reach', type: 'strike', hits: [hit(0, 11, { line: 1, reach: 200, first: 1 })] }, 'The longest thrust in the game.'),
+  T('lance', 'Lance', 'warrior', 'pike', 'weapon', 2200, '🏇', { cls: 'reach', type: 'charge', dist: 200, dur: 400, dmg: 24, push: 70, after: { spd: -40, atk: -20, dur: 2000 } }, 'Charge forward and run through the first foe, knocking it back. Afterwards you are slow and weaker for 2s.'),
+  T('glaive', 'Glaive', 'warrior', 'spear', 'weapon', 1200, '🌙', { cls: 'reach', type: 'strike', hits: [0, 200, 400].map((t) => hit(t, 5, { arc: 90, reach: 140, pull: 15 })) }, 'Three quick swipes, each pulling foes toward you.'),
+  T('halberd', 'Halberd', 'warrior', 'glaive', 'weapon', 1000, '🪓', { cls: 'reach', type: 'strike', hits: [hit(0, 13, { arc: 70, reach: 140, root: 300 })] }, 'Chop that holds the foe in place for a moment.'),
+  T('pollaxe', 'Pollaxe', 'warrior', 'halberd', 'weapon', 1000, '⚒️', { cls: 'reach', type: 'strike', hits: [hit(0, 11, { line: 1, reach: 150, first: 1, pull: 60 })] }, 'Hook that drags the foe toward you.'),
+  T('ranseur', 'Ranseur', 'warrior', 'glaive', 'weapon', 900, '🔺', { cls: 'reach', type: 'strike', hits: [hit(0, 10, { line: 1, reach: 150, first: 1, push: 90 })] }, 'Thrust that shoves the foe far back.'),
+  T('bardiche', 'Bardiche', 'warrior', 'ranseur', 'weapon', 1250, '🪚', { cls: 'heavy', type: 'strike', windup: 300, hits: [hit(0, 20, { arc: 160, reach: 120 })] }, 'Short wind-up, then a wide 160° chop.'),
+  T('sabre', 'Sabre', 'warrior', 'shortsword', 'weapon', 700, '⚔️', { cls: 'light', type: 'strike', step: 20, hits: [hit(0, 12, { arc: 100, reach: 80, push: 40 })], after: { spd: -30, dur: 400 } }, 'Slash with a step forward that pushes the foe back. You are slower for a moment after.'),
+  T('rapier', 'Rapier', 'warrior', 'sabre', 'weapon', 800, '🤺', { cls: 'light', type: 'strike', windup: 100, hits: [hit(0, 13, { line: 1, reach: 110, first: 1 })] }, 'Quick, precise thrust.'),
+  T('battleaxe', 'Battleaxe', 'warrior', 'shortsword', 'weapon', 2400, '🪓', { cls: 'heavy', type: 'strike', hits: [[0, 8], [400, 8], [800, 10], [1200, 14]].map(([t, d]) => hit(t, d, { arc: 110, reach: 90 })) }, 'Four swings in a row, each harder. Only foes still in the arc are hit.'),
+  T('greatsword', 'Greatsword', 'warrior', 'battleaxe', 'weapon', 1600, '🗡️', { cls: 'heavy', type: 'strike', windup: 450, hits: [hit(0, 26, { arc: 150, reach: 105 })] }, 'Slow wind-up, then a huge 150° sweep.'),
+  T('flail', 'Flail', 'warrior', 'battleaxe', 'weapon', 1900, '⛓️', { cls: 'heavy', type: 'strike', hits: [0, 400, 800].map((t) => hit(t, 11, { arc: 360, reach: 95 })) }, 'Three full spins that hit everything around you. Once started it can\'t be stopped.'),
+  T('quarterstaff', 'Quarterstaff', 'warrior', 'shortsword', 'sidearm', 1600, '🦯', { cls: 'side', type: 'strike', hits: [0, 250].map((t) => hit(t, 4, { arc: 90, reach: 95, push: 15 })) }, 'Sidearm: two quick strikes with a small push. Use it between weapon swings.'),
+  // ------------------------------------------------------------- Warrior: shields
+  T('buckler', 'Buckler', 'warrior', null, 'shield', 3500, '🛡️', { type: 'shield', def: 35, dur: 2000, spd: -10 }, 'Small, quick shield.'),
+  T('targe', 'Targe', 'warrior', 'buckler', 'shield', 4500, '🛡️', { type: 'shield', def: 45, dur: 2000, atk: -10 }, 'Round shield.'),
+  T('kite', 'Kite Shield', 'warrior', 'targe', 'shield', 7000, '🛡️', { type: 'shield', def: 50, dur: 2500, atk: -25, spd: -10 }, 'Tall shield.'),
+  T('pavise', 'Pavise', 'warrior', 'kite', 'shield', 9000, '🧱', { type: 'shield', def: 85, dur: 2500, atk: -40, spd: -40, shove: 30 }, 'The strongest shield: shoves away foes that touch you, but you can barely move or hurt anyone behind it.'),
+  T('parma', 'Parma', 'warrior', 'buckler', 'shield', 2500, '🛡️', { type: 'shield', def: 50, dur: 1000 }, 'Fast shield. The half-second gap between raises is its weakness.'),
+  T('round', 'Round Shield', 'warrior', 'parma', 'shield', 5000, '🛡️', { type: 'shield', def: 75, dur: 1500, atk: -60 }, 'Very strong, but your attacks are crippled while it is up: strike in the gaps, then raise it again.'),
+  T('scutum', 'Scutum', 'warrior', 'targe', 'shield', 7000, '🛡️', { type: 'shield', def: 56, dur: 2500, atk: -15, spd: -20, ally: { r: 120, def: 4, behind: 1 } }, 'Big legionary shield. Allies behind or beside you get +4 defence per Scutum (up to +20).'),
+  T('heraldic', 'Heraldic Shield', 'warrior', 'scutum', 'shield', 6000, '🛡️', { type: 'shield', def: 40, dur: 2500, ally: { r: 150, def: 10 } }, 'Shield bearing your colours. Allies near you get +10 defence.'),
+  // ------------------------------------------------------------- Warrior: maneuvers and buffs
+  T('lunge', 'Lunge', 'warrior', null, 'maneuver', 6000, '💨', { type: 'move', dir: 'fwd', dist: 120, buff: { atk: 30, dur: 1500 }, after: { spd: -20, dur: 1000, delay: 1500 } }, 'Dash forward with +30 attack for 1.5s, then you are slower for 1s.'),
+  T('feint', 'Feint', 'warrior', 'lunge', 'maneuver', 8000, '🌀', { type: 'move', dir: 'side', target: 160, buff: { atk: 30, dur: 1500 } }, 'Needs a foe within 160: step round to its side, with +30 attack for 1.5s.'),
+  T('remise', 'Remise', 'warrior', 'feint', 'maneuver', 9000, '♻️', { type: 'move', dir: 'circle', target: 160, aoe: { r: 50, dmg: 6 }, buff: { atk: 40, dur: 800 } }, 'Needs a foe within 160: circle 120° round it, hitting everything close for 6, with +40 attack for 0.8s.'),
+  T('parry', 'Parry', 'warrior', 'lunge', 'maneuver', 8000, '✋', { type: 'parry', window: 400, buff: { atk: 20, dur: 1500 }, foe: { atk: -20, spd: -30, dur: 1200 } }, 'For 0.4s the next melee hit on you is fully blocked. The attacker gets -20 attack and is 30% slower for 1.2s; you get +20 attack.'),
+  T('riposte', 'Riposte', 'warrior', 'parry', 'maneuver', 10000, '⚡', { type: 'move', dir: 'attacker', dist: 100, within: 1500, buff: { atk: 50, dur: 1000 } }, 'Only within 1.5s of being hit or parrying: dash at your attacker with +50 attack for 1s.'),
+  T('retreat', 'Retreat', 'warrior', 'lunge', 'maneuver', 8000, '↩️', { type: 'move', dir: 'back', dist: 140, aoe: { r: 60, dmg: 6, push: 60, atStart: 1 } }, 'Dash backward. Foes next to where you stood take 6 and are pushed away.'),
+  T('crossover', 'Cross Over', 'warrior', 'retreat', 'maneuver', 6000, '✖️', { type: 'move', dir: 'cross', target: 160, dist: 120 }, 'Needs a foe within 160: step back and to the side while still facing it.'),
+  T('redemption', 'Redemption', 'warrior', 'parry', 'buff', 20000, '🔥', { type: 'buff', eff: { atk: 40, spd: 15, def: -35 }, dur: 4000 }, '+40 attack and +15% speed for 4s, but -35 defence.'),
+  // ------------------------------------------------------------- Hunter: ranged
+  T('sling', 'Sling', 'hunter', null, 'weapon', 550, '🪨', { cls: 'ranged', type: 'shoot', dmg: 7, speed: 700, range: 450, proj: 'stone' }, 'Stone shot. No movement penalty.'),
+  T('flatbow', 'Flatbow', 'hunter', 'sling', 'weapon', 800, '🏹', { cls: 'ranged', type: 'shoot', dmg: 10, speed: 760, range: 550, during: { spd: -10, dur: 300 } }, 'Arrow. You are a little slower while drawing.'),
+  T('longbow', 'Longbow', 'hunter', 'flatbow', 'weapon', 1300, '🏹', { cls: 'ranged', type: 'shoot', windup: 500, dmg: 16, speed: 900, range: 800, during: { spd: -25, dur: 500 }, maim: { spd: -20, dur: 1500 } }, 'Long draw at reduced speed, then a long-range arrow that maims (target 20% slower for 1.5s).'),
+  T('crossbow', 'Crossbow', 'hunter', 'flatbow', 'weapon', 1800, '🎯', { cls: 'ranged', type: 'shoot', dmg: 20, speed: 1000, range: 650, proj: 'bolt' }, 'Fast, heavy bolt.'),
+  T('repeater', 'Repeating Crossbow', 'hunter', 'crossbow', 'weapon', 1800, '🎯', { cls: 'ranged', type: 'shoot', count: 4, every: 200, dmg: 5, speed: 900, range: 500, proj: 'bolt', during: { spd: -35, dur: 800 } }, 'Four bolts in quick succession. You are slower while firing.'),
+  T('pilum', 'Pilum', 'hunter', 'sling', 'sidearm', 4000, '🥢', { cls: 'side', type: 'shoot', dmg: 4, speed: 650, range: 400, proj: 'pilum', eff: { def: -20, spd: -20, dur: 2000 } }, 'Sidearm: thrown spear. The target gets -20 defence and is 20% slower for 2s. The answer to shields.'),
+  T('plumbata', 'Plumbata', 'hunter', 'pilum', 'weapon', 2200, '🎯', { cls: 'ranged', type: 'shoot', dmg: 28, speed: 750, range: 600, proj: 'dart', small: 1, arm: 200 }, 'Weighted dart with a tiny hitbox. It only hurts after flying 200 px.'),
+  // ------------------------------------------------------------- Hunter: blades and footwork
+  T('bollock', 'Bollock Dagger', 'hunter', 'sling', 'sidearm', 800, '🔪', { cls: 'side', type: 'strike', hits: [hit(0, 4, { arc: 60, reach: 50 })] }, 'Sidearm: fast stab at close range.'),
+  T('rondel', 'Rondel Dagger', 'hunter', 'bollock', 'sidearm', 1300, '🔪', { cls: 'side', type: 'strike', hits: [hit(0, 7, { arc: 60, reach: 55, eff: { spd: -20, dur: 800 } })] }, 'Sidearm: stab that slows the target 20% for 0.8s.'),
+  T('blackjack', 'Blackjack', 'hunter', 'rondel', 'sidearm', 4000, '🏏', { cls: 'side', type: 'strike', hits: [hit(0, 3, { arc: 70, reach: 55, eff: { spd: -40, dur: 1500, tag: 'blackjack' } })] }, 'Sidearm: cosh that slows the target 40% for 1.5s. Doesn\'t stack with itself.'),
+  T('sprint', 'Sprint', 'hunter', 'bollock', 'maneuver', 12000, '🏃', { type: 'buff', eff: { spd: 60 }, dur: 3000, after: { spd: -20, dur: 1500, delay: 3000 } }, '+60% speed for 3s, then 20% slower for 1.5s.'),
+  T('shadows', 'Hide in Shadows', 'hunter', 'sprint', 'stealth', 15000, '🌲', { type: 'stealth', invis: 0.85, dur: 6000, need: 'shadow', breakMove: 1 }, '85% invisible for 6s while you stand still in forest or a building\'s shadow.'),
+  T('focus', 'Deadly Focus', 'hunter', 'longbow', 'buff', 15000, '👁️', { type: 'buff', eff: { ratk: 40, def: -20, spd: -15 }, dur: 5000 }, '+40 attack on ranged hits, -20 defence and 15% slower, for 5s.'),
+  // ------------------------------------------------------------- Hunter: traps
+  T('tripwire', 'Tripwire', 'hunter', 'sling', 'trap', 1500, '〰️', { type: 'trap', npc: 'tripwire', wood: 2, range: 200 }, 'Deals 5 to each foe that crosses it, 3 times. Visible.'),
+  T('foothold', 'Foothold Trap', 'hunter', 'tripwire', 'trap', 1500, '🪤', { type: 'trap', npc: 'foothold', wood: 3, range: 200 }, 'Roots the first foe for 1.5s and deals 6.'),
+  T('sulphur', 'Sulphur Trap', 'hunter', 'foothold', 'trap', 1500, '💨', { type: 'trap', npc: 'sulphur', wood: 4, range: 200 }, 'Bursts into a poison cloud (80 px): 3 per second for 4s.'),
+  T('brimstone', 'Brimstone Trap', 'hunter', 'sulphur', 'trap', 1500, '🔥', { type: 'trap', npc: 'brimstone', wood: 5, range: 200 }, 'Bursts for 14, then burns for 2 per second for 3s.'),
+  T('spinner', 'Spinner Trap', 'hunter', 'brimstone', 'trap', 1500, '🌀', { type: 'trap', npc: 'spinner', wood: 8, range: 200 }, 'Post with a spinning lead ball: once triggered it hits foes within 70 for 6 every 0.6s for 15s. Can\'t be pushed.'),
+  T('net', 'Net', 'hunter', 'tripwire', 'thrown', 10000, '🕸️', { type: 'lob', range: 300, flight: 400, r: 60, root: 1200, aim: 1 }, 'Throw to a point within 300: roots foes within 60 for 1.2s.'),
+  T('lariat', 'Lariat', 'hunter', 'net', 'thrown', 8000, '➰', { type: 'shoot', dmg: 3, speed: 700, range: 350, proj: 'rope', pull: 120 }, 'Rope throw (our design): pulls the first foe hit 120 toward you and deals 3.'),
+  // ------------------------------------------------------------- Alchemist: thrown and control
+  T('gall', 'Phial of Gall', 'alchemist', 'rations', 'thrown', 3000, '🧪', { type: 'lob', range: 350, flight: 450, r: 60, dmg: 8, dot: { dps: 2, dur: 3000 }, aim: 1 }, 'Thrown up to 350: 8 to foes within 60, then acid for 2 per second for 3s.'),
+  T('naphtha', 'Naphtha', 'alchemist', 'gall', 'thrown', 5000, '🔥', { type: 'lob', range: 300, flight: 450, r: 70, zone: { dps: 4, dur: 4000 }, aim: 1 }, 'Thrown up to 300: a fire patch of 70 for 4s, 4 per second to every foe inside.'),
+  T('saltpetre', 'Saltpetre', 'alchemist', 'naphtha', 'thrown', 6000, '💥', { type: 'lob', range: 400, flight: 600, r: 70, dmg: 16, push: 80, eff: { spd: -30, dur: 1000 }, aim: 1 }, 'Thrown up to 400, explodes after 0.6s: 16 within 70, pushes foes 80 and slows them. Best at mid range.'),
+  T('moonstone', 'Moonstone', 'alchemist', 'gall', 'thrown', 9000, '🌑', { type: 'gather', r: 160, to: 40, dur: 600, dmg: 2 }, 'Smoothly pulls every foe within 160 to a point just in front of you.'),
+  T('firefog', 'Firefog', 'alchemist', 'moonstone', 'thrown', 9000, '🌫️', { type: 'repel', r: 90, dist: 100, dmg: 3 }, 'Cloud that pushes foes within 90 away by 100.'),
+  T('quicksilver', 'Quicksilver', 'alchemist', 'moonstone', 'sidearm', 8000, '🫧', { cls: 'side', type: 'shoot', dmg: 0, speed: 600, range: 350, proj: 'vial', players: 1, eff: { cd: 30, dur: 3000 } }, 'Sidearm: splash a player so their cooldowns run 30% slower for 3s. No effect on NPCs (our design).'),
+  T('leeches', 'Leeches', 'alchemist', 'rations', 'thrown', 7000, '🪱', { type: 'cone', r: 100, arc: 70, dps: 4, dur: 3000, leech: 1 }, '100 px cone: each foe takes 4 per second for 3s, and you heal all of it.'),
+  T('sceptre', 'Sceptre', 'alchemist', 'leeches', 'sidearm', 1500, '🔱', { cls: 'side', type: 'strike', hits: [hit(0, 5, { arc: 90, reach: 70, eff: { def: -15, dur: 3000 } })] }, 'Sidearm: strike that gives the target -15 defence for 3s, which also raises your leech.'),
+  T('draught', "Berserker's Draught", 'alchemist', 'leeches', 'buff', 24000, '🍺', { type: 'buff', eff: { atk: 50, def: -30, leech: 50 }, dur: 4000 }, '+50 attack, -30 defence and +50 leech for 4s.'),
+  // ------------------------------------------------------------- Alchemist: heals
+  T('rations', 'Rations', 'alchemist', null, 'heal', 15000, '🍖', { type: 'heal', amt: 18, after: { spd: -30, dur: 1500 } }, 'Heal 18 at once, then you are 30% slower for 1.5s.'),
+  T('tincture', "Mender's Tincture", 'alchemist', 'rations', 'heal', 10000, '⚗️', { type: 'heal', amt: 8, hot: { rate: 2, dur: 4000 }, toAlly: 250 }, 'Thrown at the most hurt ally within 250 (or yourself): 8 at once plus 2 per second for 4s.'),
+  T('poultice', "Sage's Poultice", 'alchemist', 'tincture', 'heal', 22000, '🌿', { type: 'heal', hot: { rate: 5, dur: 5000 }, self: { def: -25, spd: -40, dur: 5000 } }, 'Heal 5 per second for 5s, but -25 defence and 40% slower while it works.'),
+  T('blessing', 'Blessing', 'alchemist', 'poultice', 'heal', 30000, '✨', { type: 'heal', hot: { rate: 4, dur: 6000 }, allies: 150, self: { def: -30, spd: -50, dur: 6000 } }, 'You and allies within 150 heal 4 per second for 6s. You get -30 defence and are 50% slower while it works.'),
+  T('meditation', 'Meditation', 'alchemist', 'poultice', 'heal', 25000, '🧘', { type: 'heal', hot: { rate: 8, dur: 5000 }, self: { def: -40, root: 1, dur: 5000 } }, 'Heal 8 per second for 5s, but you can\'t move and have -40 defence.'),
+  // ------------------------------------------------------------- Alchemist: stealth
+  T('cloak', 'Shadow Cloak', 'alchemist', 'rations', 'stealth', 20000, '🧥', { type: 'stealth', invis: 0.7, dur: 8000, eff: { spd: -40 }, breakAct: 1, breakHit: 1 }, '70% invisible for 8s while creeping at 60% speed. Attacking or being hit ends it.'),
+  T('smoke', 'Apparition Smoke', 'alchemist', 'cloak', 'stealth', 30000, '👻', { type: 'stealth', invis: 0.99, dur: 3000 }, '99% invisible for 3s, even while moving. NPCs lose you, but strike where they last saw you.'),
+  T('turncoat', 'Turncoat', 'alchemist', 'smoke', 'stealth', 45000, '🎭', { type: 'disguise', dur: 10000 }, 'For 10s, or until you attack, other players see you as one of their own. No effect on NPCs.'),
+  // ------------------------------------------------------------- Auxiliary
+  T('pennon', 'Pennon', 'auxiliary', null, 'banner', 12000, '🚩', { type: 'aura', r: 150, eff: { atk: 10 }, dur: 6000 }, 'Carried banner: allies within 150 get +10 attack for 6s.'),
+  T('banderole', 'Banderole', 'auxiliary', 'pennon', 'banner', 15000, '🎏', { type: 'aura', r: 150, eff: { spd: 10 }, hot: 1, dur: 6000 }, 'Carried banner (our design): allies within 150 get +10% speed and heal 1 per second for 6s.'),
+  T('gonfalon', 'Gonfalon', 'auxiliary', 'pennon', 'banner', 30000, '🏳️', { type: 'deploy', npc: 'gonfalon', wood: 10, range: 200, aura: 1 }, 'Deploy a banner (120 HP, 2 min): allies within 180 get +15 defence. Holds a fort while it stands inside the walls.'),
+  T('ensign', 'Ensign', 'auxiliary', 'banderole', 'banner', 30000, '🏴', { type: 'deploy', npc: 'ensign', wood: 10, range: 200, aura: 1 }, 'Deploy a banner (80 HP, 2 min): allies within 180 heal 1 per second. Holds a fort.'),
+  T('bonfire', 'Bonfire', 'auxiliary', 'pennon', 'banner', 20000, '🔥', { type: 'deploy', npc: 'bonfire', wood: 4, range: 200, any: 1, self: { def: -20, dur: 2000 } }, 'Light a bonfire within 200 (60s): allies within 120 heal 1.5 per second. Lighting it gives you -20 defence for 2s.'),
+  T('hire_archer', 'Hire Archer', 'auxiliary', 'pennon', 'troops', 3000, '🏹', { type: 'hire', npc: 'hire_archer', gold: 60 }, 'Hire an archer (50 HP, Sling) for 60 banked gold.'),
+  T('hire_merc', 'Hire Mercenary', 'auxiliary', 'hire_archer', 'troops', 3000, '⚔️', { type: 'hire', npc: 'hire_merc', gold: 80 }, 'Hire a mercenary (70 HP, Shortsword) for 80 banked gold.'),
+  T('hire_guard', 'Hire Guard', 'auxiliary', 'hire_merc', 'troops', 3000, '🛡️', { type: 'hire', npc: 'hire_guard', gold: 100 }, 'Hire a guard (90 HP, Spear and Buckler) for 100 banked gold.'),
+  T('hire_healer', 'Hire Healer', 'auxiliary', 'hire_archer', 'troops', 3000, '⚕️', { type: 'hire', npc: 'hire_healer', gold: 120 }, "Hire a healer (50 HP) who throws Mender's Tincture at hurt allies, for 120 banked gold."),
 ];
-export const TREE = Object.fromEntries(TREES.map((t) => [t.id, t]));
+export const TOOLS = Object.fromEntries(TOOL_LIST.map((t) => [t.id, t]));
+// Eight free tools for seven slots: new players start with a sidearm too, so a veteran's sidearm is no edge.
+export const START_KIT = ['spear', 'shortsword', 'buckler', 'lunge', 'sling', 'rations', 'pennon', 'bollock'];
+export const START_BELT = ['spear', 'bollock', 'buckler', 'lunge', 'sling', 'rations', 'pennon'];
+export const UNLOCKABLE = TOOL_LIST.filter((t) => !START_KIT.includes(t.id)).map((t) => t.id);
+// Tools that aim at a point (the cursor) rather than straight ahead.
+export const isPlaced = (t) => t.type === 'trap' || t.type === 'deploy' || (t.type === 'lob' && t.aim);
 
-// N(id, name, tree, icon, [col, row], options)
-//   max: ranks · req: parent talent · lvl: soma tier (or mastery for weapon trees) needed
-//   mods: stats added per rank · active: { cd, en } for abilities · excl: a talent it cannot be combined with
-// Row r of a tree also needs 2×r points already spent in that tree.
-const N = (id, name, tree, icon, at, o) => ({ id, name, tree, icon, at, max: 1, req: null, lvl: 0, mods: null, active: null, excl: null, weapon: TREE[tree].weapon || null, ...o });
-const A = (cd, en) => ({ cd, en });
-export const TALENT_LIST = [
-  // ---- Warfare
-  N('brutality', 'Brutality', 'warfare', '💪', [1, 0], { max: 3, mods: { melee: 0.05 }, desc: 'Melee hits deal +5% damage per rank.' }),
-  N('wide_swings', 'Wide Swings', 'warfare', '🌙', [0, 1], { max: 2, req: 'brutality', mods: { arc: 0.12, reach: 0.06 }, desc: 'Melee swings are 12% wider and reach 6% farther per rank.' }),
-  N('bloodlust', 'Bloodlust', 'warfare', '🩸', [2, 1], { max: 3, req: 'brutality', mods: { lifesteal: 0.015 }, desc: 'Melee hits heal you for 1.5% of the damage per rank.' }),
-  N('concussion', 'Concussion', 'warfare', '💫', [0, 2], { req: 'wide_swings', mods: { concuss: 1 }, desc: 'Every 5th melee hit stuns its target for 0.6s. Melee hits on stunned foes Crush for +35%.' }),
-  N('war_cry', 'War Cry', 'warfare', '😤', [1, 2], { req: 'brutality', active: A(16000, 25), desc: 'Foes within 220 are Exposed for 5s (they take 15% more and deal 40% less), and you attack 25% faster for 6s.' }),
-  N('juggernaut', 'Juggernaut', 'warfare', '🛡️', [2, 2], { max: 3, req: 'bloodlust', mods: { maxhp: 0.06 }, desc: '+6% max health per rank.' }),
-  N('rampage', 'Rampage', 'warfare', '🔥', [0, 3], { max: 2, req: 'concussion', mods: { rampage: 0.08 }, desc: 'Kills make you attack 8% faster per rank for 5s, stacking 3 times.' }),
-  N('leap_slam', 'Leap Slam', 'warfare', '🦘', [1, 3], { req: 'war_cry', active: A(12000, 30), desc: 'Leap up to 280 toward the cursor and slam down: 50 damage and a 40% slow to foes within 120.' }),
-  N('unbreakable', 'Unbreakable', 'warfare', '🪨', [2, 3], { max: 2, req: 'juggernaut', mods: { dr: 0.04 }, desc: 'Take 4% less damage per rank.' }),
-  N('executioner', 'Executioner', 'warfare', '⚰️', [0, 4], { max: 2, req: 'rampage', mods: { execute: 0.15 }, desc: '+15% damage per rank to foes under 35% health.' }),
-  N('berserker', 'Berserker', 'warfare', '👹', [1, 4], { lvl: 12, req: 'leap_slam', mods: { berserk: 1 }, desc: 'Below half health you attack 30% faster and your lifesteal is doubled.' }),
-  N('iron_will', 'Iron Will', 'warfare', '🧱', [2, 4], { req: 'unbreakable', mods: { ccr: 0.5 }, desc: 'Stuns and slows on you last half as long.' }),
-
-  // ---- Precision
-  N('steady_aim', 'Steady Aim', 'precision', '🎯', [1, 0], { max: 3, mods: { ranged: 0.05 }, desc: 'Ranged hits deal +5% damage per rank.' }),
-  N('keen_eye', 'Keen Eye', 'precision', '👁️', [0, 1], { max: 3, req: 'steady_aim', mods: { crit: 0.03 }, desc: '+3% critical strike chance per rank, with every attack.' }),
-  N('quickdraw', 'Quickdraw', 'precision', '⚡', [2, 1], { max: 3, req: 'steady_aim', mods: { raspd: 0.05 }, desc: 'Bow and staff attacks are 5% faster per rank.' }),
-  N('deadly', 'Deadly Strikes', 'precision', '☠️', [0, 2], { max: 2, req: 'keen_eye', mods: { critDmg: 0.25 }, desc: 'Critical strikes deal +25% more damage per rank (normally 175%).' }),
-  N('snare_trap', 'Snare Trap', 'precision', '🪤', [1, 2], { req: 'steady_aim', active: A(14000, 20), desc: 'Hidden trap that roots the first foe for 2.2s. Ranged hits deal double to rooted foes (Pinned).' }),
-  N('split_shot', 'Split Shot', 'precision', '🔱', [2, 2], { req: 'quickdraw', mods: { split: 1 }, desc: 'Basic ranged attacks fire 2 extra projectiles at 35% damage.' }),
-  N('hunters_mark', "Hunter's Mark", 'precision', '🎯', [0, 3], { req: 'deadly', mods: { huntMark: 1 }, desc: 'Critical strikes Mark the foe for 4s: your side deals +20% damage to it.' }),
-  N('volley', 'Volley', 'precision', '🌠', [1, 3], { req: 'snare_trap', active: A(12000, 30), desc: 'Loose a fan of 7 arrows, 18 damage each.' }),
-  N('piercing', 'Piercing', 'precision', '📌', [2, 3], { max: 2, req: 'split_shot', mods: { pierce: 1 }, desc: 'Projectiles pass through 1 more foe per rank.' }),
-  N('assassin', 'Assassin', 'precision', '🥷', [0, 4], { lvl: 12, req: 'hunters_mark', mods: { assassin: 1 }, desc: 'Hits on foes above 90% health are always critical.' }),
-  N('rain_of_arrows', 'Rain of Arrows', 'precision', '🌧️', [1, 4], { lvl: 10, req: 'volley', active: A(22000, 45), desc: 'Arrows pour onto the target area for 2s.' }),
-  N('far_sight', 'Far Sight', 'precision', '🔭', [2, 4], { max: 2, req: 'piercing', mods: { far: 0.08, range: 0.12 }, desc: 'Projectiles fly 12% farther and deal +8% per rank to foes over 300 away.' }),
-
-  // ---- Arcana
-  N('attunement', 'Attunement', 'arcana', '✨', [1, 0], { max: 3, mods: { elem: 0.06 }, desc: 'Elemental damage +6% per rank: fire, frost, lightning, poison, burns, explosions and staff bolts.' }),
-  N('kindling', 'Kindling', 'arcana', '🕯️', [0, 1], { max: 3, req: 'attunement', mods: { burnCh: 0.06 }, desc: 'Hits have a 6% chance per rank to set foes ablaze for 40% of the hit over 3s.' }),
-  N('frostbite', 'Frostbite', 'arcana', '🥶', [2, 1], { max: 2, req: 'attunement', mods: { chillCh: 0.06 }, desc: 'Hits have a 6% chance per rank to Chill: a 35% slow for 2.5s. Fire on a chilled foe Shatters.' }),
-  N('fireball', 'Fireball', 'arcana', '🔥', [0, 2], { req: 'kindling', active: A(8000, 25), desc: 'Hurl a fireball: 40 damage and a burst around the target. Shatters chilled foes and Ignites poisoned ones.' }),
-  N('mana_flow', 'Mana Flow', 'arcana', '💧', [1, 2], { max: 2, req: 'attunement', mods: { enHit: 1, enRegen: 0.15 }, desc: 'Weapon hits restore 1 more energy per rank, and energy regenerates 15% faster per rank.' }),
-  N('frost_nova', 'Frost Nova', 'arcana', '❄️', [2, 2], { req: 'frostbite', active: A(14000, 30), desc: 'Burst of frost: 30 damage, then slows and Chills foes within 170.' }),
-  N('poison_flask', 'Poison Flask', 'arcana', '☠️', [0, 3], { req: 'fireball', active: A(12000, 25), desc: 'Throw a flask that leaves a poison cloud for 6s. Fire on poisoned foes Ignites.' }),
-  N('static_charge', 'Static Charge', 'arcana', '⚡', [1, 3], { max: 2, req: 'mana_flow', mods: { static: 1 }, desc: 'Every 6th hit (every 5th at rank 2) arcs lightning to 3 nearby foes for 60% of the hit.' }),
-  N('healing_draught', 'Healing Draught', 'arcana', '🧪', [2, 3], { req: 'frost_nova', active: A(16000, 25), desc: 'Heal yourself for 70 and allies nearby for 40.' }),
-  N('meteor', 'Meteor', 'arcana', '☄️', [0, 4], { lvl: 10, req: 'poison_flask', active: A(28000, 60), desc: 'Call down a meteor on the target area: 180 damage and a stun.' }),
-  N('conflux', 'Conflux', 'arcana', '🌀', [1, 4], { lvl: 12, req: 'static_charge', mods: { conflux: 0.25 }, desc: '+25% elemental damage to foes that are burning, chilled or poisoned.' }),
-  N('overflow', 'Overflow', 'arcana', '🔮', [2, 4], { req: 'healing_draught', mods: { overflow: 0.15 }, desc: 'While your energy is full, your hits deal +15% damage. Pairs well with Mana Flow.' }),
-
-  // ---- Command
-  N('rally', 'Rally', 'command', '📯', [1, 0], { active: A(25000, 30), desc: 'You and allies within 320: +30% damage and +20% speed for 8s.' }),
-  N('summon_footmen', 'Summon Footmen', 'command', '🪖', [0, 1], { req: 'rally', active: A(30000, 35), desc: 'Call two footmen to fight beside you for 45s.' }),
-  N('leadership', 'Leadership', 'command', '🎖️', [2, 1], { max: 3, req: 'rally', mods: { lead: 0.03 }, desc: 'Allies within 300 of you, players and summons alike, deal +3% damage per rank.' }),
-  N('drill_sergeant', 'Drill Sergeant', 'command', '📣', [0, 2], { max: 3, req: 'summon_footmen', mods: { summon: 0.12 }, desc: 'Your summons have +12% health and damage per rank.' }),
-  N('war_banner', 'War Banner', 'command', '🚩', [1, 2], { req: 'rally', active: A(35000, 35), desc: 'Plant a banner for 12s that heals and Rallies allies near it.' }),
-  N('tactician', 'Tactician', 'command', '♟️', [2, 2], { max: 2, req: 'leadership', mods: { tactic: 0.03 }, desc: 'You deal +3% damage per rank for each ally within 300 (up to 4), summons included.' }),
-  N('summon_archers', 'Summon Archers', 'command', '🏹', [0, 3], { req: 'drill_sergeant', active: A(40000, 45), desc: 'Call three archers for 50s.' }),
-  N('battle_standard', 'Battle Standard', 'command', '🏳️', [1, 3], { req: 'war_banner', mods: { standard: 1 }, desc: 'Your War Banner stands for 20s instead of 12s, and its aura reaches 300 instead of 200.' }),
-  N('formation', 'Formation', 'command', '🛡️', [2, 3], { max: 2, req: 'tactician', mods: { formation: 0.04 }, desc: 'You and allies within 200 take 4% less damage per rank.' }),
-  N('summon_knights', 'Summon Knights', 'command', '🐴', [0, 4], { lvl: 10, req: 'summon_archers', active: A(50000, 60), desc: 'Call three armoured knights for 60s.' }),
-  N('shield_wall', 'Shield Wall', 'command', '🏰', [1, 4], { req: 'battle_standard', mods: { shieldWall: 0.2 }, desc: 'Everyone your Rally touches also takes 20% less damage while it lasts.' }),
-  N('warlord', 'Warlord', 'command', '👑', [2, 4], { lvl: 12, req: 'formation', mods: { summonTtl: 0.5, summon: 0.2 }, desc: 'Summons last 50% longer and are 20% stronger.' }),
-  N('legion_call', 'Legion Call', 'command', '⚜️', [0, 5], { lvl: 16, req: 'summon_knights', active: A(100000, 90), desc: 'Summon a legion of four knights and four archers.' }),
-
-  // ---- Finesse
-  N('footwork', 'Footwork', 'finesse', '👣', [1, 0], { max: 3, mods: { dodgeCd: 400 }, desc: 'Your dodge roll recovers 0.4s faster per rank.' }),
-  N('evasion', 'Evasion', 'finesse', '🍃', [0, 1], { max: 3, req: 'footwork', mods: { evade: 0.04 }, desc: '4% chance per rank to evade a hit completely.' }),
-  N('swiftness', 'Swiftness', 'finesse', '💨', [2, 1], { max: 2, req: 'footwork', mods: { speed: 0.04 }, desc: '+4% move speed per rank.' }),
-  N('parry', 'Parry', 'finesse', '🤺', [0, 2], { req: 'evasion', active: A(5000, 10), desc: 'Brief guard that blocks the next hit, stuns the attacker and Exposes it.' }),
-  N('tumble', 'Tumble', 'finesse', '🤸', [1, 2], { req: 'footwork', mods: { tumble: 0.6 }, desc: 'Your first hit within 1.5s of a dodge roll deals +60% damage.' }),
-  N('shadowstep', 'Shadowstep', 'finesse', '👤', [2, 2], { req: 'swiftness', active: A(12000, 18), desc: 'Vanish and reappear at the cursor, up to 300 away.' }),
-  N('riposte', 'Riposte', 'finesse', '🗡️', [0, 3], { req: 'parry', active: A(6000, 15), desc: 'Lunge forward, Exposing foes in your path. Double damage right after a parry.' }),
-  N('thick_skin', 'Thick Skin', 'finesse', '🦏', [1, 3], { max: 3, req: 'tumble', mods: { dr: 0.04 }, desc: 'Take 4% less damage per rank.' }),
-  N('smoke_bomb', 'Smoke Bomb', 'finesse', '🌫️', [2, 3], { req: 'shadowstep', active: A(18000, 20), desc: 'Smoke cloud that slows and Exposes foes inside it for 4s.' }),
-  N('counter', 'Counterattack', 'finesse', '♞', [0, 4], { req: 'riposte', mods: { counter: 0.5 }, desc: 'Evading, blocking, parrying or rolling through a hit makes your next hit within 2s deal +50% damage.' }),
-  N('iron_skin', 'Iron Skin', 'finesse', '🪨', [1, 4], { req: 'thick_skin', active: A(22000, 30), desc: 'Take 60% less damage for 5s.' }),
-  N('last_stand', 'Last Stand', 'finesse', '🔥', [2, 4], { lvl: 12, req: 'smoke_bomb', mods: { lastStand: 1 }, desc: 'Below 30% health you take 35% less damage.' }),
-
-  // ---- Longsword mastery
-  N('sw_edge', 'Honed Edge', 'w_sword', '⚔️', [1, 0], { max: 3, mods: { wdmg: 0.05 }, desc: 'Longsword damage +5% per rank.' }),
-  N('sw_block', 'Shield Block', 'w_sword', '🛡️', [0, 1], { max: 3, req: 'sw_edge', mods: { block: 0.05 }, desc: '5% chance per rank to block a hit with your shield.' }),
-  N('sw_combo', 'Momentum', 'w_sword', '🌙', [2, 1], { max: 2, req: 'sw_edge', mods: { combo: 0.25 }, desc: 'Your third swing deals +25% more damage per rank.' }),
-  N('shield_bash', 'Shield Bash', 'w_sword', '💥', [0, 2], { req: 'sw_block', active: A(8000, 20), desc: 'Bash with your shield for 150% weapon damage and a 1.3s stun. Follow up to Crush.' }),
-  N('sw_retaliate', 'Retaliation', 'w_sword', '↩️', [1, 2], { req: 'sw_edge', mods: { retaliate: 1 }, desc: 'Blocking or parrying a hit makes your next swing a guaranteed critical strike.' }),
-  N('whirlwind', 'Whirlwind', 'w_sword', '🌀', [2, 2], { req: 'sw_combo', active: A(12000, 30), desc: 'Spin three times, hitting everything around you for 130% weapon damage each.' }),
-  N('sw_bulwark', 'Bulwark', 'w_sword', '🏰', [0, 3], { max: 2, req: 'shield_bash', mods: { maxhp: 0.08 }, desc: '+8% max health per rank.' }),
-  N('sw_flurry', 'Flurry', 'w_sword', '💨', [2, 3], { max: 2, req: 'whirlwind', mods: { aspd: 0.06 }, desc: 'Swing 6% faster per rank.' }),
-  N('sw_wave', 'Blade Wave', 'w_sword', '🌊', [1, 4], { lvl: 10, req: 'sw_retaliate', mods: { wave: 1 }, desc: 'Your third swing also launches a blade wave that pierces foes for 60% of its damage.' }),
-  N('judgement', 'Judgement', 'w_sword', '✝️', [2, 4], { lvl: 12, req: 'sw_flurry', active: A(20000, 40), desc: 'A cross-slash for 300% weapon damage in front of you that heals you for 15% of your max health.' }),
-
-  // ---- Greataxe mastery
-  N('ax_heft', 'Heft', 'w_greataxe', '🪓', [1, 0], { max: 3, mods: { wdmg: 0.06 }, desc: 'Greataxe damage +6% per rank.' }),
-  N('ax_cleave', 'Cleave Through', 'w_greataxe', '🌙', [0, 1], { max: 2, req: 'ax_heft', mods: { arc: 0.15, reach: 0.08 }, desc: 'Axe swings are 15% wider and reach 8% farther per rank.' }),
-  N('ax_rend', 'Rend', 'w_greataxe', '🩸', [2, 1], { max: 2, req: 'ax_heft', mods: { rend: 0.15 }, desc: 'Swings make foes bleed for 15% of the hit per rank over 3s.' }),
-  N('ground_slam', 'Ground Slam', 'w_greataxe', '💢', [0, 2], { req: 'ax_cleave', active: A(12000, 30), desc: 'Slam the ground: 200% weapon damage, a 50% slow and a 0.6s stun to everything within 170.' }),
-  N('ax_brute', 'Brute Force', 'w_greataxe', '🦍', [1, 2], { req: 'ax_heft', mods: { brute: 1 }, desc: 'Your knockbacks travel 50% farther, and Wall Slams you cause deal triple damage.' }),
-  N('ax_bloodbath', 'Bloodbath', 'w_greataxe', '🍷', [2, 2], { max: 2, req: 'ax_rend', mods: { killHeal: 0.04 }, desc: 'Kills heal you for 4% of your max health per rank.' }),
-  N('ax_momentum', 'Unstoppable', 'w_greataxe', '🌪️', [0, 3], { max: 2, req: 'ground_slam', mods: { axeMo: 0.06 }, desc: 'Each swing that lands within 2s of the last makes the next 6% faster per rank, up to 4 stacks.' }),
-  N('execute', 'Execute', 'w_greataxe', '⚰️', [2, 3], { req: 'ax_bloodbath', active: A(14000, 30), desc: 'Brutal chop for 250% weapon damage, doubled against foes under 35% health.' }),
-  N('titan_strike', 'Titan Strike', 'w_greataxe', '🔨', [1, 4], { lvl: 10, req: 'ax_brute', active: A(26000, 50), desc: 'Overhead blow: 350% weapon damage in a cone, a 1.8s stun and a knockback (Wall Slam).' }),
-
-  // ---- Twin Daggers mastery
-  N('dg_sharp', 'Sharpened', 'w_daggers', '🗡️', [1, 0], { max: 3, mods: { crit: 0.03 }, desc: '+3% critical strike chance per rank with daggers.' }),
-  N('dg_backstab', 'Backstab', 'w_daggers', '🔪', [0, 1], { max: 2, req: 'dg_sharp', mods: { back: 0.25 }, desc: 'Strikes on foes not facing you deal +25% more per rank.' }),
-  N('dg_venom', 'Venom Blades', 'w_daggers', '🐍', [2, 1], { max: 3, req: 'dg_sharp', mods: { venomCh: 0.1 }, desc: 'Hits have a 10% chance per rank to poison foes for 80% of the hit over 3s. Fire on a poisoned foe Ignites.' }),
-  N('fan_of_knives', 'Fan of Knives', 'w_daggers', '✴️', [0, 2], { req: 'dg_backstab', active: A(9000, 25), desc: 'Throw 10 knives in a ring, each for 250% weapon damage and passing through a foe.' }),
-  N('dg_lacerate', 'Lacerate', 'w_daggers', '🩸', [1, 2], { max: 2, req: 'dg_sharp', mods: { lacerate: 0.3 }, desc: 'Critical strikes make foes bleed for 30% of the hit per rank over 3s.' }),
-  N('dg_quick', 'Quick Hands', 'w_daggers', '💨', [2, 2], { max: 2, req: 'dg_venom', mods: { aspd: 0.06 }, desc: 'Stab 6% faster per rank.' }),
-  N('ambush', 'Ambush', 'w_daggers', '👤', [0, 3], { req: 'fan_of_knives', active: A(10000, 25), desc: 'Blink behind the foe nearest the cursor (within 320) and strike for 400% weapon damage, always critical.' }),
-  N('dg_opportunist', 'Opportunist', 'w_daggers', '🦊', [2, 3], { req: 'dg_quick', mods: { opportunist: 0.3 }, desc: '+30% damage to stunned, slowed or rooted foes.' }),
-  N('dg_thousand', 'Thousand Cuts', 'w_daggers', '🌸', [1, 4], { lvl: 10, req: 'dg_lacerate', mods: { thousand: 1 }, desc: 'Every 10th dagger hit strikes 4 more times at once.' }),
-
-  // ---- War Spear mastery
-  N('sp_reach', 'Long Reach', 'w_spear', '📏', [1, 0], { max: 2, mods: { reach: 0.12 }, desc: 'Thrusts reach 12% farther per rank.' }),
-  N('sp_impale', 'Impale', 'w_spear', '🔱', [0, 1], { max: 3, req: 'sp_reach', mods: { wdmg: 0.06 }, desc: 'Spear damage +6% per rank.' }),
-  N('sp_keepaway', 'Keep Away', 'w_spear', '✋', [2, 1], { max: 2, req: 'sp_reach', mods: { keepAway: 18 }, desc: 'Thrusts push foes back 18 per rank.' }),
-  N('lunge', 'Lunge', 'w_spear', '➡️', [0, 2], { req: 'sp_impale', active: A(7000, 20), desc: 'Dash 200 forward, skewering every foe in your path for 180% weapon damage.' }),
-  N('sp_phalanx', 'Phalanx', 'w_spear', '🛡️', [1, 2], { max: 2, req: 'sp_reach', mods: { dr: 0.04, maxhp: 0.05 }, desc: 'Take 4% less damage and gain 5% max health per rank.' }),
-  N('sp_sweep', 'Sweep', 'w_spear', '🔄', [2, 2], { req: 'sp_keepaway', mods: { sweep: 1 }, desc: 'Every 3rd attack becomes a sweep that hits all around you.' }),
-  N('javelin', 'Javelin', 'w_spear', '🎯', [0, 3], { req: 'lunge', active: A(9000, 25), desc: 'Hurl a javelin that pierces everything for 220% weapon damage and roots foes for 0.8s (Pinned).' }),
-  N('sp_skewer', 'Skewer', 'w_spear', '🍢', [2, 3], { max: 2, req: 'sp_sweep', mods: { skewer: 0.12 }, desc: 'Each foe a thrust passes through adds +12% damage per rank to the hits behind it.' }),
-  N('sp_dragon', "Dragon's Breath", 'w_spear', '🐉', [1, 4], { lvl: 10, req: 'sp_phalanx', mods: { gale: 1 }, desc: 'Every 4th thrust also sends a wind blade 400 forward for 100% damage.' }),
-
-  // ---- Longbow mastery
-  N('bw_draw', 'Draw Weight', 'w_bow', '🏹', [1, 0], { max: 3, mods: { wdmg: 0.05 }, desc: 'Bow damage +5% per rank.' }),
-  N('bw_quick', 'Nimble Fingers', 'w_bow', '💨', [0, 1], { max: 3, req: 'bw_draw', mods: { aspd: 0.05 }, desc: 'Shoot 5% faster per rank.' }),
-  N('bw_broad', 'Broadheads', 'w_bow', '🩸', [2, 1], { max: 2, req: 'bw_draw', mods: { bleedArrow: 0.2 }, desc: 'Arrows make foes bleed for 20% of the hit per rank over 3s.' }),
-  N('power_shot', 'Power Shot', 'w_bow', '🎯', [0, 2], { req: 'bw_quick', active: A(7000, 20), desc: 'A fast shot for 300% weapon damage that pierces 3 foes.' }),
-  N('bw_ricochet', 'Ricochet', 'w_bow', '↪️', [1, 2], { max: 2, req: 'bw_draw', mods: { ricochet: 1 }, desc: 'Arrows bounce to 1 more foe per rank for 60% damage.' }),
-  N('crippling_shot', 'Crippling Shot', 'w_bow', '🦵', [2, 2], { req: 'bw_broad', active: A(10000, 15), desc: 'Slows the target by 55% and Marks it for 6s: your side deals +20% damage to it.' }),
-  N('explosive_arrow', 'Explosive Arrow', 'w_bow', '💥', [0, 3], { req: 'power_shot', active: A(12000, 30), desc: 'An arrow for 200% weapon damage that bursts for 300% more on everything within 120.' }),
-  N('bw_focus', 'Focus', 'w_bow', '🧘', [2, 3], { max: 2, req: 'crippling_shot', mods: { focus: 0.12 }, desc: 'After standing still for 1s you deal +12% damage per rank.' }),
-  N('piercing_gale', 'Piercing Gale', 'w_bow', '🌪️', [1, 4], { lvl: 10, req: 'bw_ricochet', active: A(26000, 45), desc: 'A great bolt for 500% weapon damage that pierces everything and hurls foes back (Wall Slam).' }),
-
-  // ---- Runestaff mastery
-  N('st_focus', 'Runecraft', 'w_staff', '🪄', [1, 0], { max: 3, mods: { wdmg: 0.05 }, desc: 'Staff damage +5% per rank.' }),
-  N('st_burst', 'Wide Burst', 'w_staff', '💠', [0, 1], { max: 2, req: 'st_focus', mods: { burst: 0.25 }, desc: 'Bolt bursts are 25% larger per rank.' }),
-  N('st_pyro', 'Pyromancy', 'w_staff', '🔥', [1, 1], { req: 'st_focus', excl: 'st_cryo', mods: { pyro: 0.3 }, desc: 'Bolts become fire: they burn foes for 30% of the hit over 3s, Shatter chilled foes and Ignite poisoned ones. Not with Cryomancy.' }),
-  N('st_cryo', 'Cryomancy', 'w_staff', '❄️', [2, 1], { req: 'st_focus', excl: 'st_pyro', mods: { cryo: 1 }, desc: 'Bolts become frost: they slow foes by 30% and Chill them, setting up Shatter for fire allies. Not with Pyromancy.' }),
-  N('chain_lightning', 'Chain Lightning', 'w_staff', '⚡', [0, 2], { req: 'st_burst', active: A(10000, 30), desc: 'Lightning that leaps between up to 5 foes, starting at 250% weapon damage.' }),
-  N('st_siphon', 'Siphon', 'w_staff', '🔋', [1, 2], { max: 2, req: 'st_focus', mods: { enHit: 2 }, desc: 'Bolts restore 2 more energy per rank on hit.' }),
-  N('blizzard', 'Blizzard', 'w_staff', '🌨️', [2, 2], { req: 'st_focus', active: A(16000, 40), desc: 'A storm on the target area for 4s: 50% weapon damage every quarter second, slowing and Chilling.' }),
-  N('st_twin', 'Twin Bolts', 'w_staff', '♊', [0, 3], { req: 'chain_lightning', mods: { twin: 1 }, desc: 'Fire two bolts in a narrow fan, each for 65% damage.' }),
-  N('st_glass', 'Glass Cannon', 'w_staff', '🔮', [2, 3], { req: 'blizzard', mods: { wdmg: 0.2, maxhp: -0.1 }, desc: '+20% staff damage, but 10% less max health.' }),
-  N('arcane_orb', 'Arcane Orb', 'w_staff', '🟣', [1, 4], { lvl: 10, req: 'st_siphon', active: A(20000, 45), desc: 'Launch a slow orb that passes through foes, zapping everything within 120 of it for 60% weapon damage four times a second.' }),
-];
-export const TALENTS = Object.fromEntries(TALENT_LIST.map((n) => [n.id, n]));
-export const ACTIVE_IDS = TALENT_LIST.filter((n) => n.active).map((n) => n.id);
-
-// ------------------------------------------------------------------ point rules (shared by server and client)
-export function treeSpent(tal, treeId) { let n = 0; for (const id in tal) if (TALENTS[id] && TALENTS[id].tree === treeId) n += tal[id]; return n; }
-export function generalSpent(tal) { let n = 0; for (const id in tal) if (TALENTS[id] && !TALENTS[id].weapon) n += tal[id]; return n; }
-export const talentPoints = (tier, tal) => tier + 1 - generalSpent(tal);
-export const masteryPoints = (level, tal, w) => level - treeSpent(tal, 'w_' + w);
-// Why a talent cannot take another rank right now, or null if it can.
-// ctx: { tier, mastery: { weapon: level } }
-export function learnCheck(tal, id, ctx) {
-  const n = TALENTS[id];
-  if (!n) return 'Unknown talent.';
-  if ((tal[id] || 0) >= n.max) return 'Fully learned.';
-  const w = n.weapon, level = w ? ctx.mastery[w] || 0 : ctx.tier;
-  if (n.lvl && level < n.lvl) return w ? `Needs ${WEAPONS[w].name} mastery ${n.lvl}.` : `Needs soma tier ${n.lvl}.`;
-  if (n.req && !tal[n.req]) return `Learn ${TALENTS[n.req].name} first.`;
-  const need = n.at[1] * 2;
-  if (treeSpent(tal, n.tree) < need) return `Spend ${need} points in this tree first.`;
-  if (n.excl && tal[n.excl]) return `Cannot be combined with ${TALENTS[n.excl].name}.`;
-  if (w ? masteryPoints(level, tal, w) <= 0 : talentPoints(ctx.tier, tal) <= 0) return w ? `No ${WEAPONS[w].name} mastery points. Earn soma while wielding it.` : 'No talent points left. Each soma tier gives one.';
+// ------------------------------------------------------------------ unlocking
+// One key per Soma tier. A tool needs its parent unlocked first. Start-kit tools are always unlocked.
+export const keysFor = (tier, unlocked) => Math.max(0, tier - unlocked.filter((id) => !START_KIT.includes(id)).length);
+export const owns = (unlocked, id) => START_KIT.includes(id) || unlocked.includes(id);
+export function unlockCheck(unlocked, id, tier) {
+  const t = TOOLS[id];
+  if (!t) return 'Unknown tool.';
+  if (owns(unlocked, id)) return 'Already unlocked.';
+  if (t.req && !owns(unlocked, t.req)) return `Unlock ${TOOLS[t.req].name} first.`;
+  if (keysFor(tier, unlocked) < 1) return 'No keys left. Every Soma tier gives one key.';
   return null;
 }
-// Rebuilds a saved talent map so it only keeps ranks that are still legal (after a rebalance, say).
-const ORDER = [...TALENT_LIST].sort((a, b) => a.at[1] - b.at[1]);
-export function sanitizeTalents(saved, ctx) {
-  const tal = {};
-  if (!saved || typeof saved !== 'object') return tal;
-  for (const n of ORDER) {
-    const want = Math.min(n.max, Math.max(0, saved[n.id] | 0));
-    for (let r = 0; r < want && !learnCheck(tal, n.id, ctx); r++) tal[n.id] = r + 1;
+// Keeps only unlocks whose parents are owned and that the tier can pay for (e.g. after a rebalance).
+export function sanitizeUnlocks(list, tier) {
+  const out = [];
+  let changed = true;
+  const want = Array.isArray(list) ? list.filter((id) => TOOLS[id] && !START_KIT.includes(id)) : [];
+  while (changed) {
+    changed = false;
+    for (const id of want) if (!out.includes(id) && out.length < tier && (!TOOLS[id].req || owns(out, TOOLS[id].req))) { out.push(id); changed = true; }
   }
-  return tal;
+  return out;
+}
+
+// ------------------------------------------------------------------ balance maths (also used by the tests)
+export function damagePerUse(t) {
+  if (t.type === 'strike') return t.hits.reduce((a, h) => a + h.dmg, 0);
+  if (t.type === 'charge') return t.dmg;
+  if (t.type === 'shoot') return t.dmg * (t.count || 1);
+  return 0;
+}
+export const ttk = (t, hp = BASE_HP) => { const d = damagePerUse(t); return d > 0 ? hp / (d / (t.cd / 1000)) : Infinity; };
+// Times (ms after use) at which a weapon's hits land.
+export function hitTimes(t) {
+  const w = t.windup || 0;
+  if (t.type === 'strike') return t.hits.map((h) => [w + h.t, h.dmg]);
+  if (t.type === 'charge') return [[t.dur / 2, t.dmg]];
+  if (t.type === 'shoot') return Array.from({ length: t.count || 1 }, (_, i) => [w + i * (t.every || 0), t.dmg]);
+  return [];
+}
+// Fastest kill of an 80 HP, no-defence target with every cooldown ready and every buff already up.
+// Weapon and sidearm are used as often as their cycles allow; buffs add attack while they last.
+export function burstTime(weapon, sidearm, buffs, hp = BASE_HP) {
+  const events = [];
+  for (const tl of [weapon, sidearm]) {
+    if (!tl) continue;
+    for (let start = 0; start < 4000; start += tl.cd) for (const [at, d] of hitTimes(tl)) events.push([start + at, d]);
+  }
+  events.sort((a, b) => a[0] - b[0]);
+  let dealt = 0;
+  for (const [at, d] of events) {
+    const atk = buffs.reduce((a, b) => a + (at < b.dur ? b.atk : 0), 0);
+    dealt += d * (1 + Math.min(ATK_CAP[1], atk) / 100);
+    if (dealt >= hp) return at;
+  }
+  return Infinity;
+}
+// Buffs a kit can have up at once: one per cooldown group (and the banner of a friend is not counted).
+export function attackBuffs() {
+  const g = {};
+  for (const t of TOOL_LIST) {
+    const b = t.type === 'buff' ? { atk: t.eff.atk || 0, dur: t.dur } : t.type === 'aura' ? { atk: t.eff.atk || 0, dur: t.dur } : t.buff ? { atk: t.buff.atk, dur: t.buff.dur } : null;
+    if (b && b.atk > 0) (g[t.group] ||= []).push(b);
+  }
+  return g;
+}
+
+// ------------------------------------------------------------------ descriptions
+const sec = (ms) => `${+(ms / 1000).toFixed(2)}s`;
+export function toolStats(t) {
+  const out = [`${GROUPS[t.group]} group`, `cycle ${sec(t.cd)}`];
+  const d = damagePerUse(t);
+  if (d) out.push(`${t.type === 'strike' && t.hits.length > 1 ? t.hits.map((h) => h.dmg).join('+') : t.count ? `${t.dmg}×${t.count}` : d} damage`);
+  if (t.cls) { const k = ttk(t); if (Number.isFinite(k)) out.push(`kills in ${k.toFixed(1)}s`); }
+  if (t.type === 'strike') out.push(`reach ${t.hits[0].reach}`);
+  if (t.range) out.push(`range ${t.range}`);
+  if (t.windup) out.push(`wind-up ${sec(t.windup)}`);
+  if (t.type === 'shield') out.push(`+${t.def} defence for ${sec(t.dur)}`);
+  if (t.wood) out.push(`${t.wood} wood`);
+  if (t.gold) out.push(`${t.gold} gold`);
+  return out.join(' · ');
 }

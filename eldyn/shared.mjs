@@ -189,7 +189,7 @@ export function roadDist(x, y, roads = ROADS) {
 
 // ------------------------------------------------------------------ dungeons
 export const DUNGEON_DEFS = [
-  { name: 'Rat Warrens', danger: 2, theme: 'warren', mobs: [['rat', 5], ['bat', 3], ['bandit', 1]], boss: 'broodmother', biomes: ['grass', 'heath', 'swamp'] },
+  { name: 'Rat Warrens', danger: 2, theme: 'warren', mobs: [['rat', 5], ['bat', 3], ['vagabond', 1]], boss: 'broodmother', biomes: ['grass', 'heath', 'swamp'] },
   { name: 'Sunken Crypt', danger: 3, theme: 'crypt', mobs: [['skeleton', 4], ['risen', 3], ['wraith', 1]], boss: 'bone_king', biomes: ['heath', 'grass', 'forest'] },
   { name: 'Silkweb Hollow', danger: 3, theme: 'web', mobs: [['spider', 5], ['bat', 2]], boss: 'silkweaver', biomes: ['darkforest', 'forest'] },
   { name: 'Rimefrost Caverns', danger: 4, theme: 'ice', mobs: [['yeti', 2], ['frost_wisp', 3], ['wolf', 2]], boss: 'old_rime', biomes: ['snow', 'rock'] },
@@ -408,195 +408,152 @@ export function losClear(ax, ay, bx, by) {
 }
 
 // ------------------------------------------------------------------ valor & ranks
-export const VALOR_CAP = 8000;
-// Each rank keeps the rewards of the ranks below it. Dying costs 75% of valor, so rewards can be lost.
+// Valor lasts one life: you lose all of it when you die or log off. It grows faster the more you have,
+// drives how much Soma each kill gives, and ranks give privileges, never damage.
+export const CAP_BASE = 5000, CAP_LIFT = { fort: 500, castle: 900, citadel: 1500 };
+export const TERR_BONUS = { fort: 0.005, castle: 0.0075, citadel: 0.01 }, TERR_MAX = 0.35;
+export const NPC_REWARD = 0.2, CAPTURE_VALOR = { fort: 1000, castle: 2000, citadel: 4000 };
+export const valorGain = (own, victim, m = 1, t = 0) => (6 + 0.04 * own + 0.1 * victim) * m * (1 + t);
+export const somaGain = (own, victim, m = 1, t = 0) => (1 + 0.1 * own + 0.05 * victim) * m * (1 + t);
 export const RANKS = [
-  { name: 'Peasant', v: 0, perk: 'Every journey starts somewhere.' },
-  { name: 'Squire', v: 80, perk: '+10% max health.' },
-  { name: 'Soldier', v: 250, perk: '+8% damage.' },
-  { name: 'Knight', v: 600, perk: 'Recall: teleport home to Hanbin Haven after an 8s channel.' },
-  { name: 'Baron', v: 1200, perk: 'Fort travel: teleport to any castle your faction holds (open the map).' },
-  { name: 'Count', v: 2000, perk: '+10% more max health, energy regenerates 15% faster.' },
-  { name: 'Duke', v: 3200, perk: 'Commander aura: faction allies near you deal 10% more damage.' },
-  { name: 'Prince', v: 5000, perk: 'Swift travel: teleports take 3s. +8% move speed.' },
-  { name: 'King', v: 8000, perk: 'Royal might: +10% more damage and max health. All of Hanbin hears of your fall.' },
+  { name: 'Vagabond', v: 0, perk: 'Every journey starts somewhere.' },
+  { name: 'Guard', v: 40, perk: '+10 max health (90).' },
+  { name: 'Sentinel', v: 120, perk: "See enemy players inside your faction's territory on the map. Your death is announced." },
+  { name: 'Herald', v: 300, perk: 'Faction chat (start a message with /f).' },
+  { name: 'Knight', v: 600, perk: '+10 max health (100). Command Rangers and Farmers.' },
+  { name: 'Warden', v: 1000, perk: 'Command Reivers, Alchemists and Healers.' },
+  { name: 'Banneret', v: 1600, perk: 'Command Brigands and Forest Stewards. See all allied forces on the map.' },
+  { name: 'Marshall', v: 2500, perk: 'Quick travel to castles your faction holds (from the map).' },
+  { name: 'Jarl', v: 4000, perk: 'Rename your faction (once per 15 minutes).' },
+  { name: 'Theyn', v: 6000, perk: "Set your faction's banner colour." },
+  { name: 'Lord', v: 9000, perk: 'World chat (start with /w). Rally to: faction mates can quick-travel to you.' },
+  { name: 'Baron', v: 14000, perk: 'Command Honourguard, Cearls and Captains.' },
+  { name: 'King', v: 46000, perk: 'Obey and Fend orders for castle troops. Your crowning and your fall are announced to the world.' },
 ];
-export const RECALL_RANK = 3, TRAVEL_RANK = 4, AURA_RANK = 6;
-export function rankBonus(idx) {
-  return {
-    hp: 1 + (idx >= 1 ? 0.1 : 0) + (idx >= 5 ? 0.1 : 0) + (idx >= 8 ? 0.1 : 0),
-    dmg: 1 + (idx >= 2 ? 0.08 : 0) + (idx >= 8 ? 0.1 : 0),
-    en: idx >= 5 ? 1.15 : 1, speed: idx >= 7 ? 1.08 : 1,
-    channel: idx >= 7 ? 3000 : 8000,
-  };
-}
-// Status combos, shown in the help and on the skills that set them up.
-export const COMBOS = [
-  ['Shatter', 'Fire on a Chilled foe (Frost Nova, Frostbite, Cryomancy, Blizzard) deals +60% and breaks the chill.'],
-  ['Ignite', 'Fire on a poisoned foe (Poison Flask, Venom Blades) bursts into flame, hitting everything nearby.'],
-  ['Crush', 'Melee hits on a stunned foe deal +35% (Shield Bash, Concussion, Ground Slam).'],
-  ['Pinned', 'Ranged hits deal double damage to a rooted foe (Snare Trap, Javelin).'],
-  ['Wall Slam', 'Knocking a foe into a wall, tower or rock stuns it for 1s and deals extra damage.'],
-  ['Marked', "Crippling Shot and Hunter's Mark: you and your allies deal +20% damage to the foe."],
-  ['Exposed', 'Exposed foes (Parry, Riposte, War Cry, Smoke Bomb) take +15% damage and deal 40% less.'],
-  ['Backstab', 'Daggers deal +30% to foes that are not facing you, so let a friend or a summon hold their attention.'],
-];
+export const RANK = { hp1: 1, radar: 2, facChat: 3, hp2: 4, allies: 6, travel: 7, rename: 8, colour: 9, world: 10, rally: 10, king: 12 };
 export function rankOf(valor) {
   let idx = 0;
   for (let i = 0; i < RANKS.length; i++) if (valor >= RANKS[i].v) idx = i;
   return { idx, name: RANKS[idx].name, next: RANKS[idx + 1] ? RANKS[idx + 1].v : null, cur: RANKS[idx].v };
 }
+export const rankHp = (idx) => 80 + (idx >= RANK.hp1 ? 10 : 0) + (idx >= RANK.hp2 ? 10 : 0);
+// The rank a faction member needs to order each kind of castle troop (hired troops obey their owner).
+export const COMMAND_RANK = { farmer: 4, ranger: 4, reiver: 5, alchemist: 5, healer: 5, brigand: 6, forest_steward: 6, honourguard: 11, cearl: 11, captain: 11 };
 
 // ------------------------------------------------------------------ soma
-// Each tier costs 22% more than the last, so the climb is quick at first and long later:
-// tier 5 ≈ 460 soma, tier 10 ≈ 1,700, tier 15 ≈ 5,100, tier 20 ≈ 14,300, tier 25 ≈ 39,000.
-export const somaForTier = (t) => (t <= 0 ? 0 : Math.round((60 * (1.22 ** t - 1)) / 0.22));
+// Soma is permanent. Each tier gives one key and needs far more soma than the last:
+// tier 1 = 69, tier 10 = 23,220, tier 30 = 970,642, tier 50 = 5,561,734.
+export const somaForTier = (t) => (t <= 0 ? 0 : Math.round(60 * t + 8.6 * t ** 3.42));
 export function tierOf(soma) {
   soma = Math.max(0, soma);
-  let t = Math.floor(Math.log(1 + (soma * 0.22) / 60) / Math.log(1.22));
+  let t = Math.max(0, Math.floor((soma / 8.6) ** (1 / 3.42)) - 1);
   while (somaForTier(t + 1) <= soma) t++;
   while (t > 0 && somaForTier(t) > soma) t--;
   return t;
 }
-// Relic (inventory) slots: one to start, another every 4 tiers, up to 6.
-export const relicSlotsForTier = (t) => Math.min(6, 1 + Math.floor(t / 4));
 
-// ------------------------------------------------------------------ creatures
-// ai: melee | kite (keeps its distance) | charger (winds up, then rushes) | leaper | caster (bolts + ground blasts)
-//     healer | summoner | exploder | slam (heavy hits + ground slams) | boss
-// onHit: poison | slow | drain.  armor: share of damage ignored.  pack: [min, max] spawned together.
-const M = (o) => ({ ai: 'melee', gold: Math.ceil((o.soma || 0) * 0.6), ...o });
+// ------------------------------------------------------------------ creatures and people
+// ai: melee | kite | charger | leaper | caster | healer | summoner | exploder | slam | boss | kit (fights with tools)
+// valor: the Valor the NPC carries (what killing it is worth). armor: defence. pack: [min, max] spawned together.
+const M = (o) => ({ ai: 'melee', gold: 0, spd: 170, r: 14, ...o });
+const P = (o) => M({ ai: 'kit', aggro: 320, ...o });
+const O = (o) => M({ obj: 1, spd: 0, dmg: 0, range: 0, cd: 0, aggro: 0, valor: 0, ...o });
 export const MOBS = {
-  rat: M({ name: 'Giant Rat', hp: 24, dmg: 5, spd: 165, r: 10, range: 22, cd: 700, aggro: 220, valor: 1, soma: 3, pack: [3, 5] }),
-  bat: M({ name: 'Cave Bat', hp: 20, dmg: 6, spd: 200, r: 10, range: 22, cd: 800, aggro: 260, valor: 1, soma: 3, pack: [3, 4] }),
-  wolf: M({ name: 'Wolf', hp: 50, dmg: 9, spd: 150, r: 13, range: 26, cd: 900, aggro: 260, valor: 2, soma: 6, pack: [2, 3] }),
-  boar: M({ name: 'Boar', hp: 80, dmg: 12, spd: 120, r: 14, range: 26, cd: 1100, aggro: 200, valor: 2, soma: 8, ai: 'charger' }),
-  bandit: M({ name: 'Bandit', hp: 80, dmg: 11, spd: 115, r: 14, range: 32, cd: 1000, aggro: 300, valor: 3, soma: 10, pack: [1, 3] }),
-  bandit_archer: M({ name: 'Bandit Archer', hp: 60, dmg: 10, spd: 112, r: 14, range: 320, cd: 1400, aggro: 360, valor: 3, soma: 10, ai: 'kite', ranged: true, proj: 'arrow' }),
-  skeleton: M({ name: 'Skeleton Archer', hp: 60, dmg: 12, spd: 95, r: 14, range: 330, cd: 1500, aggro: 380, valor: 4, soma: 12, ai: 'kite', ranged: true, proj: 'arrow' }),
-  risen: M({ name: 'Risen', hp: 45, dmg: 9, spd: 115, r: 13, range: 30, cd: 1000, aggro: 320, valor: 1, soma: 3 }),
-  spider: M({ name: 'Giant Spider', hp: 100, dmg: 14, spd: 135, r: 16, range: 28, cd: 1000, aggro: 280, valor: 5, soma: 16, ai: 'leaper' }),
-  cultist: M({ name: 'Cultist', hp: 75, dmg: 18, spd: 90, r: 14, range: 360, cd: 2000, aggro: 380, valor: 5, soma: 17, ai: 'caster', ranged: true, proj: 'dark' }),
-  shaman: M({ name: 'Bog Shaman', hp: 70, dmg: 8, spd: 95, r: 14, range: 300, cd: 1600, aggro: 360, valor: 5, soma: 16, ai: 'healer', ranged: true, proj: 'dark' }),
-  scorpion: M({ name: 'Dune Scorpion', hp: 110, dmg: 13, spd: 125, r: 15, range: 30, cd: 1000, aggro: 260, valor: 5, soma: 16, onHit: 'poison' }),
-  lizardman: M({ name: 'Lizardfolk', hp: 120, dmg: 16, spd: 120, r: 15, range: 42, cd: 1000, aggro: 300, valor: 6, soma: 18, pack: [1, 3] }),
-  frost_wisp: M({ name: 'Frost Wisp', hp: 70, dmg: 14, spd: 120, r: 12, range: 300, cd: 1700, aggro: 360, valor: 6, soma: 20, ai: 'caster', ranged: true, proj: 'frost', onHit: 'slow' }),
-  imp: M({ name: 'Ember Imp', hp: 55, dmg: 45, spd: 175, r: 11, range: 34, cd: 600, aggro: 300, valor: 5, soma: 16, ai: 'exploder', pack: [2, 3] }),
-  bear: M({ name: 'Cave Bear', hp: 240, dmg: 22, spd: 115, r: 20, range: 34, cd: 1500, aggro: 240, valor: 8, soma: 26, ai: 'charger' }),
-  yeti: M({ name: 'Yeti', hp: 300, dmg: 24, spd: 105, r: 22, range: 40, cd: 1500, aggro: 260, valor: 10, soma: 32, ai: 'slam', onHit: 'slow' }),
-  golem: M({ name: 'Stone Golem', hp: 420, dmg: 26, spd: 75, r: 24, range: 42, cd: 1800, aggro: 240, valor: 11, soma: 36, ai: 'slam', armor: 0.35 }),
-  ogre: M({ name: 'Ogre', hp: 320, dmg: 28, spd: 85, r: 23, range: 46, cd: 1800, aggro: 280, valor: 10, soma: 32, ai: 'slam' }),
-  troll: M({ name: 'Moss Troll', hp: 340, dmg: 24, spd: 105, r: 22, range: 40, cd: 1300, aggro: 280, valor: 11, soma: 34, regen: 0.025 }),
-  wraith: M({ name: 'Wraith', hp: 170, dmg: 22, spd: 150, r: 15, range: 36, cd: 1100, aggro: 400, valor: 9, soma: 30, onHit: 'drain' }),
-  fire_elemental: M({ name: 'Fire Elemental', hp: 180, dmg: 22, spd: 100, r: 18, range: 320, cd: 1700, aggro: 380, valor: 10, soma: 34, ai: 'caster', ranged: true, proj: 'fire' }),
-  necromancer: M({ name: 'Necromancer', hp: 150, dmg: 16, spd: 90, r: 15, range: 320, cd: 1800, aggro: 380, valor: 12, soma: 40, ai: 'summoner', ranged: true, proj: 'dark', minion: 'risen' }),
-  // castle garrisons
-  guard: M({ name: 'Guard', hp: 130, dmg: 14, spd: 105, r: 14, range: 36, cd: 900, aggro: 320, valor: 6, soma: 16 }),
-  archer: M({ name: 'Archer', hp: 85, dmg: 13, spd: 95, r: 14, range: 340, cd: 1300, aggro: 380, valor: 6, soma: 16, ai: 'kite', ranged: true, proj: 'arrow' }),
-  castle_mage: M({ name: 'Battle Mage', hp: 110, dmg: 20, spd: 95, r: 14, range: 340, cd: 1800, aggro: 380, valor: 8, soma: 22, ai: 'caster', ranged: true, proj: 'fire' }),
-  knight_guard: M({ name: 'Castle Knight', hp: 280, dmg: 24, spd: 110, r: 16, range: 38, cd: 1000, aggro: 340, valor: 12, soma: 34, armor: 0.2 }),
-  captain: M({ name: 'Captain', hp: 450, dmg: 28, spd: 100, r: 18, range: 42, cd: 1100, aggro: 340, valor: 25, soma: 70, ai: 'slam' }),
-  // summons
-  footman: M({ name: 'Footman', hp: 90, dmg: 11, spd: 135, r: 14, range: 32, cd: 900, aggro: 320, valor: 0, soma: 0 }),
-  summoned_archer: M({ name: 'Archer', hp: 70, dmg: 12, spd: 125, r: 13, range: 320, cd: 1100, aggro: 360, valor: 0, soma: 0, ai: 'kite', ranged: true, proj: 'arrow' }),
-  knight: M({ name: 'Knight', hp: 230, dmg: 24, spd: 130, r: 16, range: 38, cd: 900, aggro: 340, valor: 0, soma: 0 }),
-  banner: M({ name: 'War Banner', hp: 150, dmg: 0, spd: 0, r: 12, range: 0, cd: 0, aggro: 0, valor: 0, soma: 0 }),
+  rat: M({ name: 'Giant Rat', hp: 10, dmg: 2.5, spd: 165, r: 10, range: 22, cd: 700, aggro: 220, valor: 9, pack: [3, 5] }),
+  bat: M({ name: 'Cave Bat', hp: 8, dmg: 3, spd: 200, r: 10, range: 22, cd: 800, aggro: 260, valor: 9, pack: [3, 4] }),
+  wolf: M({ name: 'Wolf', hp: 20, dmg: 4.5, spd: 150, r: 13, range: 26, cd: 900, aggro: 260, valor: 18, pack: [2, 3] }),
+  boar: M({ name: 'Boar', hp: 32, dmg: 6, spd: 120, r: 14, range: 26, cd: 1100, aggro: 200, valor: 24, ai: 'charger' }),
+  skeleton: M({ name: 'Skeleton Archer', hp: 24, dmg: 6, spd: 95, range: 330, cd: 1500, aggro: 380, valor: 36, ai: 'kite', ranged: true, proj: 'arrow' }),
+  risen: M({ name: 'Risen', hp: 18, dmg: 4.5, spd: 115, r: 13, range: 30, cd: 1000, aggro: 320, valor: 9 }),
+  spider: M({ name: 'Giant Spider', hp: 40, dmg: 7, spd: 135, r: 16, range: 28, cd: 1000, aggro: 280, valor: 48, ai: 'leaper' }),
+  cultist: M({ name: 'Cultist', hp: 30, dmg: 9, spd: 90, range: 360, cd: 2000, aggro: 380, valor: 51, ai: 'caster', ranged: true, proj: 'dark' }),
+  shaman: M({ name: 'Bog Shaman', hp: 28, dmg: 4, spd: 95, range: 300, cd: 1600, aggro: 360, valor: 48, ai: 'healer', ranged: true, proj: 'dark' }),
+  scorpion: M({ name: 'Dune Scorpion', hp: 44, dmg: 6.5, spd: 125, r: 15, range: 30, cd: 1000, aggro: 260, valor: 48, onHit: 'poison' }),
+  lizardman: M({ name: 'Lizardfolk', hp: 48, dmg: 8, spd: 120, r: 15, range: 42, cd: 1000, aggro: 300, valor: 54, pack: [1, 3] }),
+  frost_wisp: M({ name: 'Frost Wisp', hp: 28, dmg: 7, spd: 120, r: 12, range: 300, cd: 1700, aggro: 360, valor: 60, ai: 'caster', ranged: true, proj: 'frost', onHit: 'slow' }),
+  imp: M({ name: 'Ember Imp', hp: 22, dmg: 22, spd: 175, r: 11, range: 34, cd: 600, aggro: 300, valor: 48, ai: 'exploder', pack: [2, 3] }),
+  bear: M({ name: 'Cave Bear', hp: 96, dmg: 11, spd: 115, r: 20, range: 34, cd: 1500, aggro: 240, valor: 78, ai: 'charger' }),
+  yeti: M({ name: 'Yeti', hp: 120, dmg: 12, spd: 105, r: 22, range: 40, cd: 1500, aggro: 260, valor: 96, ai: 'slam', onHit: 'slow' }),
+  golem: M({ name: 'Stone Golem', hp: 168, dmg: 13, spd: 75, r: 24, range: 42, cd: 1800, aggro: 240, valor: 108, ai: 'slam', armor: 35 }),
+  ogre: M({ name: 'Ogre', hp: 128, dmg: 14, spd: 85, r: 23, range: 46, cd: 1800, aggro: 280, valor: 96, ai: 'slam' }),
+  troll: M({ name: 'Moss Troll', hp: 136, dmg: 12, spd: 105, r: 22, range: 40, cd: 1300, aggro: 280, valor: 102, regen: 0.025 }),
+  wraith: M({ name: 'Wraith', hp: 68, dmg: 11, spd: 150, r: 15, range: 36, cd: 1100, aggro: 400, valor: 90, onHit: 'drain' }),
+  fire_elemental: M({ name: 'Fire Elemental', hp: 72, dmg: 11, spd: 100, r: 18, range: 320, cd: 1700, aggro: 380, valor: 102, ai: 'caster', ranged: true, proj: 'fire' }),
+  necromancer: M({ name: 'Necromancer', hp: 60, dmg: 8, spd: 90, r: 15, range: 320, cd: 1800, aggro: 380, valor: 120, ai: 'summoner', ranged: true, proj: 'dark', minion: 'risen' }),
+  // people: they fight with the same tools and numbers as players
+  farmer: P({ name: 'Farmer', hp: 40, spd: 160, aggro: 260, valor: 10, kit: ['shortsword'], social: 1, pack: [2, 4] }),
+  vagabond: P({ name: 'Vagabond', hp: 50, spd: 165, aggro: 300, valor: 15, kit: ['spear'], pack: [1, 2] }),
+  ranger: P({ name: 'Ranger', hp: 50, spd: 165, aggro: 420, valor: 40, kit: ['sling'] }),
+  reiver: P({ name: 'Reiver', hp: 80, valor: 60, kit: ['sabre', 'buckler'] }),
+  alchemist: P({ name: 'Alchemist', hp: 60, spd: 160, aggro: 360, valor: 60, kit: ['bollock', 'naphtha', 'moonstone'] }),
+  healer: P({ name: 'Healer', hp: 60, spd: 160, valor: 100, kit: ['bollock', 'tincture', 'blessing'], healer: 1 }),
+  brigand: P({ name: 'Brigand', hp: 110, spd: 165, valor: 120, kit: ['battleaxe', 'targe'] }),
+  pillager: P({ name: 'Pillager', hp: 90, valor: 150, kit: ['glaive'], roam: 1, gold: 20, pack: [2, 3] }),
+  forest_steward: P({ name: 'Forest Steward', hp: 90, aggro: 460, valor: 200, kit: ['longbow', 'shadows'] }),
+  cearl: P({ name: 'Cearl', hp: 120, spd: 160, valor: 300, kit: ['pollaxe', 'moonstone'] }),
+  honourguard: P({ name: 'Honourguard', hp: 140, spd: 160, valor: 300, kit: ['greatsword', 'kite', 'parry'] }),
+  captain: P({ name: 'Captain', hp: 180, spd: 160, r: 16, valor: 500, kit: ['halberd', 'scutum', 'riposte'], gold: 20 }),
+  dweller: P({ name: 'Dweller', hp: 150, valor: 350, kits: [['flail', 'targe'], ['crossbow', 'rondel'], ['glaive', 'parry'], ['battleaxe', 'leeches']] }),
+  hire_archer: P({ name: 'Hired Archer', hp: 50, valor: 0, kit: ['sling'] }),
+  hire_merc: P({ name: 'Mercenary', hp: 70, valor: 0, kit: ['shortsword'] }),
+  hire_guard: P({ name: 'Hired Guard', hp: 90, valor: 0, kit: ['spear', 'buckler'] }),
+  hire_healer: P({ name: 'Hired Healer', hp: 50, valor: 0, kit: ['bollock', 'tincture'], healer: 1 }),
+  // objects: logs to break for Wood, traps, deployed banners and bonfires
+  logs: O({ name: 'Log Pile', hp: 10, r: 16 }),
+  tripwire: O({ name: 'Tripwire', hp: 10, r: 12, trap: { r: 30, uses: 3, dmg: 5 } }),
+  foothold: O({ name: 'Foothold Trap', hp: 20, r: 12, trap: { r: 26, root: 1500, dmg: 6 } }),
+  sulphur: O({ name: 'Sulphur Trap', hp: 20, r: 12, trap: { r: 30, cloud: { r: 80, dps: 3, dur: 4000 } } }),
+  brimstone: O({ name: 'Brimstone Trap', hp: 20, r: 12, trap: { r: 30, burst: { r: 60, dmg: 14 }, burn: { dps: 2, dur: 3000 } } }),
+  spinner: O({ name: 'Spinner Trap', hp: 60, r: 14, trap: { r: 70, spin: { dmg: 6, every: 600, dur: 15000 } } }),
+  gonfalon: O({ name: 'Gonfalon', hp: 120, r: 12, banner: { r: 180, def: 15 }, holds: 1, ttl: 120000 }),
+  ensign: O({ name: 'Ensign', hp: 80, r: 12, banner: { r: 180, hot: 1 }, holds: 1, ttl: 120000 }),
+  bonfire: O({ name: 'Bonfire', hp: 30, r: 14, fire: { r: 120, hot: 1.5 }, ttl: 60000 }),
   // dungeon bosses
-  broodmother: M({ name: 'The Broodmother', hp: 2600, dmg: 22, spd: 115, r: 34, range: 52, cd: 1200, aggro: 520, valor: 120, soma: 500, gold: 350, ai: 'boss', boss: 1, abilities: ['summon', 'charge', 'slam'], minion: 'rat' }),
-  bone_king: M({ name: 'The Bone King', hp: 4200, dmg: 30, spd: 100, r: 30, range: 50, cd: 1200, aggro: 560, valor: 180, soma: 800, gold: 500, ai: 'boss', boss: 1, abilities: ['barrage', 'summon', 'slam'], minion: 'risen', proj: 'dark' }),
-  silkweaver: M({ name: 'Silkweaver', hp: 4000, dmg: 28, spd: 130, r: 36, range: 50, cd: 1100, aggro: 560, valor: 180, soma: 800, gold: 500, ai: 'boss', boss: 1, abilities: ['leap', 'web', 'summon'], minion: 'spider' }),
-  old_rime: M({ name: 'Old Rime', hp: 6500, dmg: 34, spd: 105, r: 38, range: 56, cd: 1400, aggro: 560, valor: 260, soma: 1300, gold: 750, ai: 'boss', boss: 1, abilities: ['slam', 'nova', 'charge'], onHit: 'slow', proj: 'frost' }),
-  forgelord: M({ name: 'The Forgelord', hp: 8500, dmg: 40, spd: 85, r: 40, range: 58, cd: 1500, aggro: 560, valor: 340, soma: 1800, gold: 1000, ai: 'boss', boss: 1, abilities: ['barrage', 'meteor', 'slam'], armor: 0.25, proj: 'fire' }),
-  hollow_prince: M({ name: 'The Hollow Prince', hp: 12000, dmg: 45, spd: 140, r: 32, range: 50, cd: 1000, aggro: 600, valor: 450, soma: 2600, gold: 1500, ai: 'boss', boss: 1, abilities: ['blink', 'barrage', 'nova', 'summon'], minion: 'wraith', onHit: 'drain', proj: 'dark' }),
+  broodmother: M({ name: 'The Broodmother', hp: 1300, dmg: 11, spd: 115, r: 34, range: 52, cd: 1200, aggro: 520, valor: 2000, gold: 175, ai: 'boss', boss: 1, abilities: ['summon', 'charge', 'slam'], minion: 'rat' }),
+  bone_king: M({ name: 'The Bone King', hp: 2100, dmg: 15, spd: 100, r: 30, range: 50, cd: 1200, aggro: 560, valor: 3000, gold: 250, ai: 'boss', boss: 1, abilities: ['barrage', 'summon', 'slam'], minion: 'risen', proj: 'dark' }),
+  silkweaver: M({ name: 'Silkweaver', hp: 2000, dmg: 14, spd: 130, r: 36, range: 50, cd: 1100, aggro: 560, valor: 3000, gold: 250, ai: 'boss', boss: 1, abilities: ['leap', 'web', 'summon'], minion: 'spider' }),
+  old_rime: M({ name: 'Old Rime', hp: 3250, dmg: 17, spd: 105, r: 38, range: 56, cd: 1400, aggro: 560, valor: 4000, gold: 375, ai: 'boss', boss: 1, abilities: ['slam', 'nova', 'charge'], onHit: 'slow', proj: 'frost' }),
+  forgelord: M({ name: 'The Forgelord', hp: 4250, dmg: 20, spd: 85, r: 40, range: 58, cd: 1500, aggro: 560, valor: 5000, gold: 500, ai: 'boss', boss: 1, abilities: ['barrage', 'meteor', 'slam'], armor: 25, proj: 'fire' }),
+  hollow_prince: M({ name: 'The Hollow Prince', hp: 6000, dmg: 22.5, spd: 140, r: 32, range: 50, cd: 1000, aggro: 600, valor: 6000, gold: 750, ai: 'boss', boss: 1, abilities: ['blink', 'barrage', 'nova', 'summon'], minion: 'wraith', onHit: 'drain', proj: 'dark' }),
 };
+// Names you can put in front of an order ("rangers follow").
+export const TROOP_NAMES = { farmers: 'farmer', rangers: 'ranger', reivers: 'reiver', alchemists: 'alchemist', healers: 'healer', brigands: 'brigand', stewards: 'forest_steward', cearls: 'cearl', honourguards: 'honourguard', captains: 'captain', archers: 'hire_archer', mercenaries: 'hire_merc', guards: 'hire_guard' };
 // Wild spawns by terrain: [kind, weight, lowest danger it appears at].
 export const WILD_BY_BIOME = {
-  grass: [['rat', 3, 1], ['wolf', 4, 1], ['boar', 4, 1], ['bandit', 3, 1], ['bandit_archer', 2, 2], ['shaman', 1, 3], ['ogre', 2, 4]],
-  heath: [['boar', 4, 1], ['bandit', 4, 1], ['wolf', 3, 1], ['bandit_archer', 3, 2], ['ogre', 2, 3], ['necromancer', 1, 5]],
-  forest: [['wolf', 4, 1], ['boar', 3, 1], ['spider', 3, 2], ['bandit', 2, 1], ['bear', 2, 3], ['troll', 2, 4]],
-  darkforest: [['spider', 4, 1], ['wraith', 2, 3], ['troll', 3, 3], ['cultist', 2, 2], ['necromancer', 1, 4]],
-  snow: [['wolf', 4, 1], ['frost_wisp', 3, 2], ['yeti', 3, 3], ['bear', 2, 2]],
-  rock: [['bat', 3, 1], ['bandit_archer', 3, 1], ['skeleton', 3, 2], ['golem', 2, 3], ['ogre', 2, 3]],
-  ash: [['imp', 3, 1], ['cultist', 3, 2], ['fire_elemental', 3, 3], ['golem', 2, 4]],
+  grass: [['farmer', 5, 1], ['rat', 2, 1], ['wolf', 3, 1], ['boar', 3, 1], ['vagabond', 4, 1], ['ranger', 2, 2], ['pillager', 2, 2], ['shaman', 1, 3], ['ogre', 2, 4]],
+  heath: [['farmer', 3, 1], ['boar', 3, 1], ['vagabond', 4, 1], ['wolf', 3, 1], ['ranger', 2, 2], ['pillager', 3, 2], ['ogre', 2, 3], ['necromancer', 1, 5]],
+  forest: [['wolf', 4, 1], ['boar', 3, 1], ['vagabond', 2, 1], ['spider', 3, 2], ['pillager', 2, 2], ['bear', 2, 3], ['troll', 2, 4]],
+  darkforest: [['spider', 4, 1], ['wraith', 2, 3], ['troll', 3, 3], ['cultist', 2, 2], ['pillager', 2, 2], ['necromancer', 1, 4]],
+  snow: [['wolf', 4, 1], ['frost_wisp', 3, 2], ['yeti', 3, 3], ['bear', 2, 2], ['vagabond', 2, 1]],
+  rock: [['bat', 3, 1], ['ranger', 3, 1], ['skeleton', 3, 2], ['pillager', 2, 2], ['golem', 2, 3], ['ogre', 2, 3]],
+  ash: [['imp', 3, 1], ['cultist', 3, 2], ['fire_elemental', 3, 3], ['golem', 2, 4], ['pillager', 2, 2]],
   swamp: [['rat', 3, 1], ['lizardman', 4, 1], ['shaman', 2, 2], ['spider', 2, 1], ['necromancer', 1, 4], ['troll', 1, 4]],
-  desert: [['scorpion', 4, 1], ['bandit', 3, 1], ['skeleton', 3, 2], ['imp', 2, 3], ['golem', 1, 5]],
+  desert: [['scorpion', 4, 1], ['vagabond', 3, 1], ['skeleton', 3, 2], ['pillager', 3, 2], ['imp', 2, 3], ['golem', 1, 5]],
 };
 export const ELITE_AFFIXES = {
   swift: 'Swift: moves and attacks 40% faster.',
-  armored: 'Armored: ignores 40% of damage.',
+  armored: 'Armored: +40 defence.',
   vampiric: 'Vampiric: heals from the damage it deals.',
   volatile: 'Volatile: explodes when it dies.',
-  frenzied: 'Frenzied: deals 50% more damage below half health.',
+  frenzied: 'Frenzied: +50 attack below half health.',
 };
-export function garrisonFor(type, danger, level = 1) {
-  const g = { fort: ['captain', 'guard', 'guard', 'guard', 'archer', 'archer'], castle: ['captain', 'knight_guard', 'guard', 'guard', 'guard', 'guard', 'guard', 'archer', 'archer', 'archer', 'castle_mage'],
-    citadel: ['captain', 'captain', 'knight_guard', 'knight_guard', 'knight_guard', 'guard', 'guard', 'guard', 'guard', 'guard', 'guard', 'archer', 'archer', 'archer', 'archer', 'castle_mage', 'castle_mage'] }[type].slice();
-  for (let i = 1; i < danger; i += 2) g.push('guard');
-  for (let i = 1; i < level; i++) g.push('knight_guard', 'castle_mage');
-  return g;
+const FORESTY = new Set(['forest', 'darkforest']);
+export function garrisonFor(type, danger, level = 1, biome = 'grass') {
+  const g = {
+    fort: ['captain', 'reiver', 'reiver', 'reiver', 'ranger', 'ranger'],
+    castle: ['captain', 'honourguard', 'reiver', 'reiver', 'brigand', 'brigand', 'alchemist', 'healer', 'ranger', 'ranger', 'ranger'],
+    citadel: ['captain', 'captain', 'honourguard', 'honourguard', 'cearl', 'brigand', 'brigand', 'brigand', 'reiver', 'reiver', 'alchemist', 'alchemist', 'healer', 'ranger', 'ranger', 'ranger', 'ranger'],
+  }[type].slice();
+  for (let i = 1; i < danger; i += 2) g.push('reiver');
+  for (let i = 1; i < level; i++) g.push('honourguard', 'alchemist');
+  return FORESTY.has(biome) ? g.map((k) => (k === 'ranger' ? 'forest_steward' : k)) : g;
 }
 export const CASTLE_LEVEL_COST = [0, 0, 800, 2000]; // gold to raise a castle to level 2 and 3
 export const CASTLE_TAX = 8; // gold per castle per minute, paid to each online member of the owning faction
-
-// ------------------------------------------------------------------ relics
-// Equipped relics change every attack you make; the fun is in stacking ones that feed each other.
-export const RARITIES = {
-  common: { name: 'Common', color: '#cfcfcf', salvage: 25, fuse: 60 },
-  rare: { name: 'Rare', color: '#4fa3ff', salvage: 70, fuse: 180 },
-  epic: { name: 'Epic', color: '#b46aff', salvage: 220, fuse: 500 },
-  legendary: { name: 'Legendary', color: '#ffb030', salvage: 700, fuse: 1500 },
-};
-export const MAX_RELIC_LV = 5, MAX_STASH = 40;
-const RL = (id, name, rarity, icon, stat, base, per, text) => ({ id, name, rarity, icon, stat, base, per, text });
-export const RELIC_LIST = [
-  RL('iron_band', 'Iron Band', 'common', '💍', 'maxhp', 0.08, 0.02, '+{v}% max health.'),
-  RL('whetstone', 'Whetstone', 'common', '🪨', 'dmg', 0.06, 0.015, '+{v}% damage.'),
-  RL('swift_boots', 'Swift Boots', 'common', '👢', 'speed', 0.06, 0.01, '+{v}% move speed.'),
-  RL('mana_pearl', 'Mana Pearl', 'common', '🔵', 'en', 0.2, 0.05, '+{v}% energy regeneration.'),
-  RL('thorn_shard', 'Thorn Shard', 'common', '🌵', 'thorns', 0.2, 0.06, 'Melee attackers take {v}% of the damage they deal to you.'),
-  RL('brawler_knuckles', "Brawler's Knuckles", 'common', '👊', 'close', 0.25, 0.06, '+{v}% damage to foes within 130 range.'),
-  RL('hunters_lens', "Hunter's Lens", 'common', '🔭', 'far', 0.22, 0.05, '+{v}% damage to foes more than 320 away.'),
-  RL('quiver_charm', 'Quiver Charm', 'common', '🎐', 'range', 0.2, 0.05, 'Projectiles fly {v}% farther.'),
-  RL('leech_fang', 'Leech Fang', 'rare', '🦷', 'lifesteal', 0.05, 0.012, 'Heal for {v}% of all damage you deal.'),
-  RL('shrapnel_core', 'Shrapnel Core', 'rare', '💣', 'splash', 0.25, 0.05, '{v}% of every hit splashes onto foes near the target.'),
-  RL('ember_sigil', 'Ember Sigil', 'rare', '🔥', 'burn', 0.3, 0.06, 'Hits set foes ablaze for {v}% of the hit over 3s.'),
-  RL('frost_shard', 'Frost Shard', 'rare', '🧊', 'chill', 0.12, 0.03, 'Hits slow foes, and slowed foes take +{v}% damage.'),
-  RL('keen_edge', 'Keen Edge', 'rare', '🗡️', 'crit', 0.1, 0.02, '{v}% chance to critically strike for 175% damage.'),
-  RL('storm_coil', 'Storm Coil', 'rare', '⚡', 'chain', 0.15, 0.03, '{v}% chance on hit to arc lightning to 2 more foes for half damage.'),
-  RL('bloodthirst', 'Bloodthirst Charm', 'rare', '🩸', 'healOnKill', 0.06, 0.015, 'Kills heal you for {v}% of your max health.'),
-  RL('hourglass', 'Sand Hourglass', 'rare', '⏳', 'cdr', 0.08, 0.02, 'Ability cooldowns are {v}% shorter.'),
-  RL('bulwark', 'Bulwark Plate', 'rare', '🛡️', 'dr', 0.08, 0.02, 'Take {v}% less damage.'),
-  RL('lodestone', 'Gravity Lodestone', 'epic', '🧲', 'pull', 35, 6, 'Your hits drag foes {v} closer, and every 5s a pulse pulls in foes within 260.'),
-  RL('corpse_bloom', 'Corpse Bloom', 'epic', '🌺', 'explode', 0.25, 0.05, 'Foes you kill burst for {v}% of their max health, hitting those nearby. Bursts can chain.'),
-  RL('berserker_mark', "Berserker's Mark", 'epic', '😤', 'berserk', 0.4, 0.08, 'Up to +{v}% damage as your health falls.'),
-  RL('warlord_standard', "Warlord's Standard", 'epic', '🏳️', 'summon', 0.25, 0.05, 'Your summons deal +{v}% damage and use your Leech Fang and Ember Sigil.'),
-  RL('momentum_spur', 'Momentum Spur', 'epic', '🏇', 'momentum', 0.24, 0.04, 'Damage builds by 4% per second while you keep moving, up to +{v}%.'),
-  RL('headsman_seal', "Headsman's Seal", 'epic', '🪓', 'execute', 0.4, 0.08, '+{v}% damage to foes under 30% health.'),
-  RL('maelstrom_heart', 'Heart of the Maelstrom', 'legendary', '🌀', 'nova', 60, 12, 'Every 8th hit releases a storm nova dealing {v} damage around the target.'),
-  RL('phoenix_feather', 'Phoenix Feather', 'legendary', '🪶', 'phoenix', 0.3, 0.05, 'Once every 3 minutes, a killing blow instead leaves you at {v}% health and erupts in flame.'),
-  RL('titan_grip', "Titan's Grip", 'legendary', '🦾', 'titan', 0.3, 0.06, 'Melee attacks reach {v}% farther and knock foes back.'),
-  RL('prism_echoes', 'Prism of Echoes', 'legendary', '🔮', 'echo', 0.5, 0.1, 'Splash, lightning, nova, burst and burn damage also trigger your on-hit relics at {v}% strength.'),
+// The three public factions everyone joins by default (private factions hold up to 10).
+export const PUBLIC_FACTIONS = [
+  { id: 1, name: 'The Red Hart', color: '#e74c3c' },
+  { id: 2, name: 'The Azure Boar', color: '#3498db' },
+  { id: 3, name: 'The Golden Wyvern', color: '#f1c40f' },
 ];
-export const RELICS = Object.fromEntries(RELIC_LIST.map((r) => [r.id, r]));
-export const relicValue = (id, lv) => RELICS[id].base + RELICS[id].per * (lv - 1);
-export function relicText(id, lv) {
-  const r = RELICS[id], v = relicValue(id, lv);
-  return r.text.replace('{v}', r.stat === 'pull' || r.stat === 'nova' ? Math.round(v) : Math.round(v * 1000) / 10);
-}
-// Suggested builds, shown in the inventory so players can see what feeds what.
-export const SYNERGIES = [
-  ['Black Hole Brawler', "Gravity Lodestone + Brawler's Knuckles + Leech Fang on a Greataxe with Wide Swings and Bloodlust. Pull everything in, then cleave it all while healing."],
-  ['Chain Reaction', 'Corpse Bloom + Shrapnel Core + Prism of Echoes on a Runestaff with Wide Burst. One kill sets off the whole pack.'],
-  ['Inferno', 'Ember Sigil + Shrapnel Core with Pyromancy, Kindling and Poison Flask. Splash spreads the burn, and fire on poison Ignites.'],
-  ['Deadeye', "Hunter's Lens + Keen Edge + Headsman's Seal on a Longbow with Far Sight, Deadly Strikes and Assassin. Huge crits from long range."],
-  ['Shadow Dancer', 'Keen Edge + Storm Coil on Twin Daggers with Backstab, Lacerate and Tumble. Roll behind a foe, then shred it.'],
-  ['Phalanx', 'Frost Shard + Iron Band on a War Spear with Keep Away, Skewer and Formation. Hold a whole line of foes at the tip of your spear.'],
-  ['Iron Fortress', 'Bulwark Plate + Thorn Shard + Iron Band on a Longsword with Shield Block, Retaliation and Thick Skin. Let them hit you.'],
-  ['Warlord', "Warlord's Standard + Leech Fang + Ember Sigil with the Command tree. Your troops burn and drain for you."],
-  ['Storm Caller', 'Storm Coil + Heart of the Maelstrom + Prism of Echoes with Static Charge and Chain Lightning. Lightning that keeps setting off more lightning.'],
-  ['Berserker', "Berserker's Mark + Leech Fang + Bloodthirst Charm with Berserker and Rampage. Strongest when nearly dead."],
-];
-export const CRATES = {
-  crate: { name: 'Relic Crate', price: 150, odds: [['common', 0.7], ['rare', 0.26], ['epic', 0.04]] },
-  gilded: { name: 'Gilded Crate', price: 700, odds: [['common', 0.25], ['rare', 0.5], ['epic', 0.22], ['legendary', 0.03]] },
-};
+export const PRIVATE_MAX = 10;

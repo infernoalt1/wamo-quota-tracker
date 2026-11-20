@@ -21,6 +21,8 @@ function blob(x, cx, cy, rx, ry, fill, line = OUT, lw = 1.4, rot = 0) {
 function radial(x, cx, cy, r, c) { const g = x.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r * 1.1); g.addColorStop(0, shade(c, 0.28)); g.addColorStop(0.6, c); g.addColorStop(1, shade(c, -0.35)); return g; }
 
 // ------------------------------------------------------------------ weapons (drawn in hand space, pointing +x)
+// Polearms: [shaft length, head shape].
+const POLE = { pike: [52, 'spear'], partisan: [54, 'fork'], lance: [48, 'spear'], glaive: [42, 'blade'], halberd: [42, 'axe'], pollaxe: [40, 'hook'], ranseur: [44, 'fork'], bardiche: [38, 'wide'], pilum: [34, 'spear'] };
 function weapon(x, kind, swing) {
   x.save();
   if (kind === 'sword' || kind === 'rapier') {
@@ -63,6 +65,46 @@ function weapon(x, kind, swing) {
     const g = x.createRadialGradient(26, 0, 0.5, 26, 0, 6); g.addColorStop(0, '#fff'); g.addColorStop(0.4, '#c48aff'); g.addColorStop(1, 'rgba(120,60,220,0)');
     x.fillStyle = g; x.beginPath(); x.arc(26, 0, 6, 0, 7); x.fill();
     x.fillStyle = '#9a6ae0'; x.beginPath(); x.arc(26, 0, 3, 0, 7); x.fill();
+  } else if (kind === 'greatsword') {
+    x.rotate(swing ? -0.15 : -0.95);
+    x.fillStyle = '#4a2e14'; x.fillRect(-7, -1.8, 9, 3.6);
+    x.fillStyle = '#c9a43a'; x.fillRect(1, -6.5, 3, 13);
+    const g = x.createLinearGradient(0, -3, 0, 3); g.addColorStop(0, '#f4f7fb'); g.addColorStop(1, '#8d97a6');
+    x.fillStyle = g; x.beginPath(); x.moveTo(4, -2.4); x.lineTo(34, -2.4); x.lineTo(39, 0); x.lineTo(34, 2.4); x.lineTo(4, 2.4); x.closePath(); x.fill();
+    x.strokeStyle = OUT; x.lineWidth = 0.8; x.stroke();
+  } else if (kind === 'flail') {
+    x.rotate(swing ? 0.3 : -0.7);
+    x.fillStyle = '#5a3a1e'; x.fillRect(-4, -1.5, 14, 3);
+    x.strokeStyle = '#8a8f98'; x.lineWidth = 1.2; x.beginPath(); x.moveTo(10, 0); x.quadraticCurveTo(16, swing ? 6 : -4, 21, 0); x.stroke();
+    x.fillStyle = '#6a707a'; x.beginPath(); x.arc(24, 0, 4.2, 0, 7); x.fill(); x.strokeStyle = OUT; x.lineWidth = 0.8; x.stroke();
+    x.fillStyle = '#c8ccd4'; for (let i = 0; i < 6; i++) { const a = i * 1.05; x.beginPath(); x.moveTo(24 + Math.cos(a) * 4, Math.sin(a) * 4); x.lineTo(24 + Math.cos(a) * 6.5, Math.sin(a) * 6.5); x.lineTo(24 + Math.cos(a + 0.4) * 4, Math.sin(a + 0.4) * 4); x.fill(); }
+  } else if (kind === 'mace') {
+    x.rotate(swing ? 0 : -0.7);
+    x.fillStyle = '#6a4a2a'; x.fillRect(-3, -1.3, 20, 2.6);
+    x.fillStyle = '#d8b040'; x.beginPath(); x.arc(19, 0, 3.6, 0, 7); x.fill(); x.strokeStyle = OUT; x.lineWidth = 0.8; x.stroke();
+  } else if (kind === 'staffplain') {
+    x.rotate(swing ? 0.1 : -0.3);
+    x.fillStyle = '#7a5530'; x.fillRect(-16, -1.4, 44, 2.8); x.strokeStyle = OUT; x.lineWidth = 0.6; x.strokeRect(-16, -1.4, 44, 2.8);
+  } else if (kind === 'crossbow') {
+    x.fillStyle = '#6a4a2a'; x.fillRect(-4, -2, 22, 4);
+    x.strokeStyle = '#5a3a1a'; x.lineWidth = 2.4; x.beginPath(); x.moveTo(14, -11); x.quadraticCurveTo(18, 0, 14, 11); x.stroke();
+    x.strokeStyle = '#e8e0c8'; x.lineWidth = 0.7; x.beginPath(); x.moveTo(14, -11); x.lineTo(swing ? 10 : 4, 0); x.lineTo(14, 11); x.stroke();
+    x.fillStyle = '#ccd'; x.fillRect(4, -0.8, 16, 1.6);
+  } else if (kind === 'sling') {
+    x.strokeStyle = '#8a6a3a'; x.lineWidth = 1; x.beginPath(); x.moveTo(0, 0); x.lineTo(swing ? 18 : 9, swing ? -2 : 8); x.stroke();
+    x.fillStyle = '#7a5a30'; x.beginPath(); x.ellipse(swing ? 18 : 9, swing ? -2 : 8, 3, 2, 0, 0, 7); x.fill();
+  } else if (POLE[kind]) {
+    const [len, head] = POLE[kind];
+    x.rotate(swing ? 0.05 : -0.25);
+    x.fillStyle = '#7a5530'; x.fillRect(-14, -1.2, len, 2.4);
+    const e = len - 14; x.fillStyle = '#d8dee6'; x.strokeStyle = OUT; x.lineWidth = 0.8; x.beginPath();
+    if (head === 'spear') { x.moveTo(e, -3); x.lineTo(e + 8, 0); x.lineTo(e, 3); }
+    else if (head === 'blade') { x.moveTo(e - 2, -2); x.quadraticCurveTo(e + 10, -7, e + 13, 0); x.lineTo(e - 2, 2.5); }
+    else if (head === 'axe') { x.moveTo(e, -1); x.lineTo(e + 8, 0); x.lineTo(e, 1); x.moveTo(e - 6, -1); x.quadraticCurveTo(e - 2, -11, e + 3, -10); x.lineTo(e + 1, -1); }
+    else if (head === 'hook') { x.moveTo(e, -2); x.lineTo(e + 9, 0); x.lineTo(e, 2); x.moveTo(e - 3, 1); x.quadraticCurveTo(e - 1, 8, e - 7, 7); x.lineTo(e - 3, 2); }
+    else if (head === 'fork') { x.moveTo(e, -2); x.lineTo(e + 10, 0); x.lineTo(e, 2); x.moveTo(e - 2, -1); x.lineTo(e + 4, -6); x.lineTo(e + 1, -1); x.moveTo(e - 2, 1); x.lineTo(e + 4, 6); x.lineTo(e + 1, 1); }
+    else if (head === 'wide') { x.moveTo(e - 8, -1.5); x.quadraticCurveTo(e - 4, -12, e + 6, -11); x.quadraticCurveTo(e + 2, -4, e + 4, 1.5); x.lineTo(e - 8, 1.5); }
+    x.closePath(); x.fill(); x.stroke();
   } else if (kind === 'darkstaff') {
     x.rotate(-0.15);
     x.fillStyle = '#2a1a2a'; x.fillRect(-10, -1.4, 32, 2.8);
@@ -79,11 +121,18 @@ function bow(x, drawn) {
   if (drawn) { x.strokeStyle = '#d8c8a0'; x.lineWidth = 1.2; x.beginPath(); x.moveTo(pull, 0); x.lineTo(14, 0); x.stroke(); x.fillStyle = '#ccc'; x.beginPath(); x.moveTo(14, -2); x.lineTo(18, 0); x.lineTo(14, 2); x.fill(); }
   x.restore();
 }
-function shield(x, color) {
+// Shapes of the shields, seen from above: [half-depth, half-width, shape].
+const SHIELD = { buckler: [3, 6, 'o'], parma: [3.5, 7, 'o'], targe: [4, 8.5, 'o'], round: [4.5, 11, 'o'], kite: [4.5, 11, 'k'], heraldic: [4.5, 10.5, 'k'], scutum: [5, 12, 'r'], pavise: [6, 14, 'r'] };
+function shield(x, color, kind) {
+  const [d, w, sh] = SHIELD[kind] || [4.5, 9.5, 'o'];
   x.save();
-  x.beginPath(); x.ellipse(0, 0, 4.5, 9.5, 0, 0, 7); x.fillStyle = radial(x, 0, 0, 9, color); x.fill();
+  x.beginPath();
+  if (sh === 'r') { x.moveTo(-d, -w); x.quadraticCurveTo(d * 1.6, -w, d, 0); x.quadraticCurveTo(d * 1.6, w, -d, w); x.closePath(); }
+  else if (sh === 'k') { x.moveTo(-d, -w); x.lineTo(d, -w * 0.6); x.lineTo(d * 1.4, w * 0.4); x.lineTo(-d * 0.2, w); x.closePath(); }
+  else x.ellipse(0, 0, d, w, 0, 0, 7);
+  x.fillStyle = radial(x, 0, 0, w, color); x.fill();
   x.strokeStyle = '#b8a060'; x.lineWidth = 1.6; x.stroke();
-  x.fillStyle = '#d8c070'; x.beginPath(); x.arc(0.5, 0, 1.8, 0, 7); x.fill();
+  x.fillStyle = '#d8c070'; x.beginPath(); x.arc(0.5, 0, kind === 'heraldic' ? 3 : 1.8, 0, 7); x.fill();
   x.restore();
 }
 
@@ -109,7 +158,8 @@ function humanoid(o, step, atk) {
   // off hand: shield or bow
   const swing = atk ? 1 : 0;
   if (o.weapon === 'bow') { x.save(); x.translate(10 + swing * 2, -3); bow(x, atk); x.restore(); }
-  if (o.shield) { x.save(); x.translate(5, -13); shield(x, o.shield); x.restore(); }
+  if (o.weapon === 'crossbow' || o.weapon === 'sling') { x.save(); x.translate(8, 0); weapon(x, o.weapon, atk); x.restore(); }
+  if (o.shield) { x.save(); x.translate(o.raised ? 11 : 5, o.raised ? -6 : -13); shield(x, o.shield, o.shieldKind); x.restore(); }
   // torso
   x.fillStyle = radial(x, 0, 0, 13, bodyC);
   x.beginPath(); x.ellipse(0, 0, 8.5, 13, 0, 0, 7); x.fill(); x.strokeStyle = OUT; x.lineWidth = 1.5; x.stroke();
@@ -127,7 +177,7 @@ function humanoid(o, step, atk) {
   if (o.weapon === 'dagger') { x.save(); x.translate(atk ? 8 : 10, atk ? -12 : -10); weapon(x, 'dagger', !atk); x.restore(); }
   if (o.weapon !== 'bow') blob(x, 7, -11, 3.2, 3.2, o.armor === 'plate' ? '#9aa3b2' : skin, OUT, 1);
   x.save(); x.translate(hx, hy);
-  if (o.weapon && o.weapon !== 'bow') weapon(x, o.weapon, atk);
+  if (o.weapon && o.weapon !== 'bow' && o.weapon !== 'crossbow' && o.weapon !== 'sling') weapon(x, o.weapon, atk);
   x.restore();
   blob(x, hx, hy, 3.2, 3.2, o.armor === 'plate' ? '#9aa3b2' : skin, OUT, 1);
   if (o.weapon === 'bow') blob(x, 9 + swing * 2, -3, 3, 3, skin, OUT, 1);
@@ -316,16 +366,25 @@ const HAIRS = ['#3a2416', '#6b4423', '#c49a4a', '#1d1a18', '#8a3b1e', '#d8d0c0']
 const nameHash = (s) => { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
 
 // The sprite each weapon is drawn with in a player's hands.
-const PLAYER_WEAPON = { sword: 'sword', greataxe: 'greataxe', daggers: 'dagger', spear: 'spear', bow: 'bow', staff: 'staff' };
-export function playerLook(name, rank, color, wp) {
+// The sprite each tool is drawn with in someone's hands.
+export const TOOL_SPRITE = {
+  spear: 'spear', shortsword: 'sword', sabre: 'sword', rapier: 'rapier', greatsword: 'greatsword', battleaxe: 'axe', flail: 'flail',
+  pike: 'pike', partisan: 'partisan', lance: 'lance', glaive: 'glaive', halberd: 'halberd', pollaxe: 'pollaxe', ranseur: 'ranseur', bardiche: 'bardiche',
+  quarterstaff: 'staffplain', sceptre: 'mace', bollock: 'dagger', rondel: 'dagger', blackjack: 'club',
+  sling: 'sling', flatbow: 'bow', longbow: 'bow', crossbow: 'crossbow', repeater: 'crossbow', pilum: 'pilum', plumbata: 'dagger',
+};
+export function playerLook(name, rank, color, wp, sh) {
   const h = nameHash(name);
-  const armor = rank >= 3 ? 'plate' : rank === 2 ? 'chain' : rank === 1 ? 'leather' : 'cloth';
-  const head = rank >= 8 ? 'crown' : rank === 7 ? 'circlet' : rank >= 3 && rank <= 6 ? (rank >= 5 ? 'plume' : 'helm') : 'hair';
+  const armor = rank >= 4 ? 'plate' : rank >= 2 ? 'chain' : rank === 1 ? 'leather' : 'cloth';
+  const head = rank >= 12 ? 'crown' : rank === 11 ? 'circlet' : rank >= 7 ? 'plume' : rank >= 4 ? 'helm' : 'hair';
   return {
     skin: SKINS[h % SKINS.length], hair: HAIRS[(h >> 4) % HAIRS.length], tunic: color || '#9a8a68', armor, head, plume: color || '#c0392b',
-    weapon: PLAYER_WEAPON[wp] || 'sword', shield: (wp || 'sword') === 'sword' ? (color || '#7a6a50') : null, cape: rank >= 4 ? (color || '#7a2a2a') : null,
+    weapon: TOOL_SPRITE[wp] || 'spear', shield: sh ? (color || '#7a6a50') : null, shieldKind: sh || null, raised: !!sh, cape: rank >= 7 ? (color || '#7a2a2a') : null,
   };
 }
+// Bandit-held people wear their own colours; people of a faction wear the faction's.
+const wild = (c, own) => (c === WILD ? own : c);
+export const WILD = '#888';
 const MOB_LOOK = {
   bandit: () => ({ skin: SKINS[2], tunic: '#5a4a3a', armor: 'leather', head: 'bandana', hair: '#a02828', weapon: 'axe' }),
   bandit_archer: () => ({ skin: SKINS[1], tunic: '#4a5a3a', armor: 'leather', head: 'bandana', hair: '#2a6a3a', weapon: 'bow' }),
@@ -341,10 +400,26 @@ const MOB_LOOK = {
   old_rime: () => ({ skin: '#a8c8dc', tunic: '#e0f0ff', armor: 'cloth', head: 'bald', weapon: 'club', scale: 2.6, crown: 1 }),
   bone_king: () => ({ skin: '#ece4cc', tunic: '#d8d0b8', armor: 'ribs', head: 'skull', weapon: 'sword', cape: '#5a2a7a', scale: 2.2, crown: 1 }),
   guard: (c) => ({ skin: SKINS[1], tunic: c, armor: 'chain', head: 'helm', weapon: 'spear' }),
+  farmer: (c) => ({ skin: SKINS[2], tunic: wild(c, '#8a7a4a'), armor: 'cloth', head: 'hair', hair: HAIRS[1], weapon: 'sword' }),
+  vagabond: (c) => ({ skin: SKINS[1], tunic: wild(c, '#6a5a4a'), armor: 'cloth', head: 'hood', hood: '#4a3a2a', weapon: 'spear' }),
+  ranger: (c) => ({ skin: SKINS[0], tunic: wild(c, '#4a6a3a'), armor: 'leather', head: 'hood', hood: '#3a5a2a', weapon: 'sling' }),
+  reiver: (c) => ({ skin: SKINS[1], tunic: wild(c, '#7a4a3a'), armor: 'leather', head: 'bandana', hair: '#6a2a1a', weapon: 'sword', shield: '#7a6a50', shieldKind: 'buckler' }),
+  alchemist: (c) => ({ skin: SKINS[4], tunic: wild(c, '#4a3a6a'), robe: 1, head: 'hood', hood: '#2a1a4a', eyes: '#ffd070', weapon: 'dagger' }),
+  healer: (c) => ({ skin: SKINS[0], tunic: wild(c, '#d8d8c8'), robe: 1, head: 'hood', hood: '#e8e8d8', eyes: '#70c070', weapon: 'dagger' }),
+  brigand: (c) => ({ skin: SKINS[3], tunic: wild(c, '#5a4a3a'), armor: 'chain', head: 'bandana', hair: '#2a2a2a', weapon: 'axe', shield: '#6a5030', shieldKind: 'targe' }),
+  pillager: (c) => ({ skin: SKINS[2], tunic: wild(c, '#8a2a2a'), armor: 'leather', head: 'bandana', hair: '#a02828', weapon: 'glaive' }),
+  forest_steward: (c) => ({ skin: SKINS[1], tunic: wild(c, '#2a5a2a'), armor: 'leather', head: 'hood', hood: '#1a4a1a', weapon: 'bow' }),
+  cearl: (c) => ({ skin: SKINS[0], tunic: wild(c, '#5a5a6a'), armor: 'plate', head: 'helm', weapon: 'pollaxe', scale: 1.08 }),
+  honourguard: (c) => ({ skin: SKINS[0], tunic: wild(c, '#6a1a1a'), armor: 'plate', head: 'greathelm', weapon: 'greatsword', shield: wild(c, '#8a2a2a'), shieldKind: 'kite', scale: 1.12 }),
+  dweller: () => ({ skin: '#b8b0a0', tunic: '#2a2430', armor: 'chain', head: 'hood', hood: '#1a1420', eyes: '#c0ff80', weapon: 'flail', scale: 1.08 }),
+  hire_archer: (c) => ({ skin: SKINS[3], tunic: c, armor: 'leather', head: 'hood', hood: shade(c, -0.3), weapon: 'sling' }),
+  hire_merc: (c) => ({ skin: SKINS[2], tunic: c, armor: 'chain', head: 'helm', weapon: 'sword' }),
+  hire_guard: (c) => ({ skin: SKINS[1], tunic: c, armor: 'plate', head: 'helm', weapon: 'spear', shield: c, shieldKind: 'buckler' }),
+  hire_healer: (c) => ({ skin: SKINS[0], tunic: c, robe: 1, head: 'hood', hood: shade(c, -0.3), eyes: '#70c070', weapon: 'dagger' }),
   archer: (c) => ({ skin: SKINS[0], tunic: c, armor: 'leather', head: 'hood', hood: shade(c, -0.3), weapon: 'bow' }),
   castle_mage: (c) => ({ skin: SKINS[4], tunic: c, robe: 1, head: 'hood', hood: shade(c, -0.35), eyes: '#ffd070', weapon: 'staff' }),
   knight_guard: (c) => ({ skin: SKINS[0], tunic: c, armor: 'plate', head: 'greathelm', weapon: 'spear', shield: c, scale: 1.12 }),
-  captain: (c) => ({ skin: SKINS[2], tunic: c, armor: 'plate', head: 'plume', plume: c, weapon: 'sword', shield: c, cape: c, scale: 1.25 }),
+  captain: (c) => ({ skin: SKINS[2], tunic: wild(c, '#5a4a3a'), armor: 'plate', head: 'plume', plume: wild(c, '#a02020'), weapon: 'halberd', shield: wild(c, '#7a3a2a'), shieldKind: 'scutum', cape: wild(c, '#5a2a2a'), scale: 1.2 }),
   footman: (c) => ({ skin: SKINS[1], tunic: c, armor: 'chain', head: 'helm', weapon: 'sword', shield: c }),
   summoned_archer: (c) => ({ skin: SKINS[3], tunic: c, armor: 'leather', head: 'hood', hood: shade(c, -0.3), weapon: 'bow' }),
   knight: (c) => ({ skin: SKINS[0], tunic: c, armor: 'plate', head: 'greathelm', weapon: 'sword', shield: c, cape: c, scale: 1.1 }),
@@ -353,10 +428,10 @@ const MOB_LOOK = {
 export function creature(kind, color, step, atk, look) {
   const st = step > 0.3 ? 1 : step < -0.3 ? -1 : 0, a = atk ? 1 : 0;
   if (kind === 'player') {
-    const key = `p|${look.skin}|${look.hair}|${look.tunic}|${look.armor}|${look.head}|${look.weapon}|${look.shield}|${look.cape}|${st}|${a}`;
+    const key = `p|${look.skin}|${look.hair}|${look.tunic}|${look.armor}|${look.head}|${look.weapon}|${look.shield}|${look.shieldKind}|${look.cape}|${st}|${a}`;
     return memo(key, () => humanoid(look, st, a));
   }
-  const key = `${kind}|${color}|${st}|${a}`;
+  const key = `${kind}|${color}|${st}|${a}|${look ? look.weapon + '|' + (look.shieldKind || '') : ''}`;
   return memo(key, () => {
     if (QUAD[kind]) return quadruped(kind, st, a);
     if (kind === 'spider') return spider(st, a);
@@ -369,8 +444,10 @@ export function creature(kind, color, step, atk, look) {
     if (kind === 'golem') return golem(st, a);
     if (kind === 'forgelord') return golem(st, a, 1.75, true);
     if (kind === 'fire_elemental' || kind === 'frost_wisp') return elemental(kind, st, a);
-    const lf = MOB_LOOK[kind] || MOB_LOOK.guard;
-    return humanoid(lf(color || '#8a8a8a'), st, a);
+    const lf = MOB_LOOK[kind] || MOB_LOOK.guard, o = lf(color || WILD);
+    if (look && look.weapon) o.weapon = look.weapon;
+    if (look && look.shieldKind) { o.shield = o.shield || o.tunic; o.shieldKind = look.shieldKind; o.raised = true; }
+    return humanoid(o, st, a);
   });
 }
 export function banner(color) {
