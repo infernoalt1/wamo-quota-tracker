@@ -18,9 +18,13 @@ const label = id => ROLES[id]?.name || id;
 export function poisoned(g,p) {const s=player(g,g.poison?.source);return !!((s?.alive||s?.zombuulUp) && ['poisoner','pukka'].includes(s.role) && g.poison.target===p.id);}
 export function impaired(g,p) {return p.role==='drunk'||poisoned(g,p)||g.drunks.some(d=>d.id===p.id&&g.day<=d.until);}
 const active = (g,p) => !!(p?.alive||p?.zombuulUp)&&!impaired(g,p);
-function log(g,text){g.events.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text});}
-function tell(g,p,text,extra={}){p.inbox.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text,...extra});}
-function audit(g,basis,result,reason){g.decisions.push({day:g.day,phase:g.phase,basis,result,reason});}
+// Every record gets a running number, so the end-of-game log can replay them in the order they happened.
+const stamp=g=>({at:Date.now(),n:g.seq=(g.seq||0)+1});
+function log(g,text){g.events.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text,...stamp(g)});}
+function tell(g,p,text,extra={}){p.inbox.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text,...stamp(g),...extra});}
+function audit(g,basis,result,reason){g.decisions.push({day:g.day,phase:g.phase,basis,result,reason,...stamp(g)});}
+// What a player picked at night, kept for the end-of-game log. `state` is how their ability was working at that moment.
+function record(g,p,q,targets,data,auto){(g.choices||=[]).push({day:g.day,by:p.id,role:q.role,real:p.role,state:p.role==='drunk'?'drunk':poisoned(g,p)?'poisoned':impaired(g,p)?'drunk':null,targets:targets.map(x=>x.id),character:data.character||null,skip:!!data.skip,auto,...stamp(g)});}
 
 // This is an intentionally bounded heuristic, not a language model or a win predictor.
 // It can only rank outcomes independently authorized by a character's ability.
@@ -58,16 +62,28 @@ function roleInfo(g,p,target){
 }
 // `account` and `look` come from the player's optional account: a username and the decorations they wear.
 const seat=(name,session,id=crypto.randomUUID(),avatar=null,avatarHidden=false,account=null,look=null)=>({id,session,name,avatar,avatarHidden,account,look,alive:true,ghost:true,inbox:[],claim:'',ready:false});
-const lobby=settings=>({phase:'lobby',day:0,events:[],messages:[],groups:[],decisions:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],drunks:[],woke:[],innkeep:[],deadline:null,paused:false,settings});
+const lobby=settings=>({phase:'lobby',day:0,events:[],messages:[],groups:[],decisions:[],choices:[],ballots:[],queue:[],pending:null,poison:null,protection:null,nightDeaths:[],drunks:[],woke:[],innkeep:[],deadline:null,dawnAt:null,proposal:null,paused:false,settings});
 export function newGame(code,name,session,avatar=null,{account=null,look=null}={}){
  const p=seat(name,session,undefined,avatar,false,account,look);
- return {code,host:p.id,players:[p],round:1,...lobby({daySeconds:240,voteSeconds:40,script:'tb'}),created:Date.now()};
+ return {code,host:p.id,players:[p],spectators:[],round:1,...lobby({daySeconds:240,voteSeconds:40,script:'tb'}),created:Date.now()};
 }
+const nameTaken=(g,name)=>[...g.players,...(g.spectators||[])].some(p=>p.name.toLowerCase()===name.toLowerCase());
 export function join(g,name,session,avatar=null,{account=null,look=null}={}){
  const existing=g.players.find(p=>p.session===session);if(existing)return existing;
- assert(g.phase==='lobby','This game has already started.');assert(g.players.length<15,'This table is full.');
- assert(!g.players.some(p=>p.name.toLowerCase()===name.toLowerCase()),'That name is already seated.');
+ assert(g.phase==='lobby','This game has already started. You can watch it instead.');assert(g.players.length<15,'This table is full.');
+ // A spectator taking a seat keeps their name.
+ g.spectators=(g.spectators||[]).filter(s=>s.session!==session);
+ assert(!nameTaken(g,name),'That name is already seated.');
  const p=seat(name,session,undefined,avatar,false,account,look);g.players.push(p);return p;
+}
+// Spectators see only what the whole table sees: no characters, no whispers, no night information, and no voice in chat.
+export function spectate(g,name,session){
+ const seated=g.players.find(p=>p.session===session);if(seated)return seated;
+ g.spectators||=[];
+ const existing=g.spectators.find(s=>s.session===session);if(existing)return existing;
+ assert(g.spectators.length<30,'This table has as many spectators as it can take.');
+ assert(!nameTaken(g,name),'That name is already taken at this table.');
+ const s={id:crypto.randomUUID(),session,name};g.spectators.push(s);return s;
 }
 function unseat(g,p){
  g.players=g.players.filter(x=>x!==p);
@@ -76,9 +92,9 @@ function unseat(g,p){
 }
 // Back to the lobby in the same room: the code, link, host, seats and settings all carry over.
 function rematch(g){
- const {code,host,players,round,settings,created,phase}=g;
+ const {code,host,players,spectators=[],round,settings,created,phase,seq}=g;
  for(const key of Object.keys(g))delete g[key];
- Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id,p.avatar,p.avatarHidden,p.account,p.lookNext!==undefined?p.lookNext:p.look)),round:round+1,...lobby(settings),created,interrupted:phase!=='ended'});
+ Object.assign(g,{code,host,players:players.map(p=>seat(p.name,p.session,p.id,p.avatar,p.avatarHidden,p.account,p.lookNext!==undefined?p.lookNext:p.look)),spectators,round:round+1,...lobby(settings),created,seq,interrupted:phase!=='ended'});
 }
 export function start(g,forcedRoles){
  assert(COUNTS[g.players.length],'Gather 5–15 players to begin.');
@@ -104,7 +120,13 @@ export function start(g,forcedRoles){
  audit(g,'Setup','Roles assigned, fixed red herring, and bluffs chosen','Standard population counts; Baron replaces two Townsfolk. Drunk receives an unused Townsfolk identity.');
  beginNight(g);
 }
-function win(g,team,reason){g.phase='ended';g.winner=team;g.reason=reason;g.pending=null;g.deadline=null;log(g,`${team==='good'?'Good':'Evil'} wins. ${reason}`);}
+function win(g,team,reason){g.phase='ended';g.winner=team;g.reason=reason;g.pending=null;g.deadline=null;g.dawnAt=null;g.proposal=null;log(g,`${team==='good'?'Good':'Evil'} wins. ${reason}`);}
+// The table voted to stop: nobody wins, every character is shown, and the game is never recorded.
+function callGame(g){
+ g.phase='ended';g.winner=null;g.called=true;g.reason='The table voted to end the game early. Every character is revealed.';
+ g.pending=null;g.deadline=null;g.nomination=null;g.dawnAt=null;g.paused=false;g.proposal=null;
+ log(g,'The table voted to end the game. Every character is revealed.');
+}
 // One row per seat of a finished game, for the lasting record kept outside the room.
 // Teams are judged at the end, so a Goon who turned evil wins and loses with evil.
 export function results(g){
@@ -348,7 +370,7 @@ function moonResolve(g,p,q,targets,data){
  if(q.role!=='chambermaid')tell(g,p,`Your choice: ${[...targets.map(x=>x.name),...(data.character?[label(data.character)]:[])].join(', ')}.`);
 }
 export function beginNight(g){
- g.phase='night';g.day++;g.deadline=null;if(!moon(g))g.poison=null;g.protection=null;g.nightDeaths=[];g.pending=null;g.ready=[];
+ g.phase='night';g.day++;g.deadline=null;g.dawnAt=null;g.paused=false;if(!moon(g))g.poison=null;g.protection=null;g.nightDeaths=[];g.pending=null;g.ready=[];
  g.drunks=g.drunks.filter(d=>g.day<=d.until);g.woke=[];g.innkeep=[];g.exorcised=null;g.goonChosen=false;g.risen=[];g.tinkerAt=null;
  g.players.forEach(p=>{p.ready=false;p.nominated=false;p.nominator=false;p.publicAlive=p.alive;});
  const order=g.day===1?['poisoner','washerwoman','librarian','investigator','chef','empath','fortune_teller','butler','spy']:['poisoner','monk','imp','undertaker','empath','fortune_teller','butler','spy'];
@@ -360,34 +382,76 @@ export function advanceNight(g){
   const item=g.queue.shift(),p=player(g,item.id);
   if(!p)continue;
   // An executed Moonchild has had no daylight to choose in; someone who died tonight only learns at dawn.
-  if(item.role==='moonchild'&&p.moonPending&&!g.nightDeaths.includes(p.id)){g.pending={id:p.id,role:'moonchild',key:crypto.randomUUID(),count:1,aliveOnly:true};continue;}
+  if(item.role==='moonchild'&&p.moonPending&&!g.nightDeaths.includes(p.id)){g.pending={id:p.id,role:'moonchild',key:crypto.randomUUID(),count:1,aliveOnly:true,opened:Date.now()};continue;}
   if(item.auto){moonAuto(g,p,item.role);continue;}
   if(!(p.alive||p.zombuulUp)||g.exorcised===p.id||g.mastermindDay&&isDemon(p))continue;
   const prompt=moonPrompt(g,p,item.role);
   if(!prompt)continue;
   // Late in a game there may be too few legal targets; waiting on an impossible choice would freeze the night.
   if(prompt.count>g.players.filter(x=>(!prompt.notSelf||x!==p)&&(!prompt.aliveOnly||x.publicAlive)&&(!prompt.deadOnly||!x.publicAlive)&&x.id!==prompt.notId).length)continue;
-  g.woke.push(p.id);g.pending={id:item.id,role:item.role,key:crypto.randomUUID(),...prompt};
+  g.woke.push(p.id);g.pending={id:item.id,role:item.role,key:crypto.randomUUID(),...prompt,opened:Date.now()};
  }
  while(g.phase==='night'&&!g.pending&&g.queue.length&&!moon(g)){
   const item=g.queue.shift(),p=player(g,item.id);if(!p||(p.shown!==item.role)||(!p.alive&&!item.deathTrigger))continue;
   if(['poisoner','monk','imp','fortune_teller','butler','ravenkeeper'].includes(item.role)){
-   g.pending={...item,key:crypto.randomUUID(),count:item.role==='fortune_teller'?2:1,notSelf:['monk','butler'].includes(item.role)};
+   g.pending={...item,key:crypto.randomUUID(),count:item.role==='fortune_teller'?2:1,notSelf:['monk','butler'].includes(item.role),opened:Date.now()};
   }else automatic(g,p,item.role);
  }
- if(g.phase==='night'&&!g.pending&&!g.queue.length){
-  g.phase='day';g.protection=null;g.players.forEach(p=>p.publicAlive=p.alive);g.ballots=[];g.nomination=null;g.executedDeath=null;g.executionOccurred=false;g.deadline=Date.now()+g.settings.daySeconds*1000;
+ // Dawn always comes 5–15 seconds after the last choice, even on a night when nobody woke,
+ // so how long a night lasts says nothing about who is in play.
+ if(g.phase==='night'&&!g.pending&&!g.queue.length&&!g.dawnAt)g.dawnAt=Date.now()+DAWN_MIN+rand()*DAWN_SPREAD;
+}
+const DAWN_MIN=5000,DAWN_SPREAD=10000;
+export const NIGHT_SECONDS=30;
+function dawn(g){
+  g.dawnAt=null;g.phase='day';g.protection=null;g.players.forEach(p=>p.publicAlive=p.alive);g.ballots=[];g.nomination=null;g.executedDeath=null;g.executionOccurred=false;g.deadline=Date.now()+g.settings.daySeconds*1000;
   g.diedToday=false;g.outsiderDied=false;g.gossip=null;
   // A Tinker might die at any time, so the Storyteller may also pick a moment during the day.
   g.tinkerAt=moon(g)&&g.players.some(p=>p.role==='tinker'&&active(g,p))&&favorEvil(g)&&rand()<.12?Date.now()+rand()*g.settings.daySeconds*1000:null;
   log(g,g.nightDeaths.length?`Dawn breaks. ${g.nightDeaths.map(id=>player(g,id).name).join(', ')} died in the night.`:'Dawn breaks. Nobody died in the night.');
   const back=(g.risen||[]).filter(id=>player(g,id)?.alive).map(id=>player(g,id).name);
   if(back.length)log(g,`${back.join(', ')} has returned to life.`);
- }
 }
-function nightChoice(g,p,data){
+// A night prompt's 30 seconds start when its player's screen first receives it,
+// so a slow or background tab is never skipped before the prompt even reaches it.
+export function seen(g,session,now=Date.now()){
+ const q=g.pending;if(g.phase!=='night'||!q||q.deadline)return false;
+ if(player(g,q.id)?.session!==session)return false;
+ q.deadline=now+NIGHT_SECONDS*1000;return true;
+}
+const KILLERS=['imp','zombuul','pukka','shabaloth','po','godfather'];
+// Nobody chose in time, or the player is offline. Where the rules allow doing nothing, nothing happens
+// (a blind Gambler guess would only kill them); otherwise the Storyteller picks a random legal target.
+// An attacking Demon never picks itself, so a missed turn cannot pass the Demon on to a Minion.
+function autoChoose(g,p,q){
+ const legal=g.players.filter(x=>(!q.notSelf||x!==p)&&(!q.aliveOnly||x.publicAlive)&&(!q.deadOnly||!x.publicAlive)&&x.id!==q.notId);
+ if(q.count===0||q.role==='gambler'||(q.optional&&!KILLERS.includes(q.role))||legal.length<q.count){
+  tell(g,p,'You did not choose in time, so you used no ability tonight.');nightChoice(g,p,{key:q.key,skip:true},true);return;
+ }
+ const living=legal.filter(x=>x.publicAlive&&x!==p),prefer=KILLERS.includes(q.role)?living.filter(x=>!evil(x)):living;
+ const pool=prefer.length>=q.count?prefer:living.length>=q.count?living:legal;
+ tell(g,p,'You did not choose in time, so the Storyteller chose for you.');
+ nightChoice(g,p,{key:q.key,targets:shuffle(pool).slice(0,q.count).map(x=>x.id)},true);
+}
+function nightTick(g,now,away){
+ let changed=false;
+ // One overdue choice can open the next prompt for someone who is offline too, so keep settling.
+ for(let n=0;n<40&&g.phase==='night';n++){
+  const q=g.pending;
+  if(q){
+   if(!(away.has(q.id)||(q.deadline&&now>=q.deadline)))break;
+   try{autoChoose(g,player(g,q.id),q);}catch{if(g.pending===q){g.pending=null;advanceNight(g);}}
+   changed=true;continue;
+  }
+  if(g.dawnAt&&now>=g.dawnAt){dawn(g);changed=true;}
+  break;
+ }
+ return changed;
+}
+// `auto` comes only from the server's own timeout, never from a player's request.
+function nightChoice(g,p,data,auto=false){
  const q=g.pending;assert(q?.id===p.id&&q.key===data.key,'That night action is no longer waiting.');
- if(moon(g)&&q.optional&&data.skip){g.pending=null;moonSkip(g,p,q);advanceNight(g);return;}
+ if(data.skip&&(auto||moon(g)&&q.optional)){g.pending=null;record(g,p,q,[],data,auto);if(moon(g))moonSkip(g,p,q);advanceNight(g);return;}
  assert(Array.isArray(data.targets)&&data.targets.length===q.count&&new Set(data.targets).size===q.count,'Choose the required number of different players.');
  const targets=data.targets.map(id=>player(g,id));assert(targets.every(Boolean),'Choose seated players.');assert(!q.notSelf||targets.every(x=>x.id!==p.id),'Choose another player.');
  if(moon(g)){
@@ -396,9 +460,9 @@ function nightChoice(g,p,data){
   assert(!q.deadOnly||targets.every(x=>!x.publicAlive),'Choose a dead player.');
   assert(!q.notId||targets.every(x=>x.id!==q.notId),'Choose someone different from last night.');
   assert(!q.character||ROLES[data.character]?.script==='bmr','Choose a character from this script.');
-  g.pending=null;moonResolve(g,p,q,targets,data);advanceNight(g);return;
+  g.pending=null;record(g,p,q,targets,data,auto);moonResolve(g,p,q,targets,data);advanceNight(g);return;
  }
- const t=targets[0];g.pending=null;
+ const t=targets[0];g.pending=null;record(g,p,q,targets,data,auto);
  if(q.role==='poisoner'&&active(g,p))g.poison={source:p.id,target:t.id};
  if(q.role==='monk'&&active(g,p))g.protection={source:p.id,target:t.id};
  if(q.role==='imp')attack(g,p,t);
@@ -435,7 +499,9 @@ function finishVote(g){
  const n=g.nomination;let count=0;const votes=[];
  for(let i=1;i<=g.players.length;i++){
   const p=g.players[(g.players.findIndex(x=>x.id===n.target)+i)%g.players.length];
-  const yes=!!n.hands[p.id]&&(p.alive||p.ghost);
+  // A Butler's hand only counts alongside their master's.
+  const master=p.role==='butler'&&player(g,p.master);
+  const yes=!!n.hands[p.id]&&(p.alive||p.ghost)&&(p.role!=='butler'||!!(master&&n.hands[master.id]&&(master.alive||master.ghost||votes.some(v=>v.id===master.id&&v.yes))));
   if(yes){count++;if(!p.alive)p.ghost=false;}
   votes.push({id:p.id,yes});
  }
@@ -450,7 +516,18 @@ function allReady(g,away){
  return here.length>0&&here.every(x=>x.ready);
 }
 // `away` holds the ids of players the server sees as offline; it never enters the saved game.
+const PROPOSALS={lobby:'end the game and go back to the lobby',reveal:'end the game and reveal every character'};
+// A majority of the players who are online decides. It fails as soon as a majority can no longer be reached, or after a minute.
+function settleProposal(g,now,away){
+ const v=g.proposal,voters=g.players.filter(x=>!away.has(x.id)),need=Math.floor(voters.length/2)+1;
+ const yes=voters.filter(x=>v.votes[x.id]===true).length,no=voters.filter(x=>v.votes[x.id]===false).length;
+ if(yes>=need){g.proposal=null;if(v.kind==='lobby')rematch(g);else callGame(g);return true;}
+ if(voters.length-no<need||now>=v.deadline){g.proposal=null;log(g,`The vote to ${PROPOSALS[v.kind]} did not pass.`);return true;}
+ return false;
+}
 export function tick(g,now=Date.now(),away=new Set()){
+ if(g.proposal&&settleProposal(g,now,away))return true;
+ if(g.phase==='night')return nightTick(g,now,away);
  if(g.paused||g.phase!=='day')return false;
  if(g.tinkerAt&&now>=g.tinkerAt){
   g.tinkerAt=null;
@@ -463,7 +540,12 @@ export function tick(g,now=Date.now(),away=new Set()){
  if(!g.nomination&&away.size&&allReady(g,away)){endDay(g);return true;}return false;
 }
 export function act(g,session,data,away=new Set()){
- const p=g.players.find(x=>x.session===session);assert(p,'Join this room first.');
+ const p=g.players.find(x=>x.session===session);
+ if(!p){
+  const s=g.spectators?.find(x=>x.session===session);assert(s,'Join this room first.');
+  assert(data.type==='leave','Spectators can watch, but not take part.');
+  g.spectators=g.spectators.filter(x=>x!==s);return;
+ }
  const t=player(g,data.target);
  if(data.type==='chat'){
   assert(g.phase!=='night','The town is asleep. Save your conversations for dawn.');
@@ -500,7 +582,19 @@ export function act(g,session,data,away=new Set()){
  if(data.type==='leave'){assert(g.phase==='lobby','Keep your seat during a game. You can reconnect in this browser.');unseat(g,p);return;}
  if(data.type==='kick'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can remove players, and only in the lobby.');assert(t&&t.id!==p.id,'Choose another seated player.');unseat(g,t);return;}
  if(data.type==='hide_avatar'){assert(p.id===g.host,'Only the host can hide a picture.');assert(t?.avatar,'That player has no picture.');t.avatarHidden=!t.avatarHidden;return;}
- if(data.type==='rematch'){assert(g.phase!=='lobby'&&p.id===g.host,'Only the host can send the table back to the lobby.');rematch(g);return;}
+ if(data.type==='rematch'){assert(p.id===g.host,'Only the host can start a new game.');assert(g.phase==='ended','To end a game early, call a vote. A majority of the table has to agree.');rematch(g);return;}
+ if(data.type==='propose'){
+  assert(['day','night'].includes(g.phase),'You can only call this vote while a game is being played.');
+  assert(PROPOSALS[data.kind],'Choose what to vote on.');assert(!g.proposal,'A vote to end the game is already open.');
+  assert(!p.proposedAt||Date.now()-p.proposedAt>120000,'You called a vote recently. Try again in a couple of minutes.');
+  p.proposedAt=Date.now();g.proposal={id:crypto.randomUUID(),kind:data.kind,by:p.id,votes:{[p.id]:true},deadline:Date.now()+60000};
+  log(g,`${p.name} asks the table to ${PROPOSALS[data.kind]}. A majority has a minute to agree.`);
+  settleProposal(g,Date.now(),away);return;
+ }
+ if(data.type==='proposal_vote'){
+  assert(g.proposal&&g.proposal.id===data.proposal,'That vote has ended.');
+  g.proposal.votes[p.id]=!!data.yes;settleProposal(g,Date.now(),away);return;
+ }
  if(data.type==='settings'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can set lobby options.');assert([120,180,240,360,600].includes(data.daySeconds),'Choose a supported day duration.');assert(data.script===undefined||['tb','bmr'].includes(data.script),'Choose a supported game mode.');g.settings.daySeconds=data.daySeconds;if(data.script)g.settings.script=data.script;return;}
  if(data.type==='start'){assert(g.phase==='lobby'&&p.id===g.host,'Only the host can start from the lobby.');start(g);return;}
  if(data.type==='pause'){
@@ -533,9 +627,12 @@ export function act(g,session,data,away=new Set()){
  if(data.type==='vote'){
   assert(g.nomination?.id===data.nomination,'This vote has ended.');assert(p.alive||p.ghost,'Your ghost vote has been spent.');
   // All votes are public raised hands until the count, so the Butler can follow a master.
-  // As the official almanac directs, accidental illegal votes count, with a private reminder.
-  if(data.yes&&p.role==='butler'&&active(g,p)&&!g.nomination.hands[p.master])tell(g,p,'Butler reminder: you may only keep your hand raised if your master is voting. Please lower it if they are not.');
-  g.nomination.hands[p.id]=!!data.yes;return;
+  // The Butler's hand can only go up while the master's is up, and comes down with it. This holds even for a
+  // poisoned Butler: letting them vote freely would tell them they are poisoned.
+  if(data.yes&&p.role==='butler')assert(p.master&&g.nomination.hands[p.master],'As the Butler, you can only raise your hand while your master’s hand is up.');
+  g.nomination.hands[p.id]=!!data.yes;
+  if(!data.yes)g.players.filter(x=>x.role==='butler'&&x.master===p.id).forEach(x=>{g.nomination.hands[x.id]=false;});
+  return;
  }
  if(data.type==='slayer'){
   assert(!moon(g),'There is no Slayer in this game mode.');assert(!g.nomination,'Use a Slayer claim between nominations.');assert(t,'Choose a seated player.');assert(!p.slayerUsed,'You have already made your public Slayer shot.');
@@ -545,15 +642,31 @@ export function act(g,session,data,away=new Set()){
  }
  throw new Error('Unknown action.');
 }
+// The whole game in order, for the end screen: what everyone chose at night, what the Storyteller told each of them,
+// the Storyteller's own calls, and the public events. Whispers and private groups stay private, even now.
+function timeline(g){
+ const name=id=>player(g,id)?.name||'Former player';
+ const rows=[
+  ...g.events.map(e=>({kind:'event',day:e.day,phase:e.phase,n:e.n||0,at:e.at,text:e.text})),
+  ...g.decisions.map(d=>({kind:'storyteller',day:d.day,phase:d.phase,n:d.n||0,at:d.at,text:`${d.basis}: ${String(d.result)}`})),
+  ...(g.choices||[]).map(c=>({kind:'choice',day:c.day,phase:'night',n:c.n,at:c.at,by:name(c.by),role:c.role,real:c.real,state:c.state,targets:c.targets.map(name),character:c.character,skip:c.skip,auto:c.auto})),
+  ...g.players.flatMap(p=>p.inbox.filter(i=>!/^Your choice:/.test(i.text)).map(i=>({kind:'told',day:i.day,phase:i.phase,n:i.n||0,at:i.at,to:p.name,text:i.text}))),
+ ];
+ return rows.sort((a,b)=>a.n-b.n);
+}
 export function view(g,session){
- const me=g.players.find(p=>p.session===session);assert(me,'Join this room first.');
+ const me=g.players.find(p=>p.session===session),watcher=!me&&g.spectators?.find(s=>s.session===session);
+ assert(me||watcher,'Join this room first.');
  const ended=g.phase==='ended';
- const groups=g.groups.filter(c=>c.members.includes(me.id));
- return {code:g.code,round:g.round,interrupted:g.interrupted,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,
+ const groups=me?g.groups.filter(c=>c.members.includes(me.id)):[];
+ return {code:g.code,round:g.round,interrupted:g.interrupted,host:g.host,phase:g.phase,day:g.day,settings:g.settings,paused:g.paused,deadline:g.deadline,now:Date.now(),winner:g.winner,reason:g.reason,called:!!g.called,
  players:g.players.map(p=>({id:p.id,name:p.name,account:p.account||null,look:p.look||null,avatar:p.avatarHidden?null:p.avatar||null,pictured:!!p.avatar,avatarHidden:!!p.avatarHidden,alive:g.phase==='night'?p.publicAlive:p.alive,ghost:p.ghost,claim:p.claim,ready:p.ready,nominated:p.nominated,nominator:p.nominator,...(ended?{role:p.role,initialRole:p.initialRole,shown:p.initialShown,evil:evil(p)}: {})})),
- me:{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox,moonPending:!!me.moonPending,statementUsed:me.statementDay===g.day},
+ spectators:(g.spectators||[]).map(s=>s.name),
+ me:me?{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox,moonPending:!!me.moonPending,statementUsed:me.statementDay===g.day}
+  :{id:watcher.id,name:watcher.name,spectator:true,role:null,slayerUsed:true,master:null,inbox:[],moonPending:false,statementUsed:true},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
- nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
- groups,messages:g.messages.filter(m=>m.group?groups.some(c=>c.id===m.group):!m.to||m.from===me.id||m.to===me.id),
- ...(ended?{decisions:g.decisions,redHerring:player(g,g.redHerring)?.name,bluffs:g.bluffs.map(label)}:{})};
+ nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:me&&g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
+ proposal:g.proposal?{id:g.proposal.id,kind:g.proposal.kind,by:g.proposal.by,votes:g.proposal.votes,deadline:g.proposal.deadline}:null,
+ groups,messages:g.messages.filter(m=>m.group?groups.some(c=>c.id===m.group):!m.to||(me&&(m.from===me.id||m.to===me.id))),
+ ...(ended?{decisions:g.decisions,redHerring:player(g,g.redHerring)?.name,bluffs:g.bluffs.map(label),timeline:timeline(g)}:{})};
 }

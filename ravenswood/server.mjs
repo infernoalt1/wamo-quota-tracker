@@ -1,7 +1,7 @@
 import express from 'express';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { newGame, join, act, tick, view } from './lib/engine.mjs';
+import { newGame, join, spectate, act, tick, seen, view } from './lib/engine.mjs';
 import { mountAccounts, defaultStore } from './lib/accounts.mjs';
 import { mountLeaderboard } from './lib/leaderboard.mjs';
 import { mountShop } from './lib/shop.mjs';
@@ -37,7 +37,12 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     reply(req,res,data);
   }
   const load=code=>{const room=rooms.get(code);if(!room)throw Error('Room not found. Check the code.');return JSON.parse(room.state);};
-  const save=(code,game)=>{leaderboard.noteEnd(game);rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});};
+  // Every change pokes each open page in the room, which fetches its own view at once instead of waiting for its next poll.
+  const streams=new Map();
+  const poke=code=>{for(const res of streams.get(code)||[])res.write('data: 1\n\n');};
+  const save=(code,game)=>{leaderboard.noteEnd(game);rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});poke(code);};
+  // Keeps quiet connections from being closed by proxies along the way.
+  const beat=setInterval(()=>{for(const set of streams.values())for(const res of set)res.write(': keep-alive\n\n');},25000);beat.unref?.();
   router.use((req,res,next)=>{res.setHeader('Cache-Control','no-store, private');const now=Date.now();for(const [code,room] of rooms)if(now-room.updated>ROOM_TTL)rooms.delete(code);for(const [key,seen] of presence)if(now-seen.at>ROOM_TTL)presence.delete(key);next();});
   router.use('/account/avatar',express.json({limit:'96kb'}));
   router.use(express.json({limit:'4kb'}));
@@ -48,9 +53,19 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.
     markSeen(code,session);
-    if(tick(game,Date.now(),awayIds(game)))save(code,game);
+    if(seen(game,session)|tick(game,Date.now(),awayIds(game)))save(code,game);
     send(req,res,game,session);
   }catch(e){res.status(400).json({error:e.message});}});
+  router.get('/events',(req,res)=>{
+    try{
+      const session=identity(req);if(!session)return res.status(401).end();
+      const code=codeOf(req.query.code);view(load(code),session); // Only someone at this table may listen.
+      res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'});
+      res.flushHeaders?.();res.write('retry: 3000\n\n');
+      if(!streams.has(code))streams.set(code,new Set());streams.get(code).add(res);
+      res.on('close',()=>{const set=streams.get(code);set?.delete(res);if(set&&!set.size)streams.delete(code);});
+    }catch(e){res.status(400).json({error:e.message});}
+  });
   router.post('/presence',(req,res)=>{
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).end();
     const seen=presence.get(`${req.body?.code}:${identity(req)}`);if(seen)seen.closed=true;
@@ -71,10 +86,12 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     }
     const code=codeOf(data.code),game=load(code);
     if(data.type==='join')join(game,nameOf(data.name),session,avatar,who);
+    else if(data.type==='spectate')spectate(game,nameOf(data.name),session);
     else{
       view(game,session);markSeen(code,session);
-      // Commit elapsed transitions independently: stale actions may fail but cannot rewind time.
-      if(tick(game,Date.now(),awayIds(game))){save(code,game);return send(req,res,game,session);}
+      // Commit elapsed transitions first, on their own: the action is then checked against the new state,
+      // so a stale action may fail but can never rewind time.
+      if(seen(game,session)|tick(game,Date.now(),awayIds(game)))save(code,game);
       act(game,session,data,awayIds(game));
     }
     save(code,game);

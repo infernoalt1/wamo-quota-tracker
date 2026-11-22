@@ -7,11 +7,8 @@ import { POINTS, lookOf } from './cosmetics.mjs';
 
 // With fewer accounts at the table, one person with several browser profiles could farm wins.
 export const MIN_ACCOUNTS=3;
-// Below this many games a win rate says little, so those players are listed but not ranked.
-export const MIN_GAMES=5;
 
 const tally=rows=>({games:rows.length,wins:rows.filter(r=>r.won).length});
-const rate=(wins,games)=>games?wins/games:0;
 // The daily bonus resets at midnight UTC, the same moment for everyone.
 export const dayStart=(now=Date.now())=>new Date(Math.floor(now/86400000)*86400000);
 // Points for one player's game, itemised so the end screen can explain them.
@@ -24,11 +21,10 @@ export function pointsFor(p,firstWinToday){
 }
 const scriptOf=value=>value&&value!=='all'?(Object.hasOwn(SCRIPTS,value)?value:null):undefined;
 
+// The player list is alphabetical and shows no results, so it cannot be read as a ranking.
 function standings(totals){
-  const players=totals.map(t=>({username:t.username,avatar:pictureOf(t),look:lookOf(t.look),games:t.games,wins:t.wins,good:{games:t.good_games,wins:t.good_wins},evil:{games:t.evil_games,wins:t.evil_wins},demonWins:t.demon_wins}));
-  const ranked=players.filter(p=>p.games>=MIN_GAMES).sort((a,b)=>rate(b.wins,b.games)-rate(a.wins,a.games)||b.wins-a.wins||b.games-a.games||a.username.localeCompare(b.username));
-  const unranked=players.filter(p=>p.games<MIN_GAMES).sort((a,b)=>b.games-a.games||b.wins-a.wins||a.username.localeCompare(b.username));
-  return [...ranked.map((p,i)=>({rank:i+1,...p})),...unranked.map(p=>({rank:null,...p}))];
+  return totals.map(t=>({username:t.username,avatar:pictureOf(t),look:lookOf(t.look),games:t.games}))
+    .sort((a,b)=>a.username.localeCompare(b.username,undefined,{sensitivity:'base'}));
 }
 function profileOf(account,rows){
   const counts=new Map();
@@ -53,7 +49,7 @@ export function mountLeaderboard(router,{store,rooms}){
   router.get('/leaderboard',handle(async(req,res)=>{
     const script=scriptOf(req.query.script);
     if(script===null)throw refuse('Unknown game mode.');
-    res.json({minGames:MIN_GAMES,minAccounts:MIN_ACCOUNTS,players:standings(await store.totals(script))});
+    res.json({minAccounts:MIN_ACCOUNTS,players:standings(await store.totals(script))});
   }));
   router.get('/leaderboard/player',handle(async(req,res)=>{
     const account=await store.byKey(keyOf(usernameOf(req.query.username)));
@@ -87,6 +83,8 @@ export function mountLeaderboard(router,{store,rooms}){
     // Going back to the lobby clears the mark, and a game abandoned that way never reaches here.
     noteEnd(game){
       if(!store||game.phase!=='ended'||game.ledger)return;
+      // A game the table voted to stop has no winner, so it earns nothing and is not recorded.
+      if(game.called){game.ledger={id:randomUUID(),status:'called',sessions:[]};return;}
       const id=randomUUID();game.ledger={id,status:'pending',sessions:[]};
       queueMicrotask(()=>write(game.code,id,structuredClone(game)));
     },

@@ -247,6 +247,8 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .sources h3{font-family:'Spectral',serif;font-size:20px;margin-bottom:10px}
 .sources a{display:inline-block;margin:6px 14px 6px 0;font-size:13px;color:#b19ac8}
 .leader-list{display:flex;flex-direction:column}
+.leader-row.players{grid-template-columns:minmax(0,1fr) 64px}
+.leader-row.players.leader-head span:nth-child(2){text-align:right}
 .leader-row{display:grid;grid-template-columns:28px minmax(0,1fr) 52px 64px;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px solid var(--line);text-align:left;border-radius:0;width:100%}
 button.leader-row:hover{background:#ffffff08}
 .leader-row.you{background:#c7ab7612}
@@ -325,6 +327,7 @@ button.leader-row:hover{background:#ffffff08}
 /* End of game reveal */
 .finale{position:fixed;inset:0;z-index:110;overflow-y:auto;padding:40px 16px;background:radial-gradient(ellipse at 50% 0,var(--finale-glow),#0b0a0f 62%);animation:finale-fade .7s ease-out both;--finale-accent:#e0c58d;--finale-glow:#4a3d22}
 .finale.evil{--finale-accent:#e0757a;--finale-glow:#5c1a22}
+.finale.called{--finale-accent:#cfc6dc;--finale-glow:#332c40}
 .finale-inner{position:relative;max-width:900px;margin:0 auto;display:grid;justify-items:center;gap:10px;text-align:center}
 .finale-flash{position:fixed;inset:0;pointer-events:none;opacity:0;background:var(--finale-accent);animation:finale-flash 1s ease-out 1.1s both}
 .finale-inner>.clock-art{width:110px;height:110px;color:var(--finale-accent);opacity:.75;animation:finale-rise 1s ease-out both}
@@ -335,10 +338,12 @@ button.leader-row:hover{background:#ffffff08}
 .finale-you{font-size:13px;color:var(--muted);margin-bottom:18px;animation:finale-rise .6s ease-out 1.6s both}
 .finale-team{width:100%;display:grid;gap:12px;margin-bottom:20px;animation:finale-rise .6s ease-out 1.6s both}
 .finale-team h3{font-size:12px;font-weight:600;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted)}
-.finale-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:10px;perspective:1200px}
-.finale-card{position:relative;transform-style:preserve-3d;animation:finale-flip .7s cubic-bezier(.3,1.3,.5,1) var(--flip) both}
-.finale-back,.finale-face{-webkit-backface-visibility:hidden;backface-visibility:hidden;border-radius:7px}
-.finale-back{position:absolute;inset:0;transform:rotateY(180deg);display:grid;place-items:center;background:#211e2a;border:1px solid #4d4458;color:#6d6079}
+.finale-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:10px}
+/* Each card turns over by squeezing flat and opening on its face. It is 2D only: 3D flips (rotateY with a hidden
+   back face) show nothing on computers without graphics acceleration, which is common on school machines. */
+.finale-card{position:relative;animation:finale-flip .6s ease-in-out var(--flip) both}
+.finale-back,.finale-face{border-radius:7px}
+.finale-back{position:absolute;inset:0;z-index:1;display:grid;place-items:center;background:#211e2a;border:1px solid #4d4458;color:#6d6079;opacity:0;animation:finale-back .6s linear var(--flip) both}
 .finale-back .clock-art{height:72%;width:auto}
 .finale-face{height:100%;display:flex;align-items:center;gap:13px;padding:12px 14px;text-align:left;border:1px solid #3a4c5b;background:#1b252d}
 .finale-card.evil .finale-face{border-color:#733c45;background:#2c1a20}
@@ -358,10 +363,11 @@ button.leader-row:hover{background:#ffffff08}
 @keyframes finale-rise{from{opacity:0;transform:translateY(14px)}}
 @keyframes finale-flash{from{opacity:.55}to{opacity:0}}
 @keyframes finale-spin{from{transform:rotate(-1080deg)}}
-@keyframes finale-flip{from{transform:rotateY(180deg)}}
+@keyframes finale-flip{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.03)}}
+@keyframes finale-back{0%,50%{opacity:1}50.1%,100%{opacity:0}}
 @keyframes finale-demon{from{box-shadow:0 0 0 0 #ff4b3a00}30%{box-shadow:0 0 34px 8px #ff4b3acc}}
 .finale.done,.finale.done *{animation:none!important}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}.finale,.finale *{animation:none!important}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}.finale,.finale *:not(.finale-card):not(.finale-back){animation:none!important}}
 
 /* Shop decorations. A frame draws around any round picture: seats, chat, the leaderboard and profiles. */
 .framed{position:relative;overflow:visible;isolation:isolate}
@@ -495,3 +501,46 @@ button.leader-row:hover{background:#ffffff08}
  .shop-item-text p{display:none}
  .shop-item-action{padding:6px 10px 10px}
 }
+
+/* Character reveal at the start of a game. Timers drive it, and every movement is a 2D transform, so it plays the same
+   on school computers without graphics acceleration and with Windows animations turned off. */
+.reveal{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px 16px;overflow-y:auto;background:radial-gradient(ellipse at 50% 30%,#3a2f4d,#0b0a0f 70%)}
+.reveal-inner{width:min(100%,360px);display:grid;justify-items:center;gap:14px;text-align:center}
+.reveal-card{width:100%;min-height:340px;border-radius:12px;border:1px solid #5a4d66;background:#1e1b26;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:26px 22px;color:var(--text)}
+.reveal-card.back{background:repeating-linear-gradient(45deg,#221e2b 0 12px,#1d1a25 12px 24px);color:var(--muted)}
+.reveal-card.back:hover{border-color:var(--gold)}
+.reveal-card.back .clock-art{width:120px;height:120px;color:var(--gold);opacity:.8}
+.reveal-card.back strong{font-family:'Spectral',serif;font-size:22px;font-weight:500;color:var(--text)}
+.reveal-glyph{width:150px;height:150px;display:block;flex-shrink:0}
+.reveal-card strong,.reveal-card.face h2{font-family:'Spectral',serif;font-size:30px;line-height:1.15;font-weight:500}
+.reveal-card.land .reveal-glyph{animation:reveal-pop .5s ease-out both}
+.reveal-card.turn{animation:reveal-close .2s ease-in both}
+.reveal-card.face{animation:reveal-open .25s ease-out both}
+.reveal-card.face.good{border-color:#3a6a86;box-shadow:0 0 40px #4a8ab033}
+.reveal-card.face.evil{border-color:#8a3a45;box-shadow:0 0 40px #c0404a44}
+.reveal-card.face p{color:var(--muted);font-size:14px;line-height:1.5}
+.reveal-team{font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:600;padding:4px 10px;border-radius:12px}
+.reveal-team.good{color:#9fd0ee;background:#1f3a4a}
+.reveal-team.evil{color:#f0a0a6;background:#4a1f26}
+.reveal-wait{display:inline-flex;align-items:center;gap:6px;color:var(--lilac)}
+@keyframes reveal-close{to{transform:scaleX(.03)}}
+@keyframes reveal-open{from{transform:scaleX(.03)}}
+@keyframes reveal-pop{40%{transform:scale(1.12)}}
+/* End-of-game log. */
+.log-legend{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 4px}
+.log-legend .secondary{margin-left:auto}
+.log-kind.choice,.log-row.choice{--kind:#c7ab76}
+.log-kind.told,.log-row.told{--kind:#a190c5}
+.log-kind.storyteller,.log-row.storyteller{--kind:#7fb0a0}
+.log-kind.event,.log-row.event{--kind:#6f6e78}
+.log-kind{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--kind);color:var(--kind)}
+.log-row{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;padding:5px 0 5px 10px;border-left:2px solid var(--kind);margin:0 0 4px;font-size:13px;line-height:1.45}
+.log-row time{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;padding-top:2px}
+.log-row span{overflow-wrap:anywhere}
+.log-row.event span{color:var(--muted)}
+/* Ending a game early. */
+.reset-choices{display:grid;gap:10px;margin-top:14px}
+.reset-choices button{justify-content:flex-start;align-items:flex-start;text-align:left;padding:14px}
+.reset-choices button>svg{flex-shrink:0;margin-top:2px}
+.reset-choices span{display:grid;gap:3px}
+.reset-choices small{font-weight:400}

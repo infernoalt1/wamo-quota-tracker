@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { newGame, join, start, act, kill, view, results } from '../lib/engine.mjs';
-import { mountLeaderboard, MIN_GAMES } from '../lib/leaderboard.mjs';
+import { mountLeaderboard } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
 import { lookOf, progressOf } from '../lib/cosmetics.mjs';
@@ -83,11 +83,17 @@ test('a game is saved once however often it is saved afterwards, and the next ga
   assert.equal(store.games.length,2);
   assert.deepEqual(store.rows.slice(5).map(r=>r.won),[false,false,false,true,true]);
 });
-test('games still in play, and games the host abandons, are never recorded',async()=>{
+test('games still in play, and games the table votes to abandon, are never recorded',async()=>{
   const store=memoryStore(),{save,load}=harness(store),{g,sessions}=table(store,5);
-  save(g);act(g,sessions[0],{type:'rematch'});save(g);assert(load('ABCDEFGH').interrupted);await settled();
+  save(g);act(g,sessions[1],{type:'propose',kind:'lobby'});for(const s of sessions.slice(2,4))act(g,s,{type:'proposal_vote',proposal:g.proposal.id,yes:true});save(g);assert(load('ABCDEFGH').interrupted);await settled();
   assert.equal(store.games.length,0);
   assert.equal(load('ABCDEFGH').ledger,undefined);
+});
+test('a game the table votes to end and reveal has no winner, earns nothing and is never recorded',async()=>{
+  const store=memoryStore(),{save,load}=harness(store),{g,sessions}=table(store,5);
+  act(g,sessions[1],{type:'propose',kind:'reveal'});for(const s of sessions.slice(2,4))act(g,s,{type:'proposal_vote',proposal:g.proposal.id,yes:true});
+  assert.equal(g.phase,'ended');save(g);await settled();
+  assert.equal(store.games.length,0);assert.equal(load('ABCDEFGH').ledger.status,'called');
 });
 test('a slow save does not touch a room that has already moved on to the next game',async()=>{
   const store=memoryStore(),{save,load,rooms}=harness(store),{g,sessions}=table(store,5);
@@ -128,19 +134,19 @@ async function serve(store){
 async function played(store,account,games,wins,{evil=false,script='tb',role='chef',demon=false,points=0,survived}={}){
   for(let i=0;i<games;i++)await store.saveGame({id:crypto.randomUUID(),script,winner:'good',reason:'',size:5,players:[{account:account.id,role,initialRole:role,evil,won:i<wins,survived:survived??i%2===0,demon,points}]});
 }
-test('the leaderboard ranks by win rate from five games, then lists everyone else',async()=>{
+test('the player list is alphabetical, with games played and no results',async()=>{
   const store=memoryStore(),[ana,bo,cy,di]=['Ana','Bo','Cy','Di'].map(n=>store.add(n));
   await played(store,ana,5,3);await played(store,bo,10,6);await played(store,cy,6,5);await played(store,di,2,2);
   await played(store,ana,2,2,{evil:true,demon:true,role:'imp',script:'bmr'});
   const s=await serve(store);
   try{
     const all=await s.get('/leaderboard');
-    assert.equal(all.status,200);assert.equal(all.data.minGames,MIN_GAMES);
-    assert.deepEqual(all.data.players.map(p=>[p.rank,p.username]),[[1,'Cy'],[2,'Ana'],[3,'Bo'],[null,'Di']]);
-    const anaRow=all.data.players.find(p=>p.username==='Ana');
-    assert.deepEqual([anaRow.games,anaRow.wins,anaRow.good,anaRow.evil,anaRow.demonWins],[7,5,{games:5,wins:3},{games:2,wins:2},2]);
+    assert.equal(all.status,200);
+    assert.deepEqual(all.data.players.map(p=>[p.username,p.games]),[['Ana',7],['Bo',10],['Cy',6],['Di',2]]);
+    // Nothing in the list says who wins, so nobody can be ranked from it.
+    assert(all.data.players.every(p=>!('wins' in p)&&!('rank' in p)&&!('good' in p)&&!('demonWins' in p)));
     const moon=await s.get('/leaderboard?script=bmr');
-    assert.deepEqual(moon.data.players.map(p=>[p.rank,p.username,p.games]),[[null,'Ana',2]]);
+    assert.deepEqual(moon.data.players.map(p=>[p.username,p.games]),[['Ana',2]]);
     assert.equal((await s.get('/leaderboard?script=tb')).data.players.find(p=>p.username==='Ana').games,5);
     assert.equal((await s.get('/leaderboard?script=all')).data.players.length,4);
     assert.equal((await s.get('/leaderboard?script=__proto__')).status,400);
@@ -239,7 +245,8 @@ shopTest('seats show the account and look, and a change made mid-game waits for 
   const r=await ana.call('/shop/buy',{item:'nightshade'});
   assert.equal(r.data.later,true);assert.deepEqual(r.data.look,{frame:'nightshade'});
   assert.deepEqual((await others[0].call(`?code=${code}`)).data.players[0].look,{frame:'brass'});
-  await ana.call('/',{type:'rematch',code});
+  const vote=(await others[0].call('/',{type:'propose',kind:'lobby',code})).data.proposal;
+  for(const o of others.slice(1,3))await o.call('/',{type:'proposal_vote',proposal:vote.id,code,yes:true});
   assert.deepEqual((await others[0].call(`?code=${code}`)).data.players[0].look,{frame:'nightshade'});
   assert.equal((await others[0].call(`?code=${code}`)).data.players[1].account,'Bo');
 });

@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newGame,join,start,act,view,kill,poisoned,impaired,beginNight,advanceNight,endDay,tick,COUNTS} from '../lib/engine.mjs';
+import {newGame,join,spectate,start,act,view,kill,poisoned,impaired,beginNight,advanceNight,endDay,tick,seen,COUNTS} from '../lib/engine.mjs';
 import {ROLES} from '../lib/characters.mjs';
 import './accounts.test.mjs';
 import './leaderboard.test.mjs';
 function game(roles=['chef','soldier','slayer','poisoner','imp']){const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<roles.length;i++)join(g,`P${i}`,`s${i}`);start(g,roles);return g;}
-function choose(g,targets){const q=g.pending;act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:targets.map(n=>g.players[n].id)});}
-function finishNight(g){let n=0;while(g.phase==='night'&&g.pending&&n++<30){const q=g.pending;let choices=g.players.filter(p=>!q.notSelf||p.id!==q.id).slice(0,q.count);act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:choices.map(p=>p.id)});}return g;}
+function choose(g,targets){const q=g.pending;act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:targets.map(n=>g.players[n].id)});dawnNow(g);}
+// Ending a game early takes a majority vote; everyone but the host agrees here.
+function voteToLobby(g){act(g,g.players[1].session,{type:'propose',kind:'lobby'});g.players.slice(2).forEach(p=>{if(g.proposal)act(g,p.session,{type:'proposal_vote',proposal:g.proposal.id,yes:true});});assert.equal(g.phase,'lobby');}
+function finishNight(g){let n=0;while(g.phase==='night'&&g.pending&&n++<30){const q=g.pending;let choices=g.players.filter(p=>!q.notSelf||p.id!==q.id).slice(0,q.count);act(g,g.players.find(p=>p.id===q.id).session,{type:'night',key:q.key,targets:choices.map(p=>p.id)});}return dawnNow(g);}
+// Dawn comes 5–15 seconds after the last night choice; tests skip ahead to it.
+function dawnNow(g){if(g.phase==='night'&&!g.pending&&g.dawnAt)tick(g,g.dawnAt);return g;}
 function daytime(g){finishNight(g);assert.equal(g.phase,'day');return g;}
 test('standard setup and Baron counts for every supported population',()=>{for(let n=5;n<=15;n++)for(let run=0;run<15;run++){const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<n;i++)join(g,`P${i}`,`s${i}`);start(g);const actual=t=>g.players.filter(p=>ROLES[p.role].type===t).length;const baron=g.players.some(p=>p.role==='baron')?2:0;assert.equal(actual('townsfolk'),COUNTS[n][0]-baron);assert.equal(actual('outsider'),COUNTS[n][1]+baron);assert.equal(actual('minion'),COUNTS[n][2]);assert.equal(actual('demon'),1);assert.equal(new Set(g.players.map(p=>p.shown)).size,n);assert.equal(g.bluffs.length,3);for(const b of g.bluffs)assert(!g.players.some(p=>p.role===b||p.shown===b));}});
 test('Drunk identity and all other secrets stay server-side',()=>{const g=game(['drunk','soldier','slayer','baron','imp']);const v=view(g,'s0');assert.notEqual(v.me.role,'drunk');assert(!('redHerring' in v));assert(!('decisions' in v));for(const p of v.players){assert(!('session' in p));assert(!('role' in p));}assert.throws(()=>view(g,'stranger'));});
@@ -51,8 +55,8 @@ test('leaving a group ends access to it; the last member closes it',()=>{const g
 test('host can kick from the lobby only, and the player may rejoin',()=>{const g=newGame('ABCDEFGH','A','a');join(g,'B','b');join(g,'C','c');const b=g.players[1].id;assert.throws(()=>act(g,'c',{type:'kick',target:b}));assert.throws(()=>act(g,'a',{type:'kick',target:g.host}));act(g,'a',{type:'kick',target:b});assert.equal(g.players.length,2);assert.throws(()=>view(g,'b'));join(g,'B','b');assert.equal(g.players.length,3);const h=daytime(game());assert.throws(()=>act(h,'s0',{type:'kick',target:h.players[1].id}));});
 test('kicking removes the player from lobby groups',()=>{const g=newGame('ABCDEFGH','A','a');join(g,'B','b');join(g,'C','c');act(g,'a',{type:'group',title:'Plot',members:[g.players[1].id,g.players[2].id]});act(g,'a',{type:'kick',target:g.players[1].id});assert.equal(g.groups[0].members.length,2);});
 test('new game keeps the room, seats and host but clears the last story',()=>{const g=daytime(game());const ids=g.players.map(p=>p.id),host=g.host;act(g,'s0',{type:'chat',text:'old'});act(g,'s0',{type:'group',title:'Plot',members:[ids[1],ids[2]]});g.poison=null;kill(g,g.players[4],'execution');assert.equal(g.phase,'ended');assert.throws(()=>act(g,'s1',{type:'rematch'}));act(g,'s0',{type:'rematch'});assert.equal(g.code,'ABCDEFGH');assert.equal(g.round,2);assert.equal(g.phase,'lobby');assert.equal(g.host,host);assert.deepEqual(g.players.map(p=>p.id),ids);const v=view(g,'s1');assert.equal(v.messages.length,0);assert.equal(v.groups.length,0);assert.equal(v.me.inbox.length,0);assert.equal(v.winner,undefined);assert.equal(v.day,0);assert(g.players.every(p=>p.alive&&p.ghost&&!p.role&&!p.claim));start(g);assert.notEqual(g.phase,'lobby');assert.equal(g.day,1);});
-test('host can reset a game in progress, day or night, and a latecomer can then join',()=>{for(const g of [daytime(game()),game(['chef','soldier','slayer','poisoner','imp'])]){const ids=g.players.map(p=>p.id);assert.throws(()=>act(g,'s1',{type:'rematch'}));act(g,'s0',{type:'rematch'});assert.equal(g.phase,'lobby');assert.equal(g.code,'ABCDEFGH');assert.deepEqual(g.players.map(p=>p.id),ids);assert.equal(g.pending,null);assert.equal(view(g,'s1').interrupted,true);assert(g.players.every(p=>!p.role&&p.alive));join(g,'Late','late');assert.equal(g.players.length,6);start(g);assert(g.players.every(p=>p.role));assert.equal(view(g,'s1').interrupted,undefined);}});
-test('reset rerolls roles and cannot fire from the lobby',()=>{const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<7;i++)join(g,`P${i}`,`s${i}`);assert.throws(()=>act(g,'s0',{type:'rematch'}));const deals=new Set();repeat(30,()=>{start(g);deals.add(g.players.map(p=>p.role).join());act(g,'s0',{type:'rematch'});});assert(deals.size>1);});
+test('a majority vote resets a game in progress, day or night, and a latecomer can then join',()=>{for(const g of [daytime(game()),game(['chef','soldier','slayer','poisoner','imp'])]){const ids=g.players.map(p=>p.id);assert.throws(()=>act(g,'s1',{type:'rematch'}));assert.throws(()=>act(g,'s0',{type:'rematch'}));voteToLobby(g);assert.equal(g.phase,'lobby');assert.equal(g.code,'ABCDEFGH');assert.deepEqual(g.players.map(p=>p.id),ids);assert.equal(g.pending,null);assert.equal(view(g,'s1').interrupted,true);assert(g.players.every(p=>!p.role&&p.alive));join(g,'Late','late');assert.equal(g.players.length,6);start(g);assert(g.players.every(p=>p.role));assert.equal(view(g,'s1').interrupted,undefined);}});
+test('reset rerolls roles and cannot fire from the lobby',()=>{const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<7;i++)join(g,`P${i}`,`s${i}`);assert.throws(()=>act(g,'s0',{type:'rematch'}));const deals=new Set();repeat(30,()=>{start(g);deals.add(g.players.map(p=>p.role).join());g.players.forEach(p=>{p.proposedAt=0;});voteToLobby(g);});assert(deals.size>1);});
 const attackMayor=(roles,dead=[])=>{const g=daytime(game(roles));dead.forEach(i=>{g.players[i].alive=false;});beginNight(g);while(g.pending?.role!=='imp')choose(g,[g.players.findIndex(p=>p.role==='virgin')]);choose(g,[0]);finishNight(g);return g;};
 test('Mayor attack at the final three is never overruled',()=>{repeat(50,()=>{const g=attackMayor(['mayor','soldier','virgin','baron','imp'],[1,2]);assert.equal(g.players[0].alive,false);assert.equal(g.winner,'evil');});});
 test('Mayor attack at four alive either lands or costs evil, never good information',()=>{const seen=new Set();repeat(200,()=>{const g=attackMayor(['mayor','empath','soldier','virgin','baron','imp'],[2,3]);assert(g.players[1].alive&&g.players[5].alive);const died=g.players.filter((p,i)=>!p.alive&&i!==2&&i!==3).map(p=>p.role);assert.equal(died.length,1);seen.add(died[0]);});assert.deepEqual([...seen].sort(),['baron','mayor']);});
@@ -61,13 +65,13 @@ test('a message keeps its client id, trimmed to size',()=>{const g=daytime(game(
 test('the final reveal has each initial character after a star pass',()=>{const g=daytime(game(['chef','soldier','slayer','baron','imp']));beginNight(g);choose(g,[4]);assert.equal(g.players[3].role,'imp');g.poison=null;kill(g,g.players[3],'execution');assert.equal(g.phase,'ended');const v=view(g,'s0');assert.equal(v.players[3].initialRole,'baron');assert.equal(v.players[4].initialRole,'imp');assert.equal(v.players.filter(p=>p.initialRole==='imp').length,1);});
 test('the final reveal has the character a Drunk believed in',()=>{const g=daytime(game(['drunk','soldier','slayer','baron','imp']));const believed=g.players[0].shown;kill(g,g.players[4],'execution');const p=view(g,'s0').players[0];assert.equal(p.initialRole,'drunk');assert.equal(p.shown,believed);});
 function moonGame(roles,names=[]){const g=newGame('ABCDEFGH',names[0]||'P0','s0');for(let i=1;i<roles.length;i++)join(g,names[i]||`P${i}`,`s${i}`);act(g,'s0',{type:'settings',daySeconds:180,script:'bmr'});start(g,roles);return g;}
-function moonDay(g,pickFor=()=>null){let n=0;while(g.phase==='night'&&g.pending&&n++<60){const q=g.pending,me=g.players.find(p=>p.id===q.id),fixed=pickFor(q);const pool=g.players.filter(p=>(!q.notSelf||p!==me)&&(!q.aliveOnly||p.publicAlive)&&(!q.deadOnly||!p.publicAlive)&&p.id!==q.notId).slice(0,q.count);act(g,me.session,fixed==='skip'?{type:'night',key:q.key,skip:true}:{type:'night',key:q.key,targets:(fixed||pool).map(p=>p.id),character:q.character?'fool':undefined});}return g;}
+function moonDay(g,pickFor=()=>null){let n=0;while(g.phase==='night'&&g.pending&&n++<60){const q=g.pending,me=g.players.find(p=>p.id===q.id),fixed=pickFor(q);const pool=g.players.filter(p=>(!q.notSelf||p!==me)&&(!q.aliveOnly||p.publicAlive)&&(!q.deadOnly||!p.publicAlive)&&p.id!==q.notId).slice(0,q.count);act(g,me.session,fixed==='skip'?{type:'night',key:q.key,skip:true}:{type:'night',key:q.key,targets:(fixed||pool).map(p=>p.id),character:q.character?'fool':undefined});}return dawnNow(g);}
 // A Tinker can die at random, so these rule tests keep it drunk.
 const moonNext=(g,pickFor)=>{g.players.filter(p=>p.role==='tinker').forEach(p=>g.drunks.push({id:p.id,until:g.day+1}));beginNight(g);return moonDay(g,pickFor);};
-test('host picks the game mode and a three-minute day; a new game keeps them',()=>{const g=newGame('ABCDEFGH','A','a');join(g,'B','b');assert.equal(g.settings.script,'tb');assert.throws(()=>act(g,'b',{type:'settings',daySeconds:240,script:'bmr'}));assert.throws(()=>act(g,'a',{type:'settings',daySeconds:240,script:'nope'}));act(g,'a',{type:'settings',daySeconds:180,script:'bmr'});assert.equal(g.settings.daySeconds,180);assert.equal(g.settings.script,'bmr');for(let i=2;i<7;i++)join(g,`P${i}`,`s${i}`);start(g);assert(g.players.every(p=>ROLES[p.role].script==='bmr'));act(g,'a',{type:'rematch'});assert.equal(g.settings.script,'bmr');assert.equal(g.settings.daySeconds,180);});
+test('host picks the game mode and a three-minute day; a new game keeps them',()=>{const g=newGame('ABCDEFGH','A','a');join(g,'B','b');assert.equal(g.settings.script,'tb');assert.throws(()=>act(g,'b',{type:'settings',daySeconds:240,script:'bmr'}));assert.throws(()=>act(g,'a',{type:'settings',daySeconds:240,script:'nope'}));act(g,'a',{type:'settings',daySeconds:180,script:'bmr'});assert.equal(g.settings.daySeconds,180);assert.equal(g.settings.script,'bmr');for(let i=2;i<7;i++)join(g,`P${i}`,`s${i}`);start(g);assert(g.players.every(p=>ROLES[p.role].script==='bmr'));voteToLobby(g);assert.equal(g.settings.script,'bmr');assert.equal(g.settings.daySeconds,180);});
 test('Bad Moon Rising setup counts, with the Godfather adding or removing one Outsider',()=>{for(let n=5;n<=15;n++)for(let run=0;run<25;run++){const g=newGame('ABCDEFGH','P0','s0');g.settings.script='bmr';for(let i=1;i<n;i++)join(g,`P${i}`,`s${i}`);start(g);const c=t=>g.players.filter(p=>ROLES[p.role].type===t).length;assert(g.players.every(p=>ROLES[p.role].script==='bmr'));assert.equal(new Set(g.players.map(p=>p.role)).size,n);assert.equal(c('minion'),COUNTS[n][2]);assert.equal(c('demon'),1);const delta=c('outsider')-COUNTS[n][1];assert(g.players.some(p=>p.role==='godfather')?Math.abs(delta)===1:delta===0);assert.equal(c('townsfolk'),COUNTS[n][0]-delta);assert(!g.bluffs.includes('lunatic'));assert.equal(g.bluffs.length,3);}});
 test('Trouble Brewing never deals a Bad Moon Rising character',()=>{repeat(40,()=>{const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<15;i++)join(g,`P${i}`,`s${i}`);start(g);assert(g.players.every(p=>ROLES[p.role].script==='tb'));});});
-test('a player with too few legal targets is skipped instead of freezing the night',()=>{const g=moonGame(['chambermaid','minstrel','tinker','mastermind','zombuul']);moonDay(g);[1,2,3].forEach(i=>{g.players[i].alive=false;});g.diedToday=true;g.queue=[];g.players.forEach(p=>{p.publicAlive=p.alive;});g.phase='night';g.queue=[{id:g.players[0].id,role:'chambermaid'}];g.pending=null;advanceNight(g);assert.equal(g.pending,null);assert.equal(g.phase,'day');});
+test('a player with too few legal targets is skipped instead of freezing the night',()=>{const g=moonGame(['chambermaid','minstrel','tinker','mastermind','zombuul']);moonDay(g);[1,2,3].forEach(i=>{g.players[i].alive=false;});g.diedToday=true;g.queue=[];g.players.forEach(p=>{p.publicAlive=p.alive;});g.phase='night';g.queue=[{id:g.players[0].id,role:'chambermaid'}];g.pending=null;advanceNight(g);assert.equal(g.pending,null);dawnNow(g);assert.equal(g.phase,'day');});
 test('Pukka poisons on the first night and kills the previous target later',()=>{const g=moonGame(['chambermaid','minstrel','tinker','assassin','pukka']);moonDay(g,q=>q.role==='pukka'?[g.players[1]]:null);assert.equal(g.players.filter(p=>!p.alive).length,0);assert(poisoned(g,g.players[1]));moonNext(g,q=>q.role==='pukka'?[g.players[0]]:q.role==='assassin'?'skip':null);assert(!g.players[1].alive);assert(g.players[0].alive);assert(poisoned(g,g.players[0]));});
 test('a drunk Pukka freezes its poison instead of killing',()=>{const g=moonGame(['chambermaid','minstrel','tinker','assassin','pukka']);moonDay(g,q=>q.role==='pukka'?[g.players[1]]:null);g.drunks.push({id:g.players[4].id,until:99});moonNext(g,q=>q.role==='pukka'?[g.players[0]]:q.role==='assassin'?'skip':null);assert(g.players[1].alive);assert.equal(g.poison.target,g.players[1].id);});
 test('the first time the Fool would die, they do not',()=>{const g=moonGame(['fool','minstrel','tinker','assassin','zombuul']);moonDay(g);g.phase='day';kill(g,g.players[0],'night');assert(g.players[0].alive);kill(g,g.players[0],'night');assert(!g.players[0].alive);});
@@ -128,3 +132,79 @@ test('an online player who has not readied still holds the day',()=>{const g=day
 test('the last holdout going offline ends the day on the next poll',()=>{const g=daytime(game()),afk=g.players.filter(p=>p.alive).at(-1);g.players.filter(p=>p.alive&&p!==afk).forEach(p=>act(g,p.session,{type:'ready'}));assert.equal(tick(g),false);assert.equal(tick(g,Date.now(),new Set([afk.id])),true);assert.notEqual(g.phase,'day');});
 test('a table where every living player is offline waits for the timer',()=>{const g=daytime(game());assert.equal(tick(g,Date.now(),new Set(g.players.filter(p=>p.alive).map(p=>p.id))),false);assert.equal(g.phase,'day');});
 test('going offline does not cut a vote short',()=>{const g=daytime(game()),[a,b]=g.players.filter(p=>p.alive);act(g,a.session,{type:'nominate',target:b.id});assert.equal(tick(g,Date.now(),new Set(g.players.filter(p=>p!==a).map(p=>p.id))),false);assert(g.nomination);});
+test('a night choice nobody makes within 30 seconds of seeing it is made by the Storyteller, who says so',()=>{
+ const g=game(),q=g.pending,t0=Date.now();assert.equal(q.role,'poisoner');
+ assert.equal(seen(g,'s0',t0),false);assert.equal(g.pending.deadline,undefined);
+ assert.equal(seen(g,'s3',t0),true);assert.equal(g.pending.deadline,t0+30000);assert.equal(seen(g,'s3',t0+5000),false);
+ assert.equal(tick(g,t0+29000),false);assert.equal(g.pending?.key,q.key);
+ assert.equal(tick(g,t0+30000),true);assert.notEqual(g.pending?.key,q.key);
+ assert(g.players[3].inbox.some(i=>/did not choose in time, so the Storyteller chose/.test(i.text)));
+ assert(g.choices.some(c=>c.role==='poisoner'&&c.auto&&c.targets.length===1));
+});
+test('an offline player’s night choice is made at once, and a prompt nobody has seen does not time out',()=>{
+ const g=game();assert.equal(tick(g,Date.now()+120000),false);assert(g.pending);
+ assert.equal(tick(g,Date.now(),new Set([g.players[3].id])),true);assert.equal(g.pending,null);assert.equal(g.phase,'night');assert(g.dawnAt);
+});
+test('a timed-out Demon never attacks itself or its own team',()=>{repeat(60,()=>{
+ const g=daytime(game(['chef','monk','slayer','poisoner','imp']));beginNight(g);
+ while(g.pending&&g.pending.role!=='imp')choose(g,[0]);
+ assert.equal(g.pending.role,'imp');tick(g,Date.now(),new Set([g.players[4].id]));
+ assert.equal(g.players[4].role,'imp');assert(g.players[4].alive);assert(g.players[3].alive);
+});});
+test('dawn always comes 5–15 seconds after the last night choice, even when nobody wakes',()=>{repeat(40,()=>{
+ const t=Date.now(),g=game(['chef','soldier','saint','recluse','imp']);
+ assert.equal(g.phase,'night');assert.equal(g.pending,null);
+ assert(g.dawnAt>=t+5000&&g.dawnAt<=Date.now()+15000,`dawn in ${g.dawnAt-t}ms`);
+ assert.equal(tick(g,g.dawnAt-1),false);assert.equal(g.phase,'night');
+ assert.equal(tick(g,g.dawnAt),true);assert.equal(g.phase,'day');
+});});
+test('a Butler can only raise their hand while their master’s is up, and it comes down with theirs',()=>{
+ const g=daytime(game(['butler','soldier','slayer','poisoner','imp'])),[butler,master]=g.players;butler.master=master.id;
+ act(g,'s2',{type:'nominate',target:g.players[4].id});const n=g.nomination.id,vote=(s,yes)=>act(g,s,{type:'vote',nomination:n,yes});
+ assert.throws(()=>vote('s0',true),/master/);
+ vote('s1',true);vote('s0',true);assert.equal(g.nomination.hands[butler.id],true);
+ vote('s1',false);assert.equal(g.nomination.hands[butler.id],false);
+ vote('s1',true);vote('s0',true);vote('s2',true);tick(g,g.nomination.deadline);
+ assert.equal(g.ballots.at(-1).count,3);
+});
+test('a majority can end the game and reveal every character, with no winner',()=>{
+ const g=daytime(game());act(g,'s1',{type:'propose',kind:'reveal'});assert(g.proposal);
+ assert.throws(()=>act(g,'s2',{type:'propose',kind:'lobby'}));
+ act(g,'s2',{type:'proposal_vote',proposal:g.proposal.id,yes:true});assert.equal(g.phase,'day');
+ act(g,'s3',{type:'proposal_vote',proposal:g.proposal.id,yes:true});
+ assert.equal(g.phase,'ended');assert.equal(g.winner,null);assert(g.called);
+ const v=view(g,'s0');assert(v.called);assert(v.players.every(p=>p.role));
+});
+test('a vote to end the game fails without a majority or after a minute, and offline players are not counted',()=>{
+ const g=daytime(game());act(g,'s1',{type:'propose',kind:'lobby'});
+ for(const s of ['s2','s3','s4'])act(g,s,{type:'proposal_vote',proposal:g.proposal.id,yes:false});
+ assert.equal(g.proposal,null);assert.equal(g.phase,'day');assert.throws(()=>act(g,'s1',{type:'propose',kind:'lobby'}),/recently/);
+ act(g,'s2',{type:'propose',kind:'reveal'});assert.equal(tick(g,g.proposal.deadline),true);assert.equal(g.proposal,null);assert.equal(g.phase,'day');
+ const away=new Set([g.players[1].id,g.players[4].id]);
+ act(g,'s3',{type:'propose',kind:'lobby'},away);assert(g.proposal);
+ act(g,'s0',{type:'proposal_vote',proposal:g.proposal.id,yes:true},away);assert.equal(g.phase,'lobby');
+});
+test('spectators can watch at any time, see only public things, and cannot take part',()=>{
+ const g=daytime(game());assert.throws(()=>join(g,'Late','late'));spectate(g,'Watcher','w');
+ act(g,'s0',{type:'chat',text:'hello town'});g.players[0].lastMessage=0;act(g,'s0',{type:'chat',text:'psst',to:g.players[1].id});
+ const v=view(g,'w');assert(v.me.spectator);assert.deepEqual(v.messages.map(m=>m.text),['hello town']);
+ assert(v.players.every(p=>!('role' in p)));assert.equal(v.me.inbox.length,0);assert.equal(v.pending,null);assert.deepEqual(v.groups,[]);
+ for(const type of ['chat','ready','vote','nominate','propose','claim'])assert.throws(()=>act(g,'w',{type,text:'hi',kind:'lobby'}),/Spectators/);
+ assert.deepEqual(view(g,'s1').spectators,['Watcher']);assert.throws(()=>spectate(g,'P1','x'),/taken/);
+ act(g,'w',{type:'leave'});assert.throws(()=>view(g,'w'));
+});
+test('a spectator can take a seat in the lobby, and spectators stay for the next game',()=>{
+ const g=newGame('ABCDEFGH','A','a');spectate(g,'W','w');join(g,'W','w');assert.equal(g.spectators.length,0);assert(g.players.some(p=>p.session==='w'));
+ const h=game();spectate(h,'V','v');voteToLobby(h);assert.equal(view(h,'v').me.spectator,true);
+});
+test('the end-of-game log shows night choices and what each player was told, in order, and never whispers',()=>{
+ const g=daytime(game(['empath','soldier','slayer','poisoner','imp']));
+ act(g,'s0',{type:'chat',text:'secret plan',to:g.players[1].id});
+ assert.equal(view(g,'s0').timeline,undefined);
+ act(g,'s1',{type:'propose',kind:'reveal'});for(const s of ['s2','s3'])act(g,s,{type:'proposal_vote',proposal:g.proposal.id,yes:true});
+ const tl=view(g,'s0').timeline;
+ assert(tl.some(r=>r.kind==='choice'&&r.by==='P3'&&r.role==='poisoner'&&r.targets.length===1));
+ assert(tl.some(r=>r.kind==='told'&&r.to==='P0'));assert(tl.some(r=>r.kind==='event'));
+ assert(!JSON.stringify(tl).includes('secret plan'));assert(!tl.some(r=>/^Your choice/.test(r.text||'')));
+ assert(tl.every((r,i)=>!i||tl[i-1].n<=r.n));
+});
