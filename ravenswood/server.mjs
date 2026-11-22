@@ -26,10 +26,13 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
   const router=express(),rooms=new Map(),presence=new Map();
   // Presence changes on every poll, so it stays out of the saved game.
   const markSeen=(code,session)=>presence.set(`${code}:${session}`,{at:Date.now(),closed:false});
+  const isAway=(code,session,now=Date.now())=>{const seen=presence.get(`${code}:${session}`);return !seen||seen.closed||now-seen.at>awayAfter;};
+  // Offline players count as ready for dusk, so the engine is told who they are on every poll and action.
+  const awayIds=game=>new Set(game.players.filter(p=>isAway(game.code,p.session)).map(p=>p.id));
   function send(req,res,game,session){
     markSeen(game.code,session);
     const data=view(game,session),now=Date.now();
-    data.players.forEach((p,i)=>{const seen=presence.get(`${game.code}:${game.players[i].session}`);p.away=!seen||seen.closed||now-seen.at>awayAfter;});
+    data.players.forEach((p,i)=>{p.away=isAway(game.code,game.players[i].session,now);});
     const record=leaderboard.statusFor(game,session);if(record)data.record=record;
     reply(req,res,data);
   }
@@ -44,7 +47,8 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
   router.get('/',(req,res)=>{try{
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.
-    if(tick(game))save(code,game);
+    markSeen(code,session);
+    if(tick(game,Date.now(),awayIds(game)))save(code,game);
     send(req,res,game,session);
   }catch(e){res.status(400).json({error:e.message});}});
   router.post('/presence',(req,res)=>{
@@ -68,10 +72,10 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     const code=codeOf(data.code),game=load(code);
     if(data.type==='join')join(game,nameOf(data.name),session,avatar,who);
     else{
-      view(game,session);
+      view(game,session);markSeen(code,session);
       // Commit elapsed transitions independently: stale actions may fail but cannot rewind time.
-      if(tick(game)){save(code,game);return send(req,res,game,session);}
-      act(game,session,data);
+      if(tick(game,Date.now(),awayIds(game))){save(code,game);return send(req,res,game,session);}
+      act(game,session,data,awayIds(game));
     }
     save(code,game);
     if(data.type==='leave')return reply(req,res,{left:true});

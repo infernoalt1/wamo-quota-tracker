@@ -444,7 +444,13 @@ function finishVote(g){
  log(g,`${player(g,n.target).name}: ${count} vote${count===1?'':'s'}${qualified?'':' — below the execution threshold'}.`);
  g.nomination=null;g.deadline=Date.now()+Math.max(30000,n.remaining);
 }
-export function tick(g,now=Date.now()){
+// Offline players count as ready, but someone still at the table has to be the one waiting on dusk.
+function allReady(g,away){
+ const here=live(g).filter(x=>!away.has(x.id));
+ return here.length>0&&here.every(x=>x.ready);
+}
+// `away` holds the ids of players the server sees as offline; it never enters the saved game.
+export function tick(g,now=Date.now(),away=new Set()){
  if(g.paused||g.phase!=='day')return false;
  if(g.tinkerAt&&now>=g.tinkerAt){
   g.tinkerAt=null;
@@ -452,9 +458,11 @@ export function tick(g,now=Date.now()){
   if(p){if(!spared(g,p,'day',{}))log(g,`${p.name} dies.`);audit(g,'Tinker','Chosen to die during the day',`The Tinker might die at any time. Balance score ${pressure(g).toFixed(2)}.`);kill(g,p,'day');return true;}
  }
  if(g.nomination&&now>=g.nomination.deadline){finishVote(g);return true;}
- if(!g.nomination&&g.deadline&&now>=g.deadline){endDay(g);return true;}return false;
+ if(!g.nomination&&g.deadline&&now>=g.deadline){endDay(g);return true;}
+ // Someone dropping offline can be the last thing the ready table was waiting for.
+ if(!g.nomination&&away.size&&allReady(g,away)){endDay(g);return true;}return false;
 }
-export function act(g,session,data){
+export function act(g,session,data,away=new Set()){
  const p=g.players.find(x=>x.session===session);assert(p,'Join this room first.');
  const t=player(g,data.target);
  if(data.type==='chat'){
@@ -508,7 +516,7 @@ export function act(g,session,data){
  }
  if(data.type==='ready'){
   assert(!g.nomination,'Finish the current vote first.');p.ready=!p.ready;
-  if(live(g).every(x=>x.ready))endDay(g);return;
+  if(allReady(g,away))endDay(g);return;
  }
  if(data.type==='nominate'){
   assert(!g.nomination,'A nomination is already in progress.');assert(p.alive&&!p.nominator,'You can nominate once per day while alive.');assert(t&&!t.nominated,'That player has already been nominated today.');
