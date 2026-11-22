@@ -52,4 +52,6 @@ export const ROLES = Object.freeze(Object.fromEntries([
 ].map(([id, name, type, help, script = 'tb']) => [id, Object.freeze({ id, name, type, help, script, wiki: wiki(name) })])));
 
 export const ROLE_LIST = Object.freeze(Object.values(ROLES));
+// Townsfolk, Outsiders and Minions for each table size; there is always one Demon.
+export const COUNTS = Object.freeze({5:[3,0,1],6:[3,1,1],7:[5,0,1],8:[5,1,1],9:[5,2,1],10:[7,0,2],11:[7,1,2],12:[7,2,2],13:[9,0,3],14:[9,1,3],15:[9,2,3]});
 export const SCRIPTS = Object.freeze({ tb: 'Trouble Brewing', bmr: 'Bad Moon Rising' });
