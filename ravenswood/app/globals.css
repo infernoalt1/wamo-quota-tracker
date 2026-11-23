@@ -573,20 +573,9 @@ button.leader-row:hover{background:#ffffff08}
 .table-vote-actions{display:flex;gap:6px;margin-left:auto}
 .table-vote-actions .compact{min-height:30px;padding:4px 10px}
 
-/* Day timer: a thin ring around the centre of the table that drains as time runs out.
-   Gold for the day, brighter and pulsing in the last 30 seconds, rose while a vote runs, grey when paused. */
-.timer-ring{position:absolute;left:27.5%;top:27.5%;width:45%;height:45%;pointer-events:none;overflow:visible}
-.timer-ring circle{fill:none;stroke-width:1.1}
-.timer-track{stroke:#ffffff0d}
-.timer-left{stroke:#c7ab76;opacity:.5;stroke-linecap:round}
-.timer-ring.late .timer-left{stroke:#f0c870;opacity:1;animation:timer-pulse 1s ease-in-out infinite}
-.timer-ring.voting .timer-left{stroke:#ce8a88;opacity:.85}
-.timer-ring.paused .timer-left{stroke:#8d8590;opacity:.35;animation:none}
-@keyframes timer-pulse{50%{opacity:.45}}
-
 /* The vote count: a clock hand ticks round to each seat in turn, and every raised hand lights up as it is counted. */
-.tally-hand{position:absolute;inset:0;pointer-events:none}
-.tally-hand i{position:absolute;left:50%;top:15%;bottom:50%;width:2px;margin-left:-1px;border-radius:2px;background:linear-gradient(to top,#c7ab7600,#e8cf95)}
+.tally-hand{position:absolute;left:50%;top:50%;width:0;height:0;pointer-events:none}
+.tally-hand i{position:absolute;left:-1px;bottom:0;width:2px;height:35cqmin;border-radius:2px;background:linear-gradient(to top,#c7ab7600,#e8cf95)}
 .tally-hand i::before{content:'';position:absolute;top:-4px;left:-3px;width:8px;height:8px;border-radius:50%;background:#f0d9a6;box-shadow:0 0 10px #f0d9a6}
 .centerpiece.tally{inset:34%;gap:2px;text-align:center;border-radius:50%;background:radial-gradient(circle,#17161c 58%,#17161c00 71%)}
 .tally-label{max-width:100%;font-size:clamp(10px,1.9cqmin,12px);letter-spacing:1.4px;text-transform:uppercase;color:#cdb98d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -595,20 +584,20 @@ button.leader-row:hover{background:#ffffff08}
 .tally-count.enough{color:#f0d9a6;text-shadow:0 0 24px #c7ab7680}
 .centerpiece.tally.done .center-sub{color:var(--text)}
 .seat.tally-on .seat-token{border-color:#e8cf95;box-shadow:0 0 0 3px #e8cf9555}
-.seat.tally-yes .seat-token{border-color:var(--gold);box-shadow:0 0 0 4px #c7ab7680,0 0 18px #c7ab7666;animation:tally-pop .35s ease-out}
+.seat.tally-yes .seat-token{border-color:var(--gold);box-shadow:0 0 0 4px #c7ab7680,0 0 18px #c7ab7666;animation:tally-pop .45s ease-out}
 @keyframes tally-bump{from{transform:scale(1.25)}}
-@keyframes tally-pop{40%{transform:scale(1.14)}}
+@keyframes tally-pop{0%{box-shadow:0 0 0 0 #f0d9a6}35%{box-shadow:0 0 0 7px #f0d9a6aa,0 0 30px #f0d9a6aa}}
 
 /* Dusk and dawn: a soft glow inside the circle only; the rest of the screen stays as it is. */
-.circle-sweep{position:absolute;inset:4%;border-radius:50%;pointer-events:none}
+.circle-sweep{position:absolute;inset:9%;border-radius:50%;pointer-events:none}
 .circle-sweep.dusk{background:radial-gradient(circle,#2c2448 0%,#2c244800 70%);animation:sweep-dusk 1.6s ease-in-out .25s both}
 .circle-sweep.dawn{background:radial-gradient(circle,#f3d9a055 0%,#f3d9a022 40%,#f3d9a000 68%);animation:sweep-dawn 1.6s ease-out both}
-@keyframes sweep-dusk{0%{opacity:0;transform:scale(1.1)}45%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.92)}}
+@keyframes sweep-dusk{0%{opacity:0;transform:scale(1.08)}45%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.92)}}
 @keyframes sweep-dawn{0%{opacity:0;transform:scale(.35)}40%{opacity:1}100%{opacity:0;transform:scale(1.08)}}
 /* A seat that has just died, by execution or at night, flashes red once. */
 .seat.falling .seat-token{animation:seat-fall 1.6s ease-out both}
 .seat.falling .seat-name{animation:seat-fall-name 1.6s ease-out both}
-@keyframes seat-fall{0%{box-shadow:0 0 0 0 #e0575700}20%{box-shadow:0 0 0 6px #e05757aa,0 0 26px #e0575788;transform:scale(1.1)}100%{box-shadow:0 0 0 0 #e0575700;transform:scale(1)}}
+@keyframes seat-fall{0%{box-shadow:0 0 0 0 #e0575700}20%{box-shadow:0 0 0 6px #e05757aa,0 0 26px #e0575788}100%{box-shadow:0 0 0 0 #e0575700}}
 @keyframes seat-fall-name{20%{color:#f0a0a6}}
 
 /* Who is in play: the setup chart in the character list, and a one-line summary under the role card. */
@@ -630,3 +619,24 @@ button.leader-row:hover{background:#ffffff08}
 .setup-line{display:flex;align-items:center;gap:7px;padding:2px;border-radius:4px;font-size:12px;line-height:1.4;color:var(--muted);text-align:left}
 .setup-line:hover{color:var(--text)}
 .setup-line svg{flex-shrink:0}
+
+/* The running clock: during the day its rim drains as time runs out and the hand points at the end of what is left.
+   Gold for the day, brighter and pulsing in the last 30 seconds, rose while a vote runs, grey when paused. */
+.clock-art.timed{opacity:1}
+.clock-art.timed>:not(.clock-rim):not(.clock-hand){opacity:.6}
+.clock-rim,.clock-hand{stroke:#d9bd84;stroke-linecap:round}
+.clock-rim{stroke-width:3.2}
+.clock-hand{stroke-width:2.4}
+.clock-art.late .clock-rim,.clock-art.late .clock-hand{stroke:#f3cf7a;animation:timer-pulse 1s ease-in-out infinite}
+.clock-art.voting .clock-rim,.clock-art.voting .clock-hand{stroke:#d9918f}
+.clock-art.paused .clock-rim,.clock-art.paused .clock-hand{stroke:#8d8590}
+@keyframes timer-pulse{50%{opacity:.5}}
+/* Who is watching: a small pill next to the phase, opening a list of names. */
+.topline-right{display:flex;align-items:center;gap:8px;min-width:0}
+.watchers{position:relative}
+.watchers summary{list-style:none;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#b9b2c4;background:#1f1d25;border:1px solid #3b3345;border-radius:30px;padding:5px 11px;cursor:pointer;white-space:nowrap}
+.watchers summary::-webkit-details-marker{display:none}
+.watchers summary:hover,.watchers[open] summary{color:var(--text);border-color:#5d5070}
+.watchers-list{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:220px;display:grid;gap:6px;padding:12px 14px;background:#1f1d25;border:1px solid #3b3345;border-radius:8px;box-shadow:0 12px 30px #0008;font-size:13px}
+.watchers-list em{font-style:normal;font-size:10px;color:var(--gold)}
+.watchers-list small{font-size:11px;line-height:1.4;margin-top:2px}
