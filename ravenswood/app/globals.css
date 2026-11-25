@@ -640,3 +640,78 @@ button.leader-row:hover{background:#ffffff08}
 .watchers-list{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:220px;display:grid;gap:6px;padding:12px 14px;background:#1f1d25;border:1px solid #3b3345;border-radius:8px;box-shadow:0 12px 30px #0008;font-size:13px}
 .watchers-list em{font-style:normal;font-size:10px;color:var(--gold)}
 .watchers-list small{font-size:11px;line-height:1.4;margin-top:2px}
+
+/* Mystery chest. The shake and the reveal are flat 2D keyframes, so they work on school computers too. */
+.chest-panel{display:flex;align-items:center;gap:18px;margin:14px 0 4px;padding:14px 16px;border:1px solid #5a4a30;border-radius:10px;background:radial-gradient(ellipse at 20% 50%,#3a2d1a,#201e27 70%)}
+.chest-stage{width:116px;height:100px;flex-shrink:0;display:grid;place-items:center}
+.chest-art{width:110px;height:auto;overflow:visible}
+.chest-lid{fill:#7a4f26;stroke:#e6c37c;stroke-width:2}
+.chest-body{fill:#5e3b1c;stroke:#e6c37c;stroke-width:2}
+.chest-band{fill:none;stroke:#e6c37c;stroke-width:3;opacity:.85}
+.chest-lock{fill:#f0d08a;stroke:#8a6420;stroke-width:1.5}
+.chest-keyhole{fill:#3a2410}
+.chest-art.shaking{animation:chest-shake .55s ease-in-out infinite;transform-origin:50% 90%}
+@keyframes chest-shake{0%,100%{transform:rotate(0)}20%{transform:rotate(-6deg) translateY(-2px)}40%{transform:rotate(5deg)}60%{transform:rotate(-4deg) translateY(-1px)}80%{transform:rotate(3deg)}}
+.chest-prize{width:100px;height:100px;display:grid;place-items:center;border-radius:50%;animation:chest-burst .7s ease-out both}
+.chest-prize .shop-face{width:64px;height:64px}
+.chest-panel.tier-common .chest-prize{background:radial-gradient(circle,#d7d0e055,#d7d0e000 70%)}
+.chest-panel.tier-rare .chest-prize{background:radial-gradient(circle,#e6c37c77,#e6c37c00 70%)}
+.chest-panel.tier-epic .chest-prize{background:radial-gradient(circle,#b48ae688,#b48ae600 70%)}
+.chest-panel.tier-legendary .chest-prize{background:radial-gradient(circle,#ffd77aaa,#ffd77a00 72%);box-shadow:0 0 40px #ffd77a55}
+.chest-panel.tier-epic{border-color:#56437a}
+.chest-panel.tier-legendary{border-color:#c9a14f;box-shadow:0 0 30px #f2cf7a33}
+@keyframes chest-burst{0%{opacity:0;transform:scale(.3)}60%{opacity:1;transform:scale(1.12)}100%{transform:scale(1)}}
+.chest-text{flex:1;min-width:0;display:grid;gap:4px}
+.chest-text h3{font-family:'Spectral',serif;font-size:20px;font-weight:500;line-height:1.2}
+.chest-text p{font-size:13px;color:var(--muted);line-height:1.45}
+.chest-odds{font-size:11px;color:#a99d86}
+.chest-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px}
+.chest-panel.tier-rare .tier-tag{color:#d6b679}
+.chest-panel.tier-epic .tier-tag{color:#c0a2f5}
+.chest-panel.tier-legendary .tier-tag{color:#f2cf7a}
+.chest-only{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#c9b17e}
+.shop-held{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#d9c49a}
+.shop-gifts{display:grid;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.shop-gifts b{color:var(--text);font-weight:600}
+@media(max-width:520px){.chest-panel{flex-direction:column;text-align:center}.chest-actions{justify-content:center}}
+/* Chest-only decorations. */
+.frame-raven{--ring:conic-gradient(from 160deg,#0d0f16,#3a4a6e,#11141c,#5b6c92,#0d0f16,#2a3550,#0d0f16)}
+.frame-raven::after{inset:-16%;box-shadow:0 0 8px #5b6c9255}
+.frame-frost{--ring:conic-gradient(from 40deg,#9fd8ff,#ffffff,#6fb6e6,#e6f7ff,#8ccaf2,#ffffff,#9fd8ff)}
+.frame-frost::before{filter:drop-shadow(0 0 4px #bfe8ff)}
+.frame-frost::after{inset:-22%;border:1px dashed #cdeeffaa;animation:deco-spin 40s linear infinite}
+.frame-eclipse{--ring:conic-gradient(#050507,#1a1410,#050507,#1a1410,#050507)}
+.frame-eclipse::before{padding:9%}
+.frame-eclipse::after{inset:-24%;background:radial-gradient(closest-side,transparent 68%,#ffd77a 72%,#ff9d2e88 80%,transparent 96%);animation:deco-flicker 3.2s ease-in-out infinite}
+.ink-bone{color:#e8dcc4}
+.ink-verdigris{color:#72c9b1}
+.ink-aurora{-webkit-background-clip:text;background-clip:text;color:transparent!important;background-image:linear-gradient(90deg,#7dffb0,#7fd8ff,#c39bff,#7dffb0);background-size:200% 100%;animation:ink-drift 7s linear infinite}
+/* Gifting points from a profile. */
+.gift-box{display:grid;gap:6px;margin:-8px 0 18px;padding-left:14px}
+.gift-box>button{justify-self:start}
+.gift-box form{display:flex;flex-wrap:wrap;align-items:end;gap:8px}
+.gift-box label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.gift-box input{width:100px;padding:7px 10px}
+.gift-box .status-note{margin:0}
+/* Spectator bets. */
+.bet-panel{display:grid;gap:8px;padding:12px;border:1px solid #4a3f57;border-radius:8px;background:#211e29}
+.bet-panel p{font-size:13px;color:#cfc8d8}
+.bet-panel small{font-size:11px;line-height:1.45}
+.bet-pool{display:flex;align-items:center;gap:8px;font-size:12px;font-variant-numeric:tabular-nums}
+.bet-pool i{flex:1;height:6px;border-radius:3px;background:linear-gradient(90deg,#6fa8d6 calc(var(--good)*100%),#d7727c 0)}
+.bet-panel .good{color:#8fc2e6}
+.bet-panel .evil{color:#e6939b}
+.bet-teams{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.bet-teams button{padding:8px;border-radius:5px;border:1px solid #46404f;background:#25222b;font-weight:600}
+.bet-teams button.good.active{border-color:#6fa8d6;background:#1f3446;color:#cfe6f7}
+.bet-teams button.evil.active{border-color:#d7727c;background:#46202a;color:#f7d3d7}
+.bet-row{display:flex;align-items:end;gap:8px}
+.bet-row label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.bet-row input{width:84px;padding:7px 10px}
+.bet-row .primary{flex:1;text-transform:none}
+.bet-result{display:flex;justify-content:space-between;gap:10px}
+.bet-result b{font-variant-numeric:tabular-nums}
+.bet-result b.won{color:#9fd49a}
+.bet-result b.lost{color:#e6939b}
+.bet-result b.refunded,.bet-result b.pending{color:var(--muted);font-weight:400}
+@media(prefers-reduced-motion:reduce){.ink-aurora{animation:none!important}}

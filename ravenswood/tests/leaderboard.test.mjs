@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { newGame, join, start, act, kill, view, results } from '../lib/engine.mjs';
+import { newGame, join, spectate, start, act, kill, view, results } from '../lib/engine.mjs';
 import { mountLeaderboard } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
-import { lookOf, progressOf } from '../lib/cosmetics.mjs';
+import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, rollChest } from '../lib/cosmetics.mjs';
+import { createBets } from '../lib/bets.mjs';
 
 // The same interface as the Postgres store, held in memory.
 function memoryStore(){
@@ -19,8 +20,16 @@ function memoryStore(){
     bySession:async session=>{const a=accounts.find(x=>x.session===session);return a?{...a}:null;},
     async setLook(id,look){const a=accounts.find(x=>x.id===id);a.look=look;return {...a};},
     wonSince:async(ids,since)=>new Set(rows.filter(r=>r.won&&ids.includes(r.account)&&games.find(g=>g.id===r.game_id).ended_at>=since).map(r=>r.account)),
-    async wallet(id){const mine=this.items.filter(i=>i.account===id);return {earned:rows.filter(r=>r.account===id).reduce((n,r)=>n+(r.points||0),0),spent:mine.reduce((n,i)=>n+i.price,0),owned:mine.map(i=>i.item)};},
-    async buy(id,item,price){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(w.earned-w.spent<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
+    ledger:[],
+    async wallet(id){const mine=this.items.filter(i=>i.account===id);return {earned:rows.filter(r=>r.account===id).reduce((n,r)=>n+(r.points||0),0),spent:mine.reduce((n,i)=>n+i.price,0),adjust:this.ledger.filter(l=>l.account===id).reduce((n,l)=>n+l.delta,0),owned:mine.map(i=>i.item)};},
+    async balance(id){const w=await this.wallet(id);return w.earned-w.spent+w.adjust;},
+    async buy(id,item,price,held=0){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(await this.balance(id)-held<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
+    async openChest(id,{price,refund,held=0,roll}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',at:new Date()});else this.items.push({account:id,item,price:0});return {result:'opened',item,duplicate};},
+    async gift({from,to,amount,held=0,daily,since}){if(await this.giftsSent(from,since)+amount>daily)return 'cap';if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
+    async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
+    async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
+    async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
+    async addLedger(list){for(const r of list)this.ledger.push({...r,at:new Date()});},
     accountIds:async sessions=>new Map(accounts.filter(a=>sessions.includes(a.session)).map(a=>[a.session,a.id])),
     async saveGame({players,...game}){if(games.some(g=>g.id===game.id))throw Error('duplicate key');games.push({...game,ended_at:new Date(Date.now()+games.length)});for(const p of players)rows.push({game_id:game.id,...p});},
     async totals(script){
@@ -249,4 +258,84 @@ shopTest('seats show the account and look, and a change made mid-game waits for 
   for(const o of others.slice(1,3))await o.call('/',{type:'proposal_vote',proposal:vote.id,code,yes:true});
   assert.deepEqual((await others[0].call(`?code=${code}`)).data.players[0].look,{frame:'nightshade'});
   assert.equal((await others[0].call(`?code=${code}`)).data.players[1].account,'Bo');
+});
+// Games that two accounts played together, so gifting between them is allowed.
+async function together(store,a,b,games,points=30){
+  for(let i=0;i<games;i++)await store.saveGame({id:crypto.randomUUID(),script:'tb',winner:'good',reason:'',size:5,players:[a,b].map(x=>({account:x.id,role:'chef',initialRole:'chef',evil:false,won:true,survived:true,demon:false,points}))});
+}
+shopTest('a chest costs points and gives a random decoration; chest-only items can be worn once found',async({store,member})=>{
+  const {call,account}=await member('Ana');
+  assert.equal((await call('/shop/chest',{})).status,400);
+  await played(store,account,10,10,{points:30});
+  let r=await call('/shop/chest',{});assert.equal(r.status,200,JSON.stringify(r.data));
+  const got=ITEM[r.data.opened.item];assert(got&&(got.price||got.chest));assert.equal(r.data.opened.duplicate,false);
+  assert.equal(r.data.balance,300-CHEST.price);assert(r.data.owned.includes(got.id));
+  assert.equal((await call('/shop/chest',{})).status,400);
+  assert.equal((await call('/shop/equip',{kind:'frame',item:'eclipse'})).status,400);
+  store.items.push({account:account.id,item:'eclipse',price:0});
+  assert.equal((await call('/shop/equip',{kind:'frame',item:'eclipse'})).status,200);
+  assert.equal((await call('/shop/buy',{item:'eclipse'})).status,400);
+});
+test('a duplicate from a chest refunds part of the price instead',async()=>{
+  const store=memoryStore(),ana=store.add('Ana');await played(store,ana,20,20,{points:30});
+  store.items.push({account:ana.id,item:'brass',price:120});
+  const opened=await store.openChest(ana.id,{price:CHEST.price,refund:CHEST.refund,roll:()=>'brass'});
+  assert.deepEqual(opened,{result:'opened',item:'brass',duplicate:true});
+  assert.equal(await store.balance(ana.id),600-120-CHEST.price+CHEST.refund);
+});
+test('chest odds follow the published tiers and never give an earned-only item',()=>{
+  const seen={};for(let i=0;i<4000;i++){const item=ITEM[rollChest()];assert(!item.unlock);seen[item.tier]=(seen[item.tier]||0)+1;}
+  for(const [tier,odds] of Object.entries(CHEST.odds))assert(Math.abs(seen[tier]/4000*100-odds)<4,`${tier}: ${seen[tier]}`);
+  assert.equal(rollChest(()=>0),CHEST_ITEMS.find(i=>i.tier==='common').id);
+});
+shopTest('gifts go only to people you have played with, up to a daily limit, and need some games first',async({store,member})=>{
+  const ana=await member('Ana'),bo=await member('Bo'),cy=await member('Cy');
+  await together(store,ana.account,bo.account,2);
+  assert.match((await ana.call('/shop/gift',{to:'Bo',amount:20})).data.error,/recorded games/);
+  await together(store,ana.account,bo.account,3);await played(store,cy.account,5,5,{points:30});
+  assert.match((await ana.call('/shop/gift',{to:'Ana',amount:20})).data.error,/yourself/);
+  assert.match((await ana.call('/shop/gift',{to:'Cy',amount:20})).data.error,/played a recorded game with/);
+  assert.equal((await ana.call('/shop/gift',{to:'Nobody',amount:20})).status,404);
+  assert.equal((await ana.call('/shop/gift',{to:'Bo',amount:5})).status,400);
+  assert.equal((await ana.call('/shop/gift',{to:'Bo',amount:20.5})).status,400);
+  let r=await ana.call('/shop/gift',{to:'Bo',amount:60});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal(r.data.balance,150-60);assert.equal(r.data.gift.left,40);assert.deepEqual(r.data.sent,{to:'Bo',amount:60});
+  assert.match((await ana.call('/shop/gift',{to:'Bo',amount:50})).data.error,/a day/);
+  r=await bo.call('/shop');assert.equal(r.data.balance,150+60);assert.equal(r.data.gifts[0].from,'Ana');assert.equal(r.data.gifts[0].amount,60);
+});
+test('bets: only spectators, only before Day 2, within limits and what they can afford, once per game',async()=>{
+  const store=memoryStore(),bets=createBets({store}),ana=store.add('Ana'),bo=store.add('Bo');await played(store,ana,4,4,{points:30});
+  const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<5;i++)join(g,`P${i}`,`s${i}`);spectate(g,'Ana',ana.session);spectate(g,'Bo',bo.session);start(g,ROLES5);
+  await assert.rejects(bets.place(g,'s1',ana,'good',20),/Only spectators/);
+  await assert.rejects(bets.place(g,ana.session,ana,'neutral',20),/good or evil/);
+  await assert.rejects(bets.place(g,ana.session,ana,'good',500),/between/);
+  await assert.rejects(bets.place(g,bo.session,bo,'good',20),/enough points/);
+  await bets.place(g,ana.session,ana,'evil',100);assert.equal(bets.heldFor(ana.id),100);
+  await assert.rejects(bets.place(g,ana.session,ana,'good',10),/already/);
+  assert.deepEqual(bets.viewFor(g,ana.session).mine,{team:'evil',stake:100});assert.equal(bets.viewFor(g,'s1'),null);
+  const later=structuredClone(g);later.day=2;await assert.rejects(bets.place(later,bo.session,bo,'good',10),/Day 2/);
+});
+test('a recorded game pays bets on the winning team double and takes the losing stakes; anything else refunds',async()=>{
+  const store=memoryStore(),bets=createBets({store}),ana=store.add('Ana'),bo=store.add('Bo');await played(store,ana,4,4,{points:30});await played(store,bo,4,4,{points:30});
+  const table=()=>{const g=newGame('ABCDEFGH','P0','s0');for(let i=1;i<5;i++)join(g,`P${i}`,`s${i}`);spectate(g,'Ana',ana.session);spectate(g,'Bo',bo.session);start(g,ROLES5);return g;};
+  let g=table();await bets.place(g,ana.session,ana,'good',50);await bets.place(g,bo.session,bo,'evil',30);
+  goodWins(g);await bets.settle(g,'saved');
+  assert.equal(await store.balance(ana.id),120+50);assert.equal(await store.balance(bo.id),120-30);assert.equal(bets.heldFor(ana.id),0);
+  assert.deepEqual(bets.viewFor(g,'s1').list.map(b=>[b.username,b.outcome]),[['Ana','won'],['Bo','lost']]);
+  for(const end of ['skipped','called','failed']){g=table();g.round=Math.random();await bets.place(g,ana.session,ana,'evil',40);goodWins(g);await bets.settle(g,end);assert.equal(await store.balance(ana.id),170);assert.equal(bets.viewFor(g,'s1').status,'refunded');}
+  g=table();g.round=99;await bets.place(g,ana.session,ana,'good',40);assert.equal(bets.heldFor(ana.id),40);
+  const next=structuredClone(g);next.round=100;bets.sync(next);assert.equal(bets.heldFor(ana.id),0);assert.equal(await store.balance(ana.id),170);
+});
+shopTest('a spectator bets through the site, and points held in a bet cannot be spent meanwhile',async({store,browser,member})=>{
+  const host=browser(),game=(await host('/',{type:'create',name:'Host'})).data;
+  for(let i=1;i<5;i++)await browser()('/',{type:'join',name:`P${i}`,code:game.code});
+  await host('/',{type:'start',code:game.code});
+  const ana=await member('Ana');await played(store,ana.account,10,10,{points:30});
+  assert.equal((await host('/bet',{code:game.code,team:'good',stake:20})).status,401);
+  assert.match((await ana.call('/bet',{code:game.code,team:'good',stake:20})).data.error,/Only spectators/);
+  await ana.call('/',{type:'spectate',name:'Ana',code:game.code});
+  const r=await ana.call('/bet',{code:game.code,team:'good',stake:100});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.deepEqual(r.data.bets.mine,{team:'good',stake:100});assert.equal(r.data.bets.pool.good,100);
+  const wallet=(await ana.call('/shop')).data;assert.equal(wallet.held,100);assert.equal(wallet.balance,300-100);
+  assert.match((await ana.call('/shop/buy',{item:'violet'})).data.error,/enough points/);
 });

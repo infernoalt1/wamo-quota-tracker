@@ -46,7 +46,21 @@ CREATE TABLE IF NOT EXISTS botc_items(
   price INTEGER NOT NULL,
   bought_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY(account_id,item)
-)`;
+);
+CREATE TABLE IF NOT EXISTS botc_ledger(
+  id UUID PRIMARY KEY,
+  account_id UUID NOT NULL REFERENCES botc_accounts(id) ON DELETE CASCADE,
+  delta INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  other_id UUID,
+  item TEXT,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS botc_ledger_account ON botc_ledger(account_id,at)`;
+// A balance is what games earned, less what was bought, plus everything in the ledger (chests, gifts and bets).
+const BALANCE=`(SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1)
+  -(SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1)
+  +(SELECT coalesce(sum(delta),0)::int FROM botc_ledger WHERE account_id=$1)`;
 // Totals per account; the leaderboard works out rates and ranks from these.
 const TOTALS=`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,a.look,
   count(*)::int AS games,count(*) FILTER(WHERE p.won)::int AS wins,
@@ -60,6 +74,19 @@ export function pgStore(pool){
   const prepare=()=>ready||=pool.query(SCHEMA).catch(e=>{ready=null;throw e;});
   const query=async(sql,args)=>{await prepare();return (await pool.query(sql,args)).rows;};
   const one=async(sql,args)=>(await query(sql,args))[0]||null;
+  // Runs `fn` in a transaction holding the given accounts' rows, locked in a fixed order so two transfers cannot deadlock.
+  async function locked(ids,fn){
+    await prepare();
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query('SELECT 1 FROM botc_accounts WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[ids]);
+      const result=await fn(client);
+      await client.query('COMMIT');
+      return result;
+    }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+    finally{client.release();}
+  }
   return {
     async create({id,username,key,hash,session}){
       try{return await one(`INSERT INTO botc_accounts(id,username,username_key,password_hash,session) VALUES($1,$2,$3,$4,$5) RETURNING ${COLUMNS}`,[id,username,key,hash,session]);}
@@ -86,22 +113,48 @@ export function pgStore(pool){
       WHERE p.won AND p.account_id=ANY($1::uuid[]) AND g.ended_at>=$2`,[ids,since])).map(r=>r.account_id)),
     wallet:id=>one(`SELECT (SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1) AS earned,
       (SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1) AS spent,
+      (SELECT coalesce(sum(delta),0)::int FROM botc_ledger WHERE account_id=$1) AS adjust,
       (SELECT coalesce(array_agg(item),'{}') FROM botc_items WHERE account_id=$1) AS owned`,[id]),
-    // Locking the account row makes two purchases at once take turns, so points cannot be spent twice.
-    async buy(id,item,price){
-      await prepare();
-      const client=await pool.connect();
-      try{
-        await client.query('BEGIN');
-        await client.query('SELECT 1 FROM botc_accounts WHERE id=$1 FOR UPDATE',[id]);
-        const w=(await client.query(`SELECT (SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1)-(SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1) AS balance,
-          EXISTS(SELECT 1 FROM botc_items WHERE account_id=$1 AND item=$2) AS owned`,[id,item])).rows[0];
-        const result=w.owned?'owned':w.balance<price?'short':'bought';
+    // Every spend locks the account rows involved, so two at once take turns and points cannot be spent twice.
+    // `held` is what the account has staked on bets still being played; it cannot be spent meanwhile.
+    async buy(id,item,price,held=0){
+      return locked([id],async client=>{
+        const w=(await client.query(`SELECT ${BALANCE} AS balance,EXISTS(SELECT 1 FROM botc_items WHERE account_id=$1 AND item=$2) AS owned`,[id,item])).rows[0];
+        const result=w.owned?'owned':w.balance-held<price?'short':'bought';
         if(result==='bought')await client.query('INSERT INTO botc_items(account_id,item,price) VALUES($1,$2,$3)',[id,item,price]);
-        await client.query('COMMIT');
         return result;
-      }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
-      finally{client.release();}
+      });
+    },
+    // A chest costs points and gives an item; a duplicate gives some points back instead.
+    async openChest(id,{price,refund,held=0,roll}){
+      return locked([id],async client=>{
+        const w=(await client.query(`SELECT ${BALANCE} AS balance,(SELECT coalesce(array_agg(item),'{}') FROM botc_items WHERE account_id=$1) AS owned`,[id])).rows[0];
+        if(w.balance-held<price)return {result:'short'};
+        const item=roll(),duplicate=w.owned.includes(item);
+        await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,item) VALUES($1,$2,$3,'chest',$4)",[randomUUID(),id,-price,item]);
+        if(duplicate)await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,item) VALUES($1,$2,$3,'chest_refund',$4)",[randomUUID(),id,refund,item]);
+        else await client.query('INSERT INTO botc_items(account_id,item,price) VALUES($1,$2,0)',[id,item]);
+        return {result:'opened',item,duplicate};
+      });
+    },
+    async gift({from,to,amount,held=0,daily,since}){
+      return locked([from,to],async client=>{
+        const w=(await client.query(`SELECT ${BALANCE} AS balance,(SELECT coalesce(-sum(delta),0)::int FROM botc_ledger WHERE account_id=$1 AND kind='gift' AND delta<0 AND at>=$2) AS sent`,[from,since])).rows[0];
+        if(w.sent+amount>daily)return 'cap';
+        if(w.balance-held<amount)return 'short';
+        await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'gift',$4),($5,$4,$6,'gift',$2)",[randomUUID(),from,-amount,to,randomUUID(),amount]);
+        return 'sent';
+      });
+    },
+    giftsSent:async(id,since)=>(await one("SELECT coalesce(-sum(delta),0)::int AS n FROM botc_ledger WHERE account_id=$1 AND kind='gift' AND delta<0 AND at>=$2",[id,since])).n,
+    giftsReceived:id=>query(`SELECT a.username,l.delta AS amount,l.at FROM botc_ledger l JOIN botc_accounts a ON a.id=l.other_id
+      WHERE l.account_id=$1 AND l.kind='gift' AND l.delta>0 ORDER BY l.at DESC LIMIT 5`,[id]),
+    sharedGame:async(a,b)=>!!(await one('SELECT 1 FROM botc_game_players x JOIN botc_game_players y ON y.game_id=x.game_id WHERE x.account_id=$1 AND y.account_id=$2 LIMIT 1',[a,b])),
+    // Settled bets: one row per bettor, all in one statement.
+    async addLedger(rows){
+      if(!rows.length)return;
+      await query(`INSERT INTO botc_ledger(id,account_id,delta,kind) SELECT id,account_id,delta,kind FROM jsonb_to_recordset($1::jsonb) AS x(id UUID,account_id UUID,delta INTEGER,kind TEXT)`,
+        [JSON.stringify(rows.map(r=>({id:randomUUID(),account_id:r.account,delta:r.delta,kind:r.kind})))]);
     },
   };
 }

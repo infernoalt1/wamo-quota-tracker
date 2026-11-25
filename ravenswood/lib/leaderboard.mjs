@@ -40,7 +40,8 @@ function profileOf(account,rows){
   };
 }
 
-export function mountLeaderboard(router,{store,rooms}){
+// `onRecorded(game,status)` hears how each finished game ended up: saved, skipped, called or failed.
+export function mountLeaderboard(router,{store,rooms,onRecorded=()=>{}}){
   const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
   const handle=fn=>async(req,res)=>{try{
     if(!store)throw refuse('The leaderboard is not set up on this server.',503);
@@ -67,7 +68,7 @@ export function mountLeaderboard(router,{store,rooms}){
     try{
       const rows=results(game),accounts=await store.accountIds(rows.map(r=>r.session));
       const players=rows.filter(r=>accounts.has(r.session)).map(({session,...r})=>({...r,account:accounts.get(session)}));
-      if(players.length<MIN_ACCOUNTS)return settle(code,id,l=>{l.status='skipped';});
+      if(players.length<MIN_ACCOUNTS){settle(code,id,l=>{l.status='skipped';});onRecorded(game,'skipped');return;}
       const wonToday=await store.wonSince(players.filter(p=>p.won).map(p=>p.account),dayStart());
       const earned=new Map(players.map(p=>[p.account,pointsFor(p,!wonToday.has(p.account))]));
       players.forEach(p=>{p.points=earned.get(p.account).total;});
@@ -76,7 +77,8 @@ export function mountLeaderboard(router,{store,rooms}){
         l.status='saved';l.sessions=rows.filter(r=>accounts.has(r.session)).map(r=>r.session);
         l.points=Object.fromEntries(l.sessions.map(s=>[s,earned.get(accounts.get(s))]));
       });
-    }catch(e){console.error('BOTC leaderboard:',e.message);settle(code,id,l=>{l.status='failed';});}
+      onRecorded(game,'saved');
+    }catch(e){console.error('BOTC leaderboard:',e.message);settle(code,id,l=>{l.status='failed';});onRecorded(game,'failed');}
   }
   return {
     // Called just before a game is saved. Marking the game first means it is written exactly once.
@@ -84,7 +86,7 @@ export function mountLeaderboard(router,{store,rooms}){
     noteEnd(game){
       if(!store||game.phase!=='ended'||game.ledger)return;
       // A game the table voted to stop has no winner, so it earns nothing and is not recorded.
-      if(game.called){game.ledger={id:randomUUID(),status:'called',sessions:[]};return;}
+      if(game.called){game.ledger={id:randomUUID(),status:'called',sessions:[]};onRecorded(game,'called');return;}
       const id=randomUUID();game.ledger={id,status:'pending',sessions:[]};
       queueMicrotask(()=>write(game.code,id,structuredClone(game)));
     },

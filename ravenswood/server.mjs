@@ -5,6 +5,7 @@ import { newGame, join, spectate, act, tick, seen, view } from './lib/engine.mjs
 import { mountAccounts, defaultStore } from './lib/accounts.mjs';
 import { mountLeaderboard } from './lib/leaderboard.mjs';
 import { mountShop } from './lib/shop.mjs';
+import { createBets } from './lib/bets.mjs';
 
 const ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_TTL=6*60*60*1000;
@@ -34,21 +35,33 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000}={}) {
     const data=view(game,session),now=Date.now();
     data.players.forEach((p,i)=>{p.away=isAway(game.code,game.players[i].session,now);});
     const record=leaderboard.statusFor(game,session);if(record)data.record=record;
+    const book=bets.viewFor(game,session);if(book)data.bets=book;
     reply(req,res,data);
   }
   const load=code=>{const room=rooms.get(code);if(!room)throw Error('Room not found. Check the code.');return JSON.parse(room.state);};
   // Every change pokes each open page in the room, which fetches its own view at once instead of waiting for its next poll.
   const streams=new Map();
   const poke=code=>{for(const res of streams.get(code)||[])res.write('data: 1\n\n');};
-  const save=(code,game)=>{leaderboard.noteEnd(game);rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});poke(code);};
+  const save=(code,game)=>{leaderboard.noteEnd(game);bets.sync(game);rooms.set(code,{state:JSON.stringify(game),updated:Date.now()});poke(code);};
   // Keeps quiet connections from being closed by proxies along the way.
   const beat=setInterval(()=>{for(const set of streams.values())for(const res of set)res.write(': keep-alive\n\n');},25000);beat.unref?.();
-  router.use((req,res,next)=>{res.setHeader('Cache-Control','no-store, private');const now=Date.now();for(const [code,room] of rooms)if(now-room.updated>ROOM_TTL)rooms.delete(code);for(const [key,seen] of presence)if(now-seen.at>ROOM_TTL)presence.delete(key);next();});
+  router.use((req,res,next)=>{res.setHeader('Cache-Control','no-store, private');const now=Date.now();for(const [code,room] of rooms)if(now-room.updated>ROOM_TTL){rooms.delete(code);bets.forgetRoom(code);}for(const [key,seen] of presence)if(now-seen.at>ROOM_TTL)presence.delete(key);next();});
   router.use('/account/avatar',express.json({limit:'96kb'}));
   router.use(express.json({limit:'4kb'}));
   const accounts=mountAccounts(router,{store,rooms,identity,setSession});
-  const leaderboard=mountLeaderboard(router,{store,rooms});
-  mountShop(router,{store,identity,accounts});
+  const bets=createBets({store});
+  const leaderboard=mountLeaderboard(router,{store,rooms,onRecorded:(game,status)=>bets.settle(game,status)});
+  mountShop(router,{store,identity,accounts,heldFor:bets.heldFor});
+  // A logged-in spectator stakes points on which team wins the game they are watching.
+  router.post('/bet',async(req,res)=>{try{
+    if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).json({error:'Use the game website to bet.'});
+    if(!store)return res.status(503).json({error:'Betting is not set up on this server.'});
+    const session=identity(req),account=session?await store.bySession(session):null;
+    if(!account)return res.status(401).json({error:'Log in to bet points.'});
+    const code=codeOf(req.body?.code),game=load(code);
+    await bets.place(game,session,account,req.body?.team,req.body?.stake);
+    send(req,res,game,session);
+  }catch(e){res.status(e.status||400).json({error:e.message});}});
   router.get('/',(req,res)=>{try{
     const session=identity(req);if(!session)return res.status(401).json({error:'Join a room to take a seat.'});
     const code=codeOf(req.query.code),game=load(code);view(game,session); // Authorize before advancing the clock.

@@ -1,8 +1,8 @@
 'use client';
 import {useState,useEffect,useRef,Fragment} from 'react';
-import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock} from 'lucide-react';
+import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package} from 'lucide-react';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
-import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS} from '../lib/cosmetics.mjs';
+import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT} from '../lib/cosmetics.mjs';
 const types={townsfolk:'Townsfolk',outsider:'Outsiders',minion:'Minions',demon:'Demon'};
 function RoleIcon({id}){return <img className="role-icon" src={`/botc/icons/${id}.png`} alt="" draggable={false}/>;}
 function Avatar({src,name}){return src?<img className="avatar-img" src={`/botc/api/game/avatar/${src}`} alt="" draggable={false}/>:(name||'').slice(0,2).toUpperCase();}
@@ -153,6 +153,45 @@ async function postJson(url,body){
  try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:timed()}),data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'Please try again.');return data;}
  catch(e){throw new Error(e.name==='TimeoutError'?TIMED_OUT:e.message);}
 }
+// A treasure chest, drawn flat so its shake works on any computer.
+function ChestArt({shaking}){return <svg viewBox="0 0 120 100" className={`chest-art ${shaking?'shaking':''}`} aria-hidden="true">
+ <path className="chest-lid" d="M14 46C14 22 32 16 60 16S106 22 106 46Z"/>
+ <rect className="chest-body" x="14" y="46" width="92" height="42" rx="4"/>
+ <path className="chest-band" d="M14 54H106M36 17V88M84 17V88"/>
+ <rect className="chest-lock" x="52" y="40" width="16" height="18" rx="3"/>
+ <circle className="chest-keyhole" cx="60" cy="49" r="2.4"/>
+</svg>;}
+// Gifting points to someone, from their profile.
+function GiftBox({to,onWallet}){
+ const [open,setOpen]=useState(false),[amount,setAmount]=useState(50),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null);
+ async function send(){
+  if(busy)return;setBusy(true);setMsg(null);
+  try{const data=await postJson('/botc/api/game/shop/gift',{to,amount:Number(amount)});onWallet?.(data);setMsg({ok:true,text:`You sent ${to} ${data.sent.amount} points. You can gift ${data.gift.left} more today.`});setOpen(false);}
+  catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
+ }
+ return <div className="gift-box">
+  {open?<form onSubmit={e=>{e.preventDefault();send();}}><label>Points<input type="number" inputMode="numeric" min={GIFT.min} max={GIFT.max} step="1" value={amount} onChange={e=>setAmount(e.target.value)}/></label><button className="primary compact" disabled={busy}><Gift size={14}/>Send to {to}</button><button type="button" className="text-button" onClick={()=>setOpen(false)}>Cancel</button></form>
+  :<button className="secondary compact" onClick={()=>setOpen(true)}><Gift size={14}/>Gift points</button>}
+  <small>{GIFT.min}–{GIFT.max} points at a time, up to {GIFT.daily} a day, to people you have played a recorded game with.</small>
+  {msg&&<p className={`status-note ${msg.ok?'good':'error'}`}>{msg.ok?<Check size={15}/>:<X size={15}/>}<span>{msg.text}</span></p>}
+ </div>;
+}
+// Spectators can bet points on which team wins the game they are watching.
+function BetPanel({bets,loggedIn,busy,onBet,onLogin}){
+ const [team,setTeam]=useState('good'),[stake,setStake]=useState(50),total=bets.pool.good+bets.pool.evil,n=Number(stake)||0;
+ return <section className="bet-panel">
+  <span className="eyebrow"><Dices size={13}/>SPECTATOR BETS</span>
+  <div className="bet-pool" title={`${bets.count} bet${bets.count===1?'':'s'} so far`}><span className="good">Good {bets.pool.good}</span><i style={{'--good':total?bets.pool.good/total:.5}}/><span className="evil">{bets.pool.evil} Evil</span></div>
+  {bets.mine?<p>You bet <b>{bets.mine.stake}</b> on <b className={bets.mine.team}>{bets.mine.team}</b>. If you are right, you get {bets.mine.stake*2} back.</p>
+  :!bets.open?<p className="small">Bets closed when Day 2 began.</p>
+  :!loggedIn?<><p className="small">Log in to bet points on which team wins.</p><button className="secondary compact" onClick={onLogin}>Log in</button></>
+  :<>
+   <div className="bet-teams" role="group" aria-label="Team"><button className={`good ${team==='good'?'active':''}`} aria-pressed={team==='good'} onClick={()=>setTeam('good')}>Good</button><button className={`evil ${team==='evil'?'active':''}`} aria-pressed={team==='evil'} onClick={()=>setTeam('evil')}>Evil</button></div>
+   <div className="bet-row"><label>Stake<input type="number" inputMode="numeric" min={bets.min} max={bets.max} step="1" value={stake} onChange={e=>setStake(e.target.value)}/></label><button className="primary compact" disabled={busy||n<bets.min||n>bets.max} onClick={()=>onBet(team,n)}>Bet {n} on {team}</button></div>
+   <small>{bets.min}–{bets.max} points. A right call pays back double. Bets close when Day 2 begins, and pay out only if the game is recorded; otherwise you get your stake back.</small>
+  </>}
+ </section>;
+}
 const hoursLeft=at=>{const h=Math.max(1,Math.ceil((at-Date.now())/3600000));return h===1?'1 hour':`${h} hours`;};
 function ShopSample({item,account,look}){
  const wearing={...look,[item.kind]:item.id};
@@ -161,7 +200,7 @@ function ShopSample({item,account,look}){
  return <span className="shop-title-sample"><strong>{account.username}</strong><Title look={wearing}/></span>;
 }
 function Shop({account,wallet,onWallet,inGame,onLogin}){
- const [kind,setKind]=useState('frame'),[preview,setPreview]=useState(null),[confirm,setConfirm]=useState(null),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[error,setError]=useState('');
+ const [kind,setKind]=useState('frame'),[preview,setPreview]=useState(null),[confirm,setConfirm]=useState(null),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[error,setError]=useState(''),[chest,setChest]=useState(null);
  useEffect(()=>{setConfirm(null);},[kind]);
  if(!account)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p>Win games to earn points, then spend them on frames, name colours and titles that everyone at the table can see.</p><div className="shop-guest"><Lock size={18}/><div><strong>Log in to start earning points.</strong><p>Points come from games where at least three players are logged in.</p></div><button className="primary compact" onClick={onLogin}>Log in or sign up</button></div></>;
  if(!wallet)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p className="small">Opening the shop…</p></>;
@@ -171,6 +210,13 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
   try{const data=await postJson(`/botc/api/game/shop${path}`,body);onWallet(data);setNote(done+(data.later?' You are in a game right now, so it shows from your next game.':''));setConfirm(null);setPreview(null);}
   catch(e){setError(e.message);}finally{setBusy(false);}
  }
+ // The chest shakes for at least a second while the server rolls, then opens on what was inside.
+ async function openChest(){
+  if(busy)return;setBusy(true);setError('');setNote('');setChest({stage:'shaking'});const started=Date.now();
+  try{const data=await postJson('/botc/api/game/shop/chest',{});await new Promise(done=>setTimeout(done,Math.max(0,1100-(Date.now()-started))));onWallet(data);setChest({stage:'open',...data.opened});}
+  catch(e){setChest(null);setError(e.message);}finally{setBusy(false);}
+ }
+ const prize=chest?.stage==='open'?ITEM[chest.item]:null;
  const items=ITEMS.filter(i=>i.kind===kind);
  return <>
   <span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2>
@@ -187,19 +233,37 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
      <li><span>Win as the Demon</span><b>+{POINTS.demon}</b></li>
      <li className={wallet.daily.ready?'ready':''}><span>First win today{wallet.daily.ready?' · ready':` · back in ${hoursLeft(wallet.daily.resetsAt)}`}</span><b>+{POINTS.daily}</b></li>
     </ul>
+    {wallet.held>0&&<p className="shop-held"><Dices size={13}/>{wallet.held} points are riding on a bet until that game ends.</p>}
+    {wallet.gifts?.length>0&&<div className="shop-gifts"><span className="eyebrow"><Gift size={12}/>GIFTS FOR YOU</span>{wallet.gifts.map((x,i)=><span key={i}><b>{x.from}</b> sent you {x.amount} points<small> · {new Date(x.at).toLocaleDateString([],{month:'short',day:'numeric'})}</small></span>)}</div>}
   </div>
+  <section className={`chest-panel ${chest?.stage||''} ${prize?`tier-${prize.tier}`:''}`} aria-live="polite">
+   <div className="chest-stage">{prize?<div className="chest-prize"><ShopSample item={prize} account={account} look={look}/></div>:<ChestArt shaking={chest?.stage==='shaking'}/>}</div>
+   <div className="chest-text">
+    <span className="tier-tag">{prize?`${TIERS[prize.tier]} ${KINDS[prize.kind].replace(/s$/,'').toLowerCase()}`:'Mystery chest'}</span>
+    <h3>{prize?prize.name:chest?.stage==='shaking'?'Opening…':'What’s inside?'}</h3>
+    <p>{prize?(chest.duplicate?`You already have this, so ${chest.refund} points come back to you.`:prize.blurb):'A random frame, name colour or title, including a few you can only find in chests.'}</p>
+    {!prize&&<small className="chest-odds">{Object.entries(CHEST.odds).map(([t,o])=>`${TIERS[t]} ${o}%`).join(' · ')} · Duplicates give back {CHEST.refund}</small>}
+    <div className="chest-actions">
+     {prize&&!chest.duplicate&&look[prize.kind]!==prize.id&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:prize.kind,item:prize.id},`You are wearing ${prize.name}.`)}>Wear it</button>}
+     <button className={prize?'secondary compact':'primary compact'} disabled={busy||wallet.balance<CHEST.price} onClick={openChest}><Package size={14}/>{prize?'Open another':'Open'} · {CHEST.price}</button>
+     {prize&&<button className="text-button" onClick={()=>setChest(null)}>Done</button>}
+     {!prize&&wallet.balance<CHEST.price&&<small className="need">{CHEST.price-wallet.balance} more needed</small>}
+    </div>
+   </div>
+  </section>
   {inGame&&<p className="status-note"><Clock3 size={15}/><span>You are in a game. To keep things fair, changes show from your next game.</span></p>}
   {(note||error)&&<p className={`status-note ${error?'error':'good'}`} role="status">{error?<X size={15}/>:<Check size={15}/>}<span>{error||note}</span></p>}
   <div className="role-tabs">{Object.entries(KINDS).map(([key,title])=><button className={kind===key?'active':''} key={key} onClick={()=>{setKind(key);setPreview(null);}}>{title}</button>)}</div>
   <div className="shop-grid">
    {items.map(item=>{
-    const owned=item.price?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
+    const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
      <button className="shop-sample" onClick={()=>setPreview(p=>p===item.id?null:item.id)} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
-     <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
+     <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
      <div className="shop-item-action">
       {wearing?<><span className="wearing-tag"><Check size={14}/>Wearing</span><button className="text-button" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:null},`${item.name} is off.`)}>Take off</button></>
       :owned?<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:item.id},`You are wearing ${item.name}.`)}>Wear</button>
+      :item.chest?<span className="chest-only"><Package size={13}/>Found in chests</span>
       :item.unlock?<div className="unlock-progress"><span><Lock size={12}/>{UNLOCKS[item.unlock].text}</span><div className="progress-bar"><i style={{width:`${wallet.progress[item.unlock]/UNLOCKS[item.unlock].goal*100}%`}}/></div><small>{wallet.progress[item.unlock]} / {UNLOCKS[item.unlock].goal}</small></div>
       :confirm===item.id?<><button className="primary compact" disabled={busy} onClick={()=>call('/buy',{item:item.id},`You bought ${item.name} and are wearing it.`)}>Buy for {item.price}</button><button className="text-button" disabled={busy} onClick={()=>setConfirm(null)}>Cancel</button></>
       :short>0?<><span className="price"><Coins size={13}/>{item.price}</span><small className="need">{short} more needed</small></>
@@ -207,7 +271,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
      </div>
     </article>;})}
   </div>
-  <p className="small shop-footnote">Points come only from playing. Decorations never show your character or team.</p>
+  <p className="small shop-footnote">Points come only from playing, gifts and spectator bets; nothing here costs real money. To gift points, open someone’s profile from the Players list. Decorations never show your character or team.</p>
  </>;
 }
 const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
@@ -227,7 +291,7 @@ function recordNote(record,accountsOn){
 }
 function RecordRow({label,games,wins}){return <div className="record-row plain"><span>{label}</span><span>{plural(games,'game')} · {wins} won</span></div>;}
 // A list of everyone with a record, A–Z. It shows no results, so nobody is ranked against anybody.
-function Leaderboard({me,start}){
+function Leaderboard({me,start,onWallet}){
  const [board,setBoard]=useState(null),[player,setPlayer]=useState(start),[profile,setProfile]=useState(null),[error,setError]=useState('');
  useEffect(()=>{
   let live=true;setError('');
@@ -240,6 +304,7 @@ function Leaderboard({me,start}){
   <button className="text-button back-link" onClick={()=>setPlayer(null)}><ArrowLeft size={14}/>All players</button>
   {error?<p className="status-note">{error}</p>:!profile?<p className="small">Opening the records…</p>:<>
    <div className="profile-head"><Face className="account-avatar" src={profile.avatar} name={profile.username} look={profile.look}/><div><span className="eyebrow">PLAYER RECORD</span><h2><Named name={profile.username} look={profile.look}/></h2><Title look={profile.look}/></div></div>
+   {me&&me!==profile.username&&<GiftBox to={profile.username} onWallet={onWallet}/>}
    {profile.games===0?<p className="small">No recorded games yet. A game counts when at least three players at the table are logged in.</p>:<>
     <div className="stat-row">{[['Games',profile.games],['Survived',pct(profile.survived,profile.games)],['Demon wins',profile.demonWins]].map(([label,value])=><div className="stat" key={label}><b>{value}</b><small>{label}</small></div>)}</div>
     <h3 className="log-heading">By team</h3>
@@ -342,6 +407,11 @@ export default function Game(){
  function gotWallet(data){setWallet(data);setAccount(a=>a&&{...a,look:Object.keys(data.look).length?data.look:null});}
  function openShop(){setDialog(null);setDrawer('shop');}
  function openLeaders(player=null){setLeaderPlayer(player);setDialog(null);setDrawer('leaders');}
+ async function placeBet(team,stake){
+  if(mutating.current)return;mutating.current=true;generation.current++;setBusy(true);setError('');
+  try{const data=await postJson('/botc/api/game/bet',{code:g.code,team,stake});setG(data);getJson('/botc/api/game/shop').then(gotWallet).catch(()=>{});}
+  catch(e){setError(e.message);}finally{mutating.current=false;setBusy(false);}
+ }
  function openLog(){updateLocal({finaleSeen:true});setDialog(null);setDrawer('log');}
  function openAccount(back=null){setAfterAuth(back);setAuthName('');setPassword('');setDialog('account');}
  const me=g?.players.find(p=>p.id===g.me.id),phase=g?.phase||'welcome',night=phase==='night',role=ROLES[g?.me.role],seats=g?.players||emptySeats,living=g?.players.filter(p=>p.alive).length||0,chosen=phase==='day'?g?.players.find(p=>p.id===selected):null,host=g?.me.id===g?.host,readyCount=g?.players.filter(p=>p.alive&&(p.ready||p.away)).length||0;
@@ -401,6 +471,7 @@ export default function Game(){
   <div className="room-card"><div><span className="eyebrow">ROOM CODE</span><strong>{g.code}</strong></div><button className="icon-button" onClick={copy} aria-label="Copy invitation link" title="Copy invitation link">{copied?<Check size={18}/>:<Copy size={18}/>}</button></div>
   {phase==='lobby'?<div className="lobby-controls"><h2>The gathering before the storm.</h2>{g.interrupted&&<p className="status-note"><RotateCcw size={15}/><span>The table voted to end the last game early. Everyone gets a new character when the next one begins.</span></p>}{spectator&&<p className="status-note"><Eye size={15}/><span>You are watching. Take a seat to play in the next game.</span></p>}<p className="small">Invite your friends with the room code. Everyone plays a character; the automated Storyteller does the rest.</p><label>Game mode<select value={script} disabled={!host||busy} onChange={e=>action('settings',{daySeconds:g.settings.daySeconds,script:e.target.value})}>{Object.entries(SCRIPTS).map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></label><label>Length of each day<select value={g.settings.daySeconds} disabled={!host||busy} onChange={e=>action('settings',{daySeconds:Number(e.target.value),script})}>{[[120,'2 minutes · quick'],[180,'3 minutes · brisk'],[240,'4 minutes · standard'],[360,'6 minutes · relaxed'],[600,'10 minutes · leisurely']].map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></label><p className="small">{seats.length<5?`${5-seats.length} more player${seats.length===4?'':'s'} needed.`:seats.length<7?'5–6 player rules: evil players do not learn one another or receive Demon bluffs.':'Evil players learn their team on the first night.'}</p>{host&&seats.length>1&&<div className="seat-list"><span className="eyebrow">AT THE TABLE</span>{seats.filter(p=>p.id!==g.me.id).map(p=><div className="seat-list-row" key={p.id}><span>{p.name}{p.away&&<em className="offline-tag"> offline</em>}</span><div className="seat-list-actions">{p.pictured&&<button className="icon-button" disabled={busy} onClick={()=>action('hide_avatar',{target:p.id})} aria-label={`${p.avatarHidden?'Show':'Hide'} ${p.name}'s picture`} title={`${p.avatarHidden?'Show':'Hide'} ${p.name}'s picture`}>{p.avatarHidden?<Eye size={15}/>:<EyeOff size={15}/>}</button>}<button className="icon-button" disabled={busy} onClick={()=>action('kick',{target:p.id})} aria-label={`Remove ${p.name} from the table`} title={`Remove ${p.name} from the table`}><UserX size={15}/></button></div></div>)}<small>Removed players can rejoin with the room code.</small></div>}{spectator?<button className="primary" disabled={busy||seats.length>=15} onClick={()=>action('join',{name:g.me.name})}>Take a seat <Armchair size={16}/></button>:host?<button className="primary" disabled={busy||seats.length<5} onClick={()=>action('start')}>Begin the story <Moon size={16}/></button>:<p className="small">Waiting for the host to begin.</p>}<button className="text-button" disabled={busy} onClick={()=>action('leave')}><LogOut size={14}/>{spectator?'Stop watching':'Leave table'}</button></div>:spectator?<>
   <div className="role-card"><div className="card-heading"><span className="eyebrow">YOU ARE WATCHING</span></div><div className="role-symbol"><Eye size={30}/></div><h2>Spectator</h2><p>You see what the whole town sees: the seats, the votes and the Town square. Characters, whispers and night information stay hidden until the game ends.</p></div>
+  {g.bets&&!g.bets.ended&&<BetPanel key={gameKey} bets={g.bets} loggedIn={!!account} busy={busy} onBet={placeBet} onLogin={()=>openAccount()}/>}
   {COUNTS[seats.length]&&<button className="setup-line" onClick={()=>setDrawer('roles')} title="See the character list and setup chart"><Users size={13}/><span>{setupLine(seats.length)}</span></button>}
   {phase==='ended'&&<p className="small">Every character is now shown on the table.</p>}
   <button className="text-button" disabled={busy} onClick={()=>action('leave')}><LogOut size={14}/>Stop watching</button>
@@ -412,6 +483,7 @@ export default function Game(){
   {inPlay&&<button className="text-button" disabled={busy||!!proposal} onClick={()=>setDialog('reset')}><RotateCcw size={14}/>End game early…</button>}
   {phase==='ended'&&g.timeline&&<button className="text-button" onClick={openLog}><ScrollText size={14}/>Game log</button>}
   </>}</>}
+  {phase==='ended'&&g.bets?.list&&<section className="bet-panel"><span className="eyebrow"><Dices size={13}/>SPECTATOR BETS</span>{g.bets.list.map((b,i)=><p key={i} className="bet-result"><span>{b.username} · {b.stake} on <span className={b.team}>{b.team}</span></span><b className={b.outcome}>{b.outcome==='won'?`+${b.stake}`:b.outcome==='lost'?`−${b.stake}`:b.outcome==='pending'?'…':'returned'}</b></p>)}{g.bets.status==='refunded'&&<small>This game was not recorded, so every stake was returned.</small>}</section>}
   <p className="rail-credit">Unofficial. Blood on the Clocktower and its character art are by The Pandemonium Institute. <a href="https://bloodontheclocktower.com" target="_blank" rel="noreferrer">Original game ↗</a></p>
  </aside>
  <section className="table-section">
@@ -464,7 +536,7 @@ export default function Game(){
  {finaleDue&&!dialog&&<Finale g={g} host={host} busy={busy} onClose={()=>updateLocal({finaleSeen:true})} onNewGame={()=>action('rematch')} onLog={openLog}/>}
  {(dawnDue||newsDue)&&!dialog&&!dawnHold&&<div className="modal-backdrop"><section className="modal dawn" role="dialog" aria-modal="true" aria-label={dawnDue?`Dawn of day ${g.day}`:'A private message'}>{dawnDue?<><span className="eyebrow"><Sun size={14}/>DAWN · DAY {g.day}</span><h2>{deaths.length?`${listNames(deaths)} died in the night.`:'Nobody died in the night.'}</h2></>:<><span className="eyebrow"><LockKeyhole size={14}/>A PRIVATE MESSAGE</span><h2>The Storyteller has news for you.</h2></>}<h3>{dawnDue?'Your private night':'Only you can see this'}</h3>{popupItems.length?popupItems.map(item=><JournalEntry key={item.id} item={item}/>):<p className="small">The Storyteller had nothing for you tonight.</p>}<small>This is saved in your Journal.</small><button className="primary" autoFocus onClick={()=>updateLocal({dawn:g.day,inbox:inboxCount})}>{dawnDue?'Begin the day':'Got it'}<ArrowRight size={17}/></button></section></div>}
  {dialog&&<div className="modal-backdrop" onClick={()=>setDialog(null)}><section className="modal" role="dialog" aria-modal="true" aria-label={dialog==='account'?'Your account':dialog==='slayer'?'Confirm public Slayer claim':dialog==='reset'?'End the game early':dialog==='group'?'Start a group chat':dialog==='create'?'Create a game':'Join a game'} onClick={e=>e.stopPropagation()}><button className="modal-close icon-button" aria-label="Close dialog" onClick={()=>setDialog(null)}><X size={20}/></button>{dialog==='account'?(account?<><span className="eyebrow">YOUR ACCOUNT</span><h2><Named name={account.username} look={account.look}/></h2><Title look={account.look}/><div className="account-picture"><Face className="account-avatar" src={account.avatar} name={account.username} look={account.look}/><div className="account-picture-actions"><label className={`secondary compact file-button ${busy?'disabled':''}`}><Camera size={14}/>{account.avatar?'Change picture':'Add a picture'}<input type="file" accept="image/*" disabled={busy} onChange={e=>{choosePicture(e.target.files[0]);e.target.value='';}}/></label>{account.avatar&&<button className="text-button" disabled={busy} onClick={()=>setPicture(null)}>Remove picture</button>}</div></div><p className="small">You stay logged in on this browser, and your seat follows you to any computer you log in on. If other people use this computer, log out when you finish.</p>{afterAuth&&<button className="primary" onClick={()=>{setDialog(afterAuth);setAfterAuth(null);}}>Continue<ArrowRight size={17}/></button>}<div className="account-actions">{!afterAuth&&<span className="account-links"><button className="secondary compact" onClick={()=>openLeaders(account.username)}><Trophy size={14}/>Your record</button><button className="secondary compact" onClick={()=>openShop()}><Store size={14}/>Shop</button></span>}<button className="text-button" disabled={busy} onClick={logOut}><LogOut size={14}/>Log out</button></div></>:<><span className="eyebrow">OPTIONAL · NO EMAIL NEEDED</span><h2>{authMode==='register'?'Make an account.':'Welcome back.'}</h2><p>Get a profile picture, and your seat back from any computer.</p><form onSubmit={e=>{e.preventDefault();signIn();}}><label>Username<input autoFocus value={authName} maxLength={20} minLength={2} required autoComplete="username" onChange={e=>setAuthName(e.target.value)}/></label><label>Password<input type="password" value={password} minLength={6} maxLength={72} required autoComplete={authMode==='register'?'new-password':'current-password'} onChange={e=>setPassword(e.target.value)}/></label><button className="primary" disabled={busy}>{authMode==='register'?'Create account':'Log in'}<ArrowRight size={17}/></button></form><button className="text-button" onClick={()=>setAuthMode(authMode==='register'?'login':'register')}>{authMode==='register'?'Already have an account? Log in':'New here? Make an account'}</button>{authMode==='register'&&<small>There is no email reset, so keep your password somewhere safe.</small>}</>):dialog==='reset'?<><span className="eyebrow">END THIS GAME EARLY</span><h2>Ask the table.</h2><p>Ending a game early needs a majority of the players who are online. They get a minute to agree. Either way, nobody wins and the game is not recorded.</p><div className="reset-choices"><button className="secondary" disabled={busy} onClick={()=>action('propose',{kind:'reveal'})}><Eye size={16}/><span><strong>Reveal every character and end</strong><small>Everyone sees who was who, and the full game log.</small></span></button><button className="secondary" disabled={busy} onClick={()=>action('propose',{kind:'lobby'})}><RotateCcw size={16}/><span><strong>Go back to the lobby</strong><small>Characters stay secret. Everyone keeps their seat, and new players can join.</small></span></button></div></>:dialog==='group'?<><span className="eyebrow">A PRIVATE CIRCLE</span><h2>Start a group.</h2><p>Only the players you pick can read it, and only they will see that it exists.</p><form onSubmit={e=>{e.preventDefault();submitGroup();}}><label>Group name<input autoFocus value={groupTitle} maxLength={30} placeholder="Optional" onChange={e=>setGroupTitle(e.target.value)}/></label><fieldset className="member-pick"><legend>Invite at least two players</legend>{seats.filter(p=>p.id!==g.me.id).map(p=><label key={p.id}><input type="checkbox" checked={groupPick.includes(p.id)} onChange={()=>setGroupPick(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])}/>{p.name}{!p.alive&&' (dead)'}</label>)}</fieldset><button className="primary" disabled={busy||groupPick.length<2}>Create group<ArrowRight size={17}/></button></form></>:dialog==='slayer'?<><span className="eyebrow">A PUBLIC, ONCE-PER-GAME CLAIM</span><h2>Take your shot?</h2><p>Everyone will see you claim Slayer and target {chosen?.name}. Anyone can bluff this action. Only a functioning Slayer can cause a death.</p><button className="primary" disabled={busy} onClick={()=>action('slayer',{target:selected})}>Shoot {chosen?.name}<Target size={16}/></button></>:<><span className="eyebrow">THE STORY BEGINS WITH YOU</span><h2>{dialog==='create'?'Gather your circle.':'A seat at the table.'}</h2><p>{dialog==='create'?'Create a room code and invite 4–14 friends. The host plays too.':'Enter your name and the code from your host.'}</p><form onSubmit={e=>{e.preventDefault();action(dialog==='create'?'create':'join');}}><label>Your name<input autoFocus value={name} maxLength={24} required placeholder="What should the town call you?" onChange={e=>setName(e.target.value)}/></label>{dialog==='join'&&<label>Room code<input className="code-input" value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,''))} maxLength={8} minLength={8} required placeholder="ABCDEFGH"/></label>}<button className="primary" disabled={busy}>{busy?'Taking your seat…':dialog==='create'?'Create the table':'Join the table'}<ArrowRight size={17}/></button>{dialog==='join'&&<button type="button" className="secondary" disabled={busy||!name.trim()||joinCode.length!==8} onClick={()=>action('spectate')}><Eye size={16}/>Just watch</button>}</form>{dialog==='join'&&<small>Spectators can watch a game already in progress, but cannot talk or vote.</small>}<small>No account needed. Your seat is saved in this browser.</small>{accountsOn&&!account&&<button className="text-button" onClick={()=>openAccount(dialog)}><Camera size={14}/>Make an account to add a picture</button>}</>}</section></div>}
- {drawer&&<div className="drawer-backdrop" onClick={()=>setDrawer(null)}><section className="handbook" role="dialog" aria-modal="true" aria-label={drawer==='roles'?'Character reference':drawer==='leaders'?'Players':drawer==='log'?'Game log':drawer==='shop'?'Shop':'How to play and Storyteller policy'} onClick={e=>e.stopPropagation()}><button className="modal-close icon-button" aria-label="Close reference" onClick={()=>setDrawer(null)}><X size={21}/></button>{drawer==='roles'?<><span className="eyebrow">THE CHARACTER ALMANAC</span><h2>Know the possibilities.</h2><p>All {scriptRoles.length} {SCRIPTS[script]} characters. The script is public; who is in play is a secret.</p><SetupChart script={script} players={g?seats.length:null}/><div className="role-tabs">{Object.entries(types).map(([key,name])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{name}</button>)}</div>{scriptRoles.filter(r=>r.type===tab).map(r=><article className={`reference-card ${r.type}`} key={r.id}><span className="reference-symbol"><RoleIcon id={r.id}/></span><div><h3>{r.name}</h3><p>{r.help}</p><a href={r.wiki} target="_blank" rel="noreferrer">Official rules & strategy ↗</a></div></article>)}</>:drawer==='leaders'?<Leaderboard key={leaderPlayer||''} me={account?.username} start={leaderPlayer}/>:drawer==='log'?(g?.timeline?<GameLog g={g}/>:<p className="small">The game log opens when the game ends.</p>):drawer==='shop'?<Shop account={account} wallet={wallet} onWallet={gotWallet} inGame={!!g&&!['lobby','ended'].includes(phase)} onLogin={()=>{setDrawer(null);openAccount();}}/>:<Help/>}</section></div>}
+ {drawer&&<div className="drawer-backdrop" onClick={()=>setDrawer(null)}><section className="handbook" role="dialog" aria-modal="true" aria-label={drawer==='roles'?'Character reference':drawer==='leaders'?'Players':drawer==='log'?'Game log':drawer==='shop'?'Shop':'How to play and Storyteller policy'} onClick={e=>e.stopPropagation()}><button className="modal-close icon-button" aria-label="Close reference" onClick={()=>setDrawer(null)}><X size={21}/></button>{drawer==='roles'?<><span className="eyebrow">THE CHARACTER ALMANAC</span><h2>Know the possibilities.</h2><p>All {scriptRoles.length} {SCRIPTS[script]} characters. The script is public; who is in play is a secret.</p><SetupChart script={script} players={g?seats.length:null}/><div className="role-tabs">{Object.entries(types).map(([key,name])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{name}</button>)}</div>{scriptRoles.filter(r=>r.type===tab).map(r=><article className={`reference-card ${r.type}`} key={r.id}><span className="reference-symbol"><RoleIcon id={r.id}/></span><div><h3>{r.name}</h3><p>{r.help}</p><a href={r.wiki} target="_blank" rel="noreferrer">Official rules & strategy ↗</a></div></article>)}</>:drawer==='leaders'?<Leaderboard key={leaderPlayer||''} me={account?.username} start={leaderPlayer} onWallet={gotWallet}/>:drawer==='log'?(g?.timeline?<GameLog g={g}/>:<p className="small">The game log opens when the game ends.</p>):drawer==='shop'?<Shop account={account} wallet={wallet} onWallet={gotWallet} inGame={!!g&&!['lobby','ended'].includes(phase)} onLogin={()=>{setDrawer(null);openAccount();}}/>:<Help/>}</section></div>}
  </div>;
 }
 function Help(){return <><span className="eyebrow">WELCOME TO RAVENSWOOD BLUFF</span><h2>Trust a little.<br/>Question everything.</h2><p>A social deduction game for 5–15 human players. The website runs the Storyteller; you bring the conversation.</p>{[

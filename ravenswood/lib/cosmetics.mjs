@@ -26,6 +26,9 @@ export const ITEMS = Object.freeze([
   { id: 'clock', kind: 'frame', name: 'The Clocktower', tier: 'legendary', price: 1600, blurb: 'A gilded clock face that turns while the town sleeps.' },
   { id: 'demon_crown', kind: 'frame', name: 'Demon’s Crown', tier: 'unlock', unlock: 'demon_wins', blurb: 'Horns and embers for those who have ruled the night.' },
   { id: 'halo', kind: 'frame', name: 'Halo', tier: 'unlock', unlock: 'good_wins', blurb: 'For a true defender of the town.' },
+  { id: 'raven', kind: 'frame', name: 'Raven’s Wing', tier: 'rare', chest: true, blurb: 'Black feathers with a blue sheen.' },
+  { id: 'frost', kind: 'frame', name: 'Hoarfrost', tier: 'epic', chest: true, blurb: 'A ring of ice that never melts.' },
+  { id: 'eclipse', kind: 'frame', name: 'Eclipse', tier: 'legendary', chest: true, blurb: 'A black sun with a burning gold corona.' },
 
   { id: 'ash', kind: 'color', name: 'Ash', tier: 'common', price: 100, blurb: 'Soft grey, like the morning after a fire.' },
   { id: 'moss', kind: 'color', name: 'Moss', tier: 'common', price: 100, blurb: 'The green of the old churchyard.' },
@@ -35,6 +38,9 @@ export const ITEMS = Object.freeze([
   { id: 'moonlit', kind: 'color', name: 'Moonlit', tier: 'epic', price: 900, blurb: 'Silver and blue light that drifts across your name.' },
   { id: 'bloodmoon', kind: 'color', name: 'Blood Moon', tier: 'legendary', price: 1400, blurb: 'A slow crimson shimmer. Everyone will notice.' },
   { id: 'ghostlight', kind: 'color', name: 'Ghostlight', tier: 'unlock', unlock: 'grave_wins', blurb: 'A pale glow for those who win from the grave.' },
+  { id: 'bone', kind: 'color', name: 'Bone', tier: 'common', chest: true, blurb: 'Old ivory, dug up from somewhere.' },
+  { id: 'verdigris', kind: 'color', name: 'Verdigris', tier: 'rare', chest: true, blurb: 'The green of an old copper bell.' },
+  { id: 'aurora', kind: 'color', name: 'Aurora', tier: 'legendary', chest: true, blurb: 'Northern lights rolling across your name.' },
 
   { id: 'townsfolk', kind: 'title', name: 'Townsfolk at Heart', tier: 'common', price: 100, blurb: 'Honest. Probably.' },
   { id: 'night_owl', kind: 'title', name: 'Night Owl', tier: 'common', price: 100, blurb: 'Always awake when it matters.' },
@@ -46,8 +52,28 @@ export const ITEMS = Object.freeze([
   { id: 'saint', kind: 'title', name: 'The Saint', tier: 'unlock', unlock: 'saint_win', blurb: 'Survived the town’s judgement.' },
   { id: 'mastermind', kind: 'title', name: 'Mastermind', tier: 'unlock', unlock: 'minion_wins', blurb: 'The hand behind the Demon.' },
   { id: 'veteran', kind: 'title', name: 'Veteran', tier: 'unlock', unlock: 'veteran', blurb: 'Fifty stories told.' },
+  { id: 'collector', kind: 'title', name: 'The Collector', tier: 'common', chest: true, blurb: 'Keeps everything. Just in case.' },
+  { id: 'high_roller', kind: 'title', name: 'High Roller', tier: 'rare', chest: true, blurb: 'Bets it all, every time.' },
+  { id: 'fortune', kind: 'title', name: 'Fortune’s Favourite', tier: 'epic', chest: true, blurb: 'The dice always seem to land their way.' },
 ]);
 export const ITEM = Object.freeze(Object.fromEntries(ITEMS.map(i => [i.id, i])));
+
+// Mystery chests: a random decoration from everything in the shop plus the chest-only items (never the earned ones).
+// The tier is drawn first with these odds, then an item within it. A duplicate refunds part of the price.
+export const CHEST = Object.freeze({ price: 250, refund: 100, odds: Object.freeze({ common: 55, rare: 30, epic: 11, legendary: 4 }) });
+export const CHEST_ITEMS = Object.freeze(ITEMS.filter(i => i.price || i.chest));
+export function rollChest(random = Math.random) {
+  const tiers = Object.entries(CHEST.odds), total = tiers.reduce((n, [, w]) => n + w, 0);
+  let r = random() * total, tier = tiers[0][0];
+  for (const [t, w] of tiers) { if (r < w) { tier = t; break; } r -= w; }
+  const pool = CHEST_ITEMS.filter(i => i.tier === tier);
+  return pool[Math.floor(random() * pool.length)].id;
+}
+// Gifting points: small amounts, a daily cap, and only to someone you have played a recorded game with,
+// so a second account cannot simply funnel points to a main one.
+export const GIFT = Object.freeze({ min: 10, max: 100, daily: 100, minGames: 5 });
+// Spectator bets on which team wins: a right call pays back double the stake.
+export const BET = Object.freeze({ min: 10, max: 100 });
 
 // Only real items of the right kind survive, so a removed item simply disappears.
 export function lookOf(raw) {
