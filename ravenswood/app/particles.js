@@ -47,8 +47,9 @@ function step(now){
   if(parts.length)requestAnimationFrame(step);else{running=false;ctx.clearRect(0,0,canvas.width,canvas.height);}
 }
 function draw(p,s){
-  ctx.globalCompositeOperation=p.kind==='glow'||p.kind==='spark'?'lighter':'source-over';
+  ctx.globalCompositeOperation=p.kind==='glow'||p.kind==='spark'||p.kind==='wisp'?'lighter':'source-over';
   if(p.kind==='glow'||p.kind==='puff'){ctx.drawImage(glow(p.color),p.x-s,p.y-s,s*2,s*2);return;}
+  if(p.kind==='wisp'){const lean=Math.sin(p.age*3+p.phase)*.25;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(lean);ctx.scale(.45,1.9);ctx.drawImage(glow(p.color),-s,-s,s*2,s*2);ctx.restore();return;}
   ctx.save();ctx.translate(p.x,p.y);
   if(p.kind==='spark'){const a=Math.atan2(p.vy,p.vx),len=Math.min(14,Math.hypot(p.vx,p.vy)*.035)+s;ctx.rotate(a);ctx.strokeStyle=p.color;ctx.lineWidth=s*.6;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-len,0);ctx.lineTo(0,0);ctx.stroke();}
   else if(p.kind==='flake'){ctx.rotate(p.rot);ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-s,-s*.4);ctx.lineTo(s*.6,-s*.7);ctx.lineTo(s,s*.3);ctx.lineTo(-s*.3,s*.6);ctx.closePath();ctx.fill();}
@@ -67,7 +68,8 @@ const PRESETS={
   ink:(x,y,c,n,k)=>{for(let i=0;i<n(15);i++){const a=rnd(0,6.283),v=rnd(110,260)*k;add({kind:'drop',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-50*k,ay:420*k,drag:2.2,life:rnd(.55,.95),size:rnd(1.8,3.6)*k,color:pick(c)});}},
   feathers:(x,y,c,n,k)=>{for(let i=0;i<n(6);i++)add({kind:'feather',x:x+rnd(-8,8)*k,y,vx:rnd(-50,50)*k,vy:rnd(-110,-60)*k,ay:70*k,drag:1.6,sway:38*k,vr:rnd(-3,3),rot:rnd(0,6.28),life:rnd(1.8,2.6),size:rnd(7,10)*k,color:pick(c)});},
   smoke:(x,y,c,n,k)=>{for(let i=0;i<n(9);i++)add({kind:'puff',x:x+rnd(-4,4)*k,y:y-4*k,vx:rnd(-8,8)*k,vy:rnd(-55,-30)*k,sway:12*k,life:rnd(1.6,2.4),size:rnd(4,6)*k,grow:2.4,color:pick(c),alpha:.55});},
-  wisps:(x,y,c,n,k)=>{for(let i=0;i<n(9);i++)add({kind:'puff',x:x+rnd(-12,12)*k,y:y+rnd(-6,6)*k,vx:rnd(-10,10)*k,vy:rnd(-70,-35)*k,sway:26*k,life:rnd(1.4,2.2),size:rnd(4,7)*k,grow:1.6,color:pick(c),alpha:.8});},
+  wisps:(x,y,c,n,k)=>{for(let i=0;i<n(12);i++)add({kind:'wisp',x:x+rnd(-14,14)*k,y:y+rnd(-4,8)*k,vx:rnd(-6,6)*k,vy:rnd(-58,-26)*k,drag:.3,sway:18*k,life:rnd(1.3,2.1),size:rnd(2.4,4.2)*k,grow:.5,color:pick(c),alpha:.75});
+    add({kind:'glow',x,y,vx:0,vy:-8*k,life:.9,size:18*k,grow:.5,color:c[c.length-1],alpha:.35});},
 };
 // Plays an effect centred on an element. Colours come from the decoration that caused it.
 export function playOn(el,preset,colors,scale){

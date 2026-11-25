@@ -56,7 +56,7 @@ export const ITEMS = Object.freeze([
   { id: 'gilded_hand', kind: 'hand', name: 'Gilded Hand', tier: 'common', price: 150, fx: 'sparks', tint: ['#fff1c2', '#f2c35b', '#d99a2b'], blurb: 'A shower of gold sparks with every vote.' },
   { id: 'bone_hand', kind: 'hand', name: 'Bone Hand', tier: 'rare', price: 300, fx: 'dust', tint: ['#fff8e8', '#e9dcc0', '#cfc2a4'], blurb: 'Old ivory, and a little dust.' },
   { id: 'ember_hand', kind: 'hand', name: 'Ember Hand', tier: 'epic', price: 800, fx: 'embers', tint: ['#ffb347', '#ff7a1c', '#ffd27a'], blurb: 'Your vote rises like sparks from a fire.' },
-  { id: 'ghost_hand', kind: 'hand', name: 'Ghostly Hand', tier: 'rare', chest: true, fx: 'wisps', tint: ['#c8f3ff', '#8fd8ff'], blurb: 'Pale wisps curl up from your fingers.' },
+  { id: 'ghost_hand', kind: 'hand', name: 'Ghostly Hand', tier: 'rare', chest: true, fx: 'wisps', tint: ['#bff3ff', '#8fe2ff', '#6fc9ff'], blurb: 'Pale wisps curl up from your fingers.' },
   { id: 'crimson_hand', kind: 'hand', name: 'Crimson Hand', tier: 'legendary', chest: true, fx: 'ink', tint: ['#ff3b4a', '#b5121f', '#ff8a8a'], blurb: 'Every vote leaves a spatter of red.' },
   // Death marks: what plays when you die, and the mark your seat keeps afterwards.
   { id: 'ash_mark', kind: 'mark', name: 'Ashes', tier: 'common', price: 150, fx: 'ash', icon: 'wind', tint: ['#8b8794', '#5d5a63', '#b9b4bf'], blurb: 'You crumble, and drift away on the wind.' },

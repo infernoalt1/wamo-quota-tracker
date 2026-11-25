@@ -727,7 +727,10 @@ button.leader-row:hover{background:#ffffff08}
 .hand-indicator.hand-gilded_hand{background:linear-gradient(160deg,#fff3cc,#e2b04e 60%,#a8741f);color:#3a2608;box-shadow:0 0 8px #f2c35b99}
 .hand-indicator.hand-bone_hand{background:linear-gradient(160deg,#fffaf0,#e5d8bb);color:#4a3f2c;box-shadow:0 0 6px #fff6dd66}
 .hand-indicator.hand-ember_hand{background:radial-gradient(circle at 40% 35%,#ffe1a3,#ff8a1f 60%,#b8400c);color:#3a1204;box-shadow:0 0 10px #ff7a1caa}
-.hand-indicator.hand-ghost_hand{background:radial-gradient(circle at 40% 35%,#f2fcff,#9fe0ff 70%);color:#1d4656;box-shadow:0 0 10px #9fe0ffaa}
+/* Ghostly Hand: a dark, see-through badge with a pale glowing hand that floats gently. */
+.hand-indicator.hand-ghost_hand{background:radial-gradient(circle at 50% 40%,#1f4150e6,#0b1820f2 75%);color:#e4fbff;border:1px solid #9fe9ff80;box-shadow:0 0 9px #7fd8ff77,inset 0 0 6px #9fe9ff44;animation:ghost-float 2.6s ease-in-out infinite}
+.hand-indicator.hand-ghost_hand svg{filter:drop-shadow(0 0 3px #bff3ff) drop-shadow(0 0 6px #7fd8ff99)}
+@keyframes ghost-float{0%,100%{transform:translateY(0);opacity:1}50%{transform:translateY(-2px);opacity:.82}}
 .hand-indicator.hand-crimson_hand{background:radial-gradient(circle at 40% 35%,#ff8a8a,#c4141f 65%,#6e0910);color:#fff0f0;box-shadow:0 0 10px #ff3b4aaa}
 /* Death marks: the icon a dead seat keeps, tinted to match. */
 .seat.dead .mark-icon{opacity:.9}
