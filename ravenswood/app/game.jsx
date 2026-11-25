@@ -206,29 +206,68 @@ function BetPanel({bets,loggedIn,busy,onBet,onLogin}){
   </>}
  </section>;
 }
-// For admins only: give points to a player, or take some back.
+// For admins only: everyone's points, each player's history, and giving points or taking them back.
+const when=at=>new Date(at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+const signed=n=>n>0?`+${n}`:`${n}`;
+function activityText(a){
+ const item=ITEM[a.item]?.name||a.item;
+ switch(a.kind){
+  case 'game':return <>{a.won?'Won':'Lost'} as {ROLES[a.item]?.name||a.item}{a.script&&<small> · {SCRIPTS[a.script]||a.script}</small>}</>;
+  case 'buy':return <>Bought <b>{item}</b></>;
+  case 'chest':return <>Opened a chest: <b className={`tier-text-${ITEM[a.item]?.tier||'common'}`}>{item}</b></>;
+  case 'chest_refund':return <>Duplicate {item}, refunded</>;
+  case 'gift':return a.delta>0?<>Gift from <b>{a.other||'someone'}</b></>:<>Gift to <b>{a.other||'someone'}</b></>;
+  case 'grant':return a.delta>0?<>Given by <b>{a.other||'an admin'}</b></>:<>Taken back by <b>{a.other||'an admin'}</b></>;
+  case 'bet':return a.delta>0?'Won a spectator bet':'Lost a spectator bet';
+  default:return a.kind;
+ }
+}
+function AdminPlayer({p}){
+ const t=p.totals,sum=(...k)=>k.reduce((n,x)=>n+(t[x]?.total||0),0),count=k=>t[k]?.n||0,plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
+ const tiles=[
+  ['Games',sum('game'),`${count('game')} played`],
+  ['Shop',sum('buy'),`${count('buy')} bought`],
+  ['Chests',sum('chest','chest_refund'),`${count('chest')} opened · ${plural(count('chest_refund'),'duplicate')}`],
+  ['Gifts',sum('gift','gift_out'),`${count('gift')} in · ${count('gift_out')} out`],
+  ['Bets',sum('bet','bet_out'),`${count('bet')} won · ${count('bet_out')} lost`],
+  ['Admin',sum('grant','grant_out'),plural(count('grant')+count('grant_out'),'change')],
+ ];
+ return <>
+  <div className="admin-player-head"><h3>{p.username}</h3><span className="shop-balance"><Coins size={18}/>{p.balance}<small>points</small></span></div>
+  {p.held>0&&<p className="shop-held"><Dices size={13}/>{p.held} more are riding on a bet right now.</p>}
+  <div className="admin-tiles">{tiles.map(([label,value,sub])=><div key={label} className="admin-tile"><small>{label}</small><b className={value>0?'good':value<0?'evil':''}>{value?signed(value):'0'}</b><small>{sub}</small></div>)}</div>
+  <span className="eyebrow admin-recent-head">HISTORY{p.activity.length>=300?' · LATEST 300':''}</span>
+  {p.activity.length?<ul className="admin-recent admin-history">{p.activity.map((a,i)=><li key={i}><span>{activityText(a)}</span><b className={a.delta>0?'good':a.delta<0?'evil':''}>{a.delta?signed(a.delta):'0'}</b><small>{when(a.at)}</small></li>)}</ul>:<p className="small">Nothing yet.</p>}
+  <p className="small admin-owned">Owns {plural(p.owned.length,'decoration')}{p.owned.length?`: ${p.owned.map(id=>ITEM[id]?.name||id).join(', ')}`:''}.</p>
+ </>;
+}
 function Admin(){
- const [data,setData]=useState(null),[names,setNames]=useState([]),[to,setTo]=useState(''),[amount,setAmount]=useState(100),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null),[error,setError]=useState('');
- useEffect(()=>{
-  getJson('/botc/api/game/admin').then(setData).catch(e=>setError(e.message));
-  getJson('/botc/api/game/leaderboard?script=all').then(d=>setNames(d.players.map(p=>p.username))).catch(()=>{});
- },[]);
+ const [data,setData]=useState(null),[player,setPlayer]=useState(null),[detail,setDetail]=useState(null),[search,setSearch]=useState(''),[sort,setSort]=useState('points'),
+  [to,setTo]=useState(''),[amount,setAmount]=useState(100),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null),[error,setError]=useState('');
+ useEffect(()=>{getJson('/botc/api/game/admin').then(setData).catch(e=>setError(e.message));},[]);
+ const loadPlayer=name=>getJson(`/botc/api/game/admin/player?username=${encodeURIComponent(name)}`).then(d=>setDetail(d.player)).catch(e=>setMsg({ok:false,text:e.message}));
+ useEffect(()=>{setDetail(null);if(player){setTo(player);loadPlayer(player);}},[player]);
  async function grant(sign){
   const n=Math.abs(Math.round(Number(amount)))*sign;
   if(busy||!to.trim()||!n)return;setBusy(true);setMsg(null);
-  try{const d=await postJson('/botc/api/game/admin/grant',{to:to.trim(),amount:n});setData(d);const g=d.granted;setMsg({ok:true,text:`${g.amount>0?`Gave ${g.to} ${g.amount}`:`Took ${-g.amount} from ${g.to}`} points. They now have ${g.balance}.`});}
-  catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
+  try{
+   const d=await postJson('/botc/api/game/admin/grant',{to:to.trim(),amount:n}),g=d.granted;setData(d);
+   setMsg({ok:true,text:`${g.amount>0?`Gave ${g.to} ${g.amount}`:`Took ${-g.amount} from ${g.to}`} points. They now have ${g.balance}.`});
+   if(player&&player.toLowerCase()===g.to.toLowerCase())loadPlayer(player);
+  }catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
  }
- const head=<><span className="eyebrow"><ShieldCheck size={13}/>ADMIN</span><h2>Hand out points.</h2></>;
+ const head=<><span className="eyebrow"><ShieldCheck size={13}/>ADMIN</span><h2>The town’s purse.</h2></>;
  if(error)return <>{head}<p className="status-note error"><X size={15}/><span>{error}</span></p></>;
  if(!data)return <>{head}<p className="small">Opening…</p></>;
- const n=Math.abs(Math.round(Number(amount)))||0;
+ const n=Math.abs(Math.round(Number(amount)))||0,q=search.trim().toLowerCase();
+ const order={name:(a,b)=>a.username.localeCompare(b.username),newest:(a,b)=>b.joined-a.joined,points:(a,b)=>b.balance-a.balance}[sort];
+ const players=data.players.filter(p=>!q||p.username.toLowerCase().includes(q)).sort(order);
+ const total=data.players.reduce((s,p)=>s+p.balance,0);
  return <>
   {head}
-  <p>Points you give show up in the player's shop at once, under gifts. Taking points back can leave a balance below zero.</p>
   <form className="admin-grant" onSubmit={e=>{e.preventDefault();grant(1);}}>
    <label>Player<input value={to} maxLength={20} required list="admin-names" autoComplete="off" placeholder="Username" onChange={e=>setTo(e.target.value)}/></label>
-   <datalist id="admin-names">{names.map(x=><option key={x} value={x}/>)}</datalist>
+   <datalist id="admin-names">{data.players.map(p=><option key={p.username} value={p.username}/>)}</datalist>
    <label>Points<input type="number" inputMode="numeric" min="1" max={data.max} step="1" value={amount} onChange={e=>setAmount(e.target.value)}/></label>
    <div className="admin-buttons">
     <button className="primary compact" disabled={busy||!to.trim()||!n}><Plus size={14}/>Give {n}</button>
@@ -236,8 +275,22 @@ function Admin(){
    </div>
   </form>
   {msg&&<p className={`status-note ${msg.ok?'good':'error'}`}>{msg.ok?<Check size={15}/>:<X size={15}/>}<span>{msg.text}</span></p>}
-  <span className="eyebrow admin-recent-head">RECENT</span>
-  {data.grants.length?<ul className="admin-recent">{data.grants.map((x,i)=><li key={i}><span><b>{x.to}</b>{x.by?<small> · by {x.by}</small>:null}</span><b className={x.amount>0?'good':'evil'}>{x.amount>0?'+':''}{x.amount}</b><small>{new Date(x.at).toLocaleDateString([],{month:'short',day:'numeric'})}</small></li>)}</ul>:<p className="small">Nobody has been given points yet.</p>}
+  {player?<>
+   <button className="text-button back-link" onClick={()=>setPlayer(null)}><ArrowLeft size={14}/>All players</button>
+   {detail?<AdminPlayer p={detail}/>:<p className="small">Opening {player}’s history…</p>}
+  </>:<>
+   <div className="admin-list-head"><span className="eyebrow">PLAYERS · {data.players.length}</span><small>{total} points in all</small></div>
+   <div className="admin-filter">
+    <input value={search} placeholder="Search players" aria-label="Search players" onChange={e=>setSearch(e.target.value)}/>
+    <select value={sort} aria-label="Sort players" onChange={e=>setSort(e.target.value)}><option value="points">Most points</option><option value="name">Name</option><option value="newest">Newest</option></select>
+   </div>
+   {players.length?<ul className="admin-players">{players.map(p=><li key={p.username}><button onClick={()=>setPlayer(p.username)}>
+    <span className="admin-name">{p.username}<small>{p.games} game{p.games===1?'':'s'} · spent {p.spent}{p.held?` · ${p.held} on a bet`:''}</small></span>
+    <b>{p.balance}</b>
+   </button></li>)}</ul>:<p className="small">No players match.</p>}
+   <span className="eyebrow admin-recent-head">RECENT ADMIN CHANGES</span>
+   {data.grants.length?<ul className="admin-recent">{data.grants.map((x,i)=><li key={i}><span><b>{x.to}</b>{x.by?<small> · by {x.by}</small>:null}</span><b className={x.amount>0?'good':'evil'}>{signed(x.amount)}</b><small>{when(x.at)}</small></li>)}</ul>:<p className="small">Nobody has been given points yet.</p>}
+  </>}
  </>;
 }
 const hoursLeft=at=>{const h=Math.max(1,Math.ceil((at-Date.now())/3600000));return h===1?'1 hour':`${h} hours`;};

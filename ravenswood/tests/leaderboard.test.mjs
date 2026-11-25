@@ -25,13 +25,19 @@ function memoryStore(){
     async wallet(id){const mine=this.items.filter(i=>i.account===id);return {earned:rows.filter(r=>r.account===id).reduce((n,r)=>n+(r.points||0),0),spent:mine.reduce((n,i)=>n+i.price,0),adjust:this.ledger.filter(l=>l.account===id).reduce((n,l)=>n+l.delta,0),owned:mine.map(i=>i.item)};},
     async balance(id){const w=await this.wallet(id);return w.earned-w.spent+w.adjust;},
     async buy(id,item,price,held=0){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(await this.balance(id)-held<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
-    async openChest(id,{price,refund,held=0,roll}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',at:new Date()});else this.items.push({account:id,item,price:0});return {result:'opened',item,duplicate};},
+    async openChest(id,{price,refund,held=0,roll}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',item,at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',item,at:new Date()});else this.items.push({account:id,item,price:0});return {result:'opened',item,duplicate};},
     async gift({from,to,amount,held=0,daily,since}){if(await this.giftsSent(from,since)+amount>daily)return 'cap';if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
     async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
     async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
     async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
     async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
+    async balances(){return Promise.all(accounts.map(async a=>{const w=await this.wallet(a.id);return {id:a.id,username:a.username,created_at:new Date(),earned:w.earned,spent:w.spent,adjust:w.adjust,games:rows.filter(r=>r.account===a.id).length};}));},
+    async activity(id){const name=x=>accounts.find(a=>a.id===x)?.username??null;return [
+      ...rows.filter(r=>r.account===id).map(r=>({kind:'game',delta:r.points||0,item:r.initialRole,won:r.won,script:games.find(g=>g.id===r.game_id).script,at:games.find(g=>g.id===r.game_id).ended_at})),
+      ...this.items.filter(i=>i.account===id&&i.price>0).map(i=>({kind:'buy',delta:-i.price,item:i.item,at:new Date(0)})),
+      ...this.ledger.filter(l=>l.account===id).map(l=>({kind:l.kind,delta:l.delta,item:l.item,other:name(l.other),at:l.at}))].sort((a,b)=>b.at-a.at);},
+    async activityTotals(id){const t={};for(const r of await this.activity(id)){const k=r.kind+(['gift','grant','bet'].includes(r.kind)&&r.delta<0?'_out':'');t[k]??={kind:k,n:0,total:0};t[k].n++;t[k].total+=r.delta;}return Object.values(t);},
     async addLedger(list){for(const r of list)this.ledger.push({...r,at:new Date()});},
     accountIds:async sessions=>new Map(accounts.filter(a=>sessions.includes(a.session)).map(a=>[a.session,a.id])),
     async saveGame({players,...game}){if(games.some(g=>g.id===game.id))throw Error('duplicate key');games.push({...game,ended_at:new Date(Date.now()+games.length)});for(const p of players)rows.push({game_id:game.id,...p});},
@@ -359,4 +365,23 @@ shopTest('only admins can give points, and the player sees them in their shop',a
   r=await ana.call('/shop');assert.equal(r.data.balance,300);assert.deepEqual(r.data.gifts.map(g=>[g.from,g.amount]),[['Boss',500]]);
   assert.equal((await ana.call('/shop/buy',{item:'brass'})).status,200);
   assert.equal((await boss.call('/shop')).data.gift.left,100);
+  r=await boss.call('/admin');const row=r.data.players.find(p=>p.username==='Ana');
+  assert.equal(row.balance,300-ITEM.brass.price);assert.equal(row.spent,ITEM.brass.price);assert.equal(r.data.players.length,2);
+});
+shopTest('an admin sees the points a player earned, spent, opened and was given',async({store,member})=>{
+  const boss=await member('Boss'),ana=await member('Ana');
+  assert.equal((await ana.call('/admin/player?username=Boss')).status,403);
+  assert.equal((await boss.call('/admin/player?username=Nobody')).status,404);
+  await played(store,ana.account,4,4,{points:30});
+  await boss.call('/admin/grant',{to:'Ana',amount:300});
+  await ana.call('/shop/buy',{item:'brass'});
+  await store.openChest(ana.account.id,{price:CHEST.price,refund:CHEST.refund,roll:()=>'brass'});
+  const r=await boss.call('/admin/player?username=ana');assert.equal(r.status,200,JSON.stringify(r.data));
+  const p=r.data.player;
+  assert.equal(p.username,'Ana');assert.equal(p.balance,120+300-ITEM.brass.price-CHEST.price+CHEST.refund);
+  assert.deepEqual(p.totals.game,{n:4,total:120});assert.deepEqual(p.totals.grant,{n:1,total:300});assert.deepEqual(p.totals.chest,{n:1,total:-CHEST.price});
+  assert.deepEqual(p.totals.chest_refund,{n:1,total:CHEST.refund});assert.deepEqual(p.totals.buy,{n:1,total:-ITEM.brass.price});
+  const kinds=p.activity.map(a=>a.kind);for(const k of ['game','buy','chest','chest_refund','grant'])assert(kinds.includes(k),k);
+  assert.equal(p.activity.find(a=>a.kind==='chest').item,'brass');assert.equal(p.activity.find(a=>a.kind==='grant').other,'Boss');
+  assert.equal(p.activity.find(a=>a.kind==='game').item,'chef');
 });

@@ -712,13 +712,34 @@ button.leader-row:hover{background:#ffffff08}
 .admin-buttons{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
 .admin-recent-head{margin-top:18px}
 .admin-recent{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:2px}
-.admin-recent li{display:grid;grid-template-columns:minmax(0,1fr) auto 56px;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.admin-recent li{display:grid;grid-template-columns:minmax(0,1fr) auto 104px;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
 .admin-recent li>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .admin-recent small{color:var(--muted)}
-.admin-recent li>small{text-align:right}
-.admin-recent .good{color:#9fd98b}
-.admin-recent .evil{color:#f08f8f}
-@media (max-width:420px){.admin-grant{grid-template-columns:1fr}}
+.admin-recent li>small{text-align:right;white-space:nowrap}
+.admin-recent li>b{font-variant-numeric:tabular-nums}
+.admin-recent b{font-weight:600}
+.admin-recent .good,.admin-tile .good{color:#9fd98b}
+.admin-recent .evil,.admin-tile .evil{color:#f08f8f}
+.tier-text-rare{color:#e2c48a}
+.tier-text-epic{color:#cdb2ff}
+.tier-text-legendary{color:#ffd77a}
+.admin-list-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:20px}
+.admin-filter{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px;margin:8px 0}
+.admin-filter input,.admin-filter select{padding:8px 10px}
+.admin-players{list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:360px;overflow-y:auto}
+.admin-players button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--line);border-radius:6px;background:#1c1d23;color:var(--text);text-align:left;cursor:pointer}
+.admin-players button:hover,.admin-players button:focus-visible{border-color:#5b4f6b;background:#22222b}
+.admin-name{display:grid;gap:2px;min-width:0;font-weight:600}
+.admin-name small{font-weight:400}
+.admin-players b{font-family:'Spectral',serif;font-size:18px;color:#f0d9a6;font-variant-numeric:tabular-nums}
+.admin-player-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:4px}
+.admin-player-head h3{margin:0;font-size:22px}
+.admin-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+.admin-tile{display:grid;gap:3px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:#1c1d23}
+.admin-tile>b{font-family:'Spectral',serif;font-size:20px;font-variant-numeric:tabular-nums}
+.admin-history{max-height:420px;overflow-y:auto}
+.admin-owned{margin-top:12px}
+@media (max-width:420px){.admin-grant,.admin-filter{grid-template-columns:1fr}.admin-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-recent li{grid-template-columns:minmax(0,1fr) auto}.admin-recent li>small{grid-column:1/-1;text-align:left}}
 /* Spectator bets. */
 .bet-panel{display:grid;gap:8px;padding:12px;border:1px solid #4a3f57;border-radius:8px;background:#211e29}
 .bet-panel p{font-size:13px;color:#cfc8d8}

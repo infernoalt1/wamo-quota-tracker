@@ -53,7 +53,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys
   const bets=createBets({store});
   const leaderboard=mountLeaderboard(router,{store,rooms,onRecorded:(game,status)=>bets.settle(game,status)});
   mountShop(router,{store,identity,accounts,heldFor:bets.heldFor});
-  mountAdmin(router,{store,identity,admins});
+  mountAdmin(router,{store,identity,admins,heldFor:bets.heldFor});
   // A logged-in spectator stakes points on which team wins the game they are watching.
   router.post('/bet',async(req,res)=>{try{
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).json({error:'Use the game website to bet.'});

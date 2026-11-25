@@ -154,6 +154,25 @@ export function pgStore(pool){
     grant:({to,by,amount})=>query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'grant',$4)",[randomUUID(),to,amount,by]),
     grants:()=>query(`SELECT t.username AS "to",b.username AS "by",l.delta AS amount,l.at FROM botc_ledger l
       JOIN botc_accounts t ON t.id=l.account_id LEFT JOIN botc_accounts b ON b.id=l.other_id WHERE l.kind='grant' ORDER BY l.at DESC LIMIT 20`),
+    // Every account's points, for the admin page.
+    balances:()=>query(`SELECT a.id,a.username,a.created_at,coalesce(g.earned,0)::int AS earned,coalesce(g.games,0)::int AS games,
+      coalesce(i.spent,0)::int AS spent,coalesce(l.adjust,0)::int AS adjust FROM botc_accounts a
+      LEFT JOIN (SELECT account_id,sum(points) AS earned,count(*) AS games FROM botc_game_players GROUP BY account_id) g ON g.account_id=a.id
+      LEFT JOIN (SELECT account_id,sum(price) AS spent FROM botc_items GROUP BY account_id) i ON i.account_id=a.id
+      LEFT JOIN (SELECT account_id,sum(delta) AS adjust FROM botc_ledger GROUP BY account_id) l ON l.account_id=a.id
+      ORDER BY a.created_at LIMIT 2000`),
+    // One account's points coming and going, newest first: games, shop purchases (chest finds are listed as chests), and the ledger.
+    activity:id=>query(`SELECT * FROM (
+      SELECT 'game' AS kind,p.points AS delta,p.initial_role AS item,NULL::text AS other,p.won,g.script,g.ended_at AS at
+        FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id WHERE p.account_id=$1
+      UNION ALL SELECT 'buy',-price,item,NULL,NULL,NULL,bought_at FROM botc_items WHERE account_id=$1 AND price>0
+      UNION ALL SELECT l.kind,l.delta,l.item,o.username,NULL,NULL,l.at FROM botc_ledger l LEFT JOIN botc_accounts o ON o.id=l.other_id WHERE l.account_id=$1
+    ) x ORDER BY at DESC LIMIT 300`,[id]),
+    // Counts and sums by kind over the account's whole history, since the activity list is cut short.
+    activityTotals:id=>query(`SELECT 'game' AS kind,count(*)::int AS n,coalesce(sum(points),0)::int AS total FROM botc_game_players WHERE account_id=$1
+      UNION ALL SELECT 'buy',count(*)::int,coalesce(-sum(price),0)::int FROM botc_items WHERE account_id=$1 AND price>0
+      UNION ALL SELECT kind||CASE WHEN kind IN ('gift','grant','bet') AND delta<0 THEN '_out' ELSE '' END,count(*)::int,sum(delta)::int FROM botc_ledger WHERE account_id=$1
+        GROUP BY kind||CASE WHEN kind IN ('gift','grant','bet') AND delta<0 THEN '_out' ELSE '' END`,[id]),
     sharedGame:async(a,b)=>!!(await one('SELECT 1 FROM botc_game_players x JOIN botc_game_players y ON y.game_id=x.game_id WHERE x.account_id=$1 AND y.account_id=$2 LIMIT 1',[a,b])),
     // Settled bets: one row per bettor, all in one statement.
     async addLedger(rows){
