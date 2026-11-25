@@ -732,15 +732,26 @@ button.leader-row:hover{background:#ffffff08}
 .hand-indicator.hand-ghost_hand svg{filter:drop-shadow(0 0 3px #bff3ff) drop-shadow(0 0 6px #7fd8ff99)}
 @keyframes ghost-float{0%,100%{transform:translateY(0);opacity:1}50%{transform:translateY(-2px);opacity:.82}}
 .hand-indicator.hand-crimson_hand{background:radial-gradient(circle at 40% 35%,#ff8a8a,#c4141f 65%,#6e0910);color:#fff0f0;box-shadow:0 0 10px #ff3b4aaa}
-/* Death marks: the icon a dead seat keeps, tinted to match. */
-.seat.dead .mark-icon{opacity:.9}
-.mark-ash_mark{color:#b4afbc}
-.mark-ink_mark{color:#b0485c}
-.mark-candle_mark{color:#d6a65e}
-.mark-raven_mark{color:#9aa7c9}
-.mark-ember_mark{color:#ff9d4a}
-.mark-wisp_mark{color:#bfefff;filter:drop-shadow(0 0 4px #9fe0ff)}
+/* Death marks: what the seat itself does while its scene plays. Afterwards a dead seat looks like any other. */
+.seat.falling.fall-ash_mark .seat-token,.shop-face.sample-die.fall-ash_mark{animation:die-crumble 1.6s ease-out both}
+.seat.falling.fall-ink_mark .seat-token,.shop-face.sample-die.fall-ink_mark{animation:die-ink 1.8s ease-out both}
+.seat.falling.fall-candle_mark .seat-token,.shop-face.sample-die.fall-candle_mark{animation:die-candle 2s ease-out both}
+.seat.falling.fall-raven_mark .seat-token,.shop-face.sample-die.fall-raven_mark{animation:die-raven 1.8s ease-out both}
+.seat.falling.fall-ember_mark .seat-token,.shop-face.sample-die.fall-ember_mark{animation:die-ember 2s ease-out both}
+.seat.falling.fall-wisp_mark .seat-token,.shop-face.sample-die.fall-wisp_mark{animation:die-wisp 2s ease-out both}
+.shop-face.sample-die{filter:grayscale(1)}
+@keyframes die-crumble{0%{filter:none}8%,24%,40%{transform:translateX(-2px)}16%,32%{transform:translateX(2px)}50%{transform:none;filter:grayscale(1) brightness(1.3)}100%{filter:grayscale(1)}}
+@keyframes die-ink{0%{box-shadow:0 0 0 0 #6e162600}12%{box-shadow:0 0 0 5px #6e1626dd,0 0 26px #4a0c18;filter:brightness(.7) sepia(.6) hue-rotate(-30deg)}100%{box-shadow:0 0 0 0 #6e162600;filter:grayscale(1)}}
+@keyframes die-candle{0%,45%{box-shadow:0 0 18px 5px #ffb34788;filter:sepia(.5) brightness(1.15)}55%{box-shadow:0 0 0 0 #ffb34700;filter:brightness(.55)}100%{filter:grayscale(1)}}
+@keyframes die-raven{0%{filter:none}14%{filter:brightness(.3);box-shadow:0 0 0 6px #0b0c12dd,0 0 32px #000}100%{box-shadow:0 0 0 0 #0b0c1200;filter:grayscale(1)}}
+@keyframes die-ember{0%{filter:none}14%{box-shadow:0 0 0 4px #ff7a1c,0 0 30px 8px #ff6a14aa;filter:sepia(1) saturate(4) hue-rotate(-25deg) brightness(1.25)}100%{box-shadow:0 0 0 0 #ff6a1400;filter:grayscale(1)}}
+@keyframes die-wisp{0%{filter:none}18%{opacity:.55;box-shadow:0 0 0 3px #bff3ffaa,0 0 24px #8fe2ff99;filter:brightness(1.3) grayscale(.6)}100%{opacity:1;box-shadow:0 0 0 0 #8fe2ff00;filter:grayscale(1)}}
+/* The Departing Wisp: a pale copy of the player's picture rising out of the seat. */
+.fx-ghost{position:fixed;z-index:149;pointer-events:none;display:grid;place-items:center;border-radius:50%;overflow:hidden;font-family:'Spectral',serif;font-size:16px;color:#e4fbff;background:radial-gradient(circle at 50% 40%,#bff3ff55,#6fc9ff22 70%);border:1px solid #bff3ffaa;box-shadow:0 0 18px #8fe2ffaa,inset 0 0 12px #bff3ff66;animation:ghost-rise 2.4s ease-out forwards}
+.fx-ghost img{width:100%;height:100%;object-fit:cover;opacity:.5;filter:grayscale(1) brightness(1.5)}
+@keyframes ghost-rise{0%{opacity:0;transform:translateY(0)}15%{opacity:.9}100%{opacity:0;transform:translateY(-95px)}}
 /* Shop samples for hands and marks. */
 .shop-seat{position:relative;display:inline-grid;place-items:center}
 .shop-seat .hand-indicator{right:-6px;top:-4px}
-.dead-token{display:grid;place-items:center;border-radius:50%;background:#222329;border:1px solid #4b4c55;color:#7f808c}
+.sample-hint{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;color:var(--muted)}
+.shop-seat{margin-top:-12px}

@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useRef,Fragment} from 'react';
-import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,Wind,Droplet,Flame,Bird,Ghost} from 'lucide-react';
+import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package} from 'lucide-react';
 import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
 import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT} from '../lib/cosmetics.mjs';
@@ -144,14 +144,17 @@ function SetupChart({script,players}){
  </section>;
 }
 function ChatRow({active,icon,look,title,preview,time,unread,dead,onClick}){return <button className={`chat-row ${active?'active':''} ${unread?'unread':''} ${dead?'dead':''}`} onClick={onClick}><span className={`chat-avatar${frameOf(look)}`}>{icon}</span><span className="chat-row-text"><span className="chat-row-top"><strong>{title}</strong>{time&&<time>{time}</time>}</span><span className="chat-row-bottom"><span className="chat-preview">{preview}</span>{unread>0&&<span className="badge" aria-label={`${unread} unread`}>{unread}</span>}</span></span></button>;}
-// Vote hands and death marks: each plays a particle effect, and a death mark also replaces the skull on a dead seat.
-// Without one, a counted vote gives off small gold sparks and a death a little ash.
-const MARK_ICONS={wind:Wind,droplet:Droplet,flame:Flame,bird:Bird,ghost:Ghost,sparkles:Sparkles};
-function DeathMark({look,size=18}){const item=ITEM[look?.mark],Icon=MARK_ICONS[item?.icon]||Skull;return <Icon size={size} className={item?`mark-icon mark-${item.id}`:undefined}/>;}
+// Vote hands and death marks each play an effect: a hand when it goes up and is counted, a mark once, when its
+// owner dies. Dead seats always show the plain skull afterwards. Without one, a counted vote gives off small gold
+// sparks and a death a little ash.
 const handFx=look=>ITEM[look?.hand]||{fx:'sparks',tint:['#f6dc9c','#c7ab76']};
 const markFx=look=>ITEM[look?.mark]||{fx:'ash',tint:['#8b8794','#5d5a63','#b9b4bf']};
 const seatToken=id=>document.querySelector(`[data-seat="${id}"] .seat-token`);
-const playAt=(el,item,scale)=>playOn(el,item.fx,item.tint,scale);
+const playAt=(el,item,scale,extra)=>playOn(el,item.fx,item.tint,scale,extra);
+// The player's picture or name, for death marks that show it (the Departing Wisp's rising ghost).
+const pictureOf=who=>({avatar:who?.avatar?`/botc/api/game/avatar/${who.avatar}`:null,name:who?.name||''});
+// Plays a death mark on a shop sample: the effect, and the seat going grey for a moment as if it had died.
+function previewDeath(el,item,who){if(!el)return;playAt(el,item,1.2,pictureOf(who));el.classList.add('sample-die',`fall-${item.id}`);setTimeout(()=>el.classList.remove('sample-die',`fall-${item.id}`),2600);}
 // Shop decorations: a frame around the picture, a colour for the name, and a title.
 const frameOf=look=>look?.frame?` framed frame-${look.frame}`:'';
 function Face({className,src,name,look}){return <span className={`${className}${frameOf(look)}`}><Avatar src={src} name={name}/></span>;}
@@ -208,8 +211,8 @@ function ShopSample({item,account,look}){
  const wearing={...look,[item.kind]:item.id};
  if(item.kind==='frame')return <Face className="shop-face" src={account.avatar} name={account.username} look={wearing}/>;
  if(item.kind==='color')return <span className="shop-ink"><Named name={account.username} look={wearing}/></span>;
- if(item.kind==='hand')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><span className={`hand-indicator hand-${item.id}`}><Hand size={11}/></span></span>;
- if(item.kind==='mark')return <span className="shop-seat"><span className="shop-face dead-token"><DeathMark look={{mark:item.id}} size={22}/></span></span>;
+ if(item.kind==='hand')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><span className={`hand-indicator hand-${item.id}`}><Hand size={11}/></span><small className="sample-hint">Click to preview</small></span>;
+ if(item.kind==='mark')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><small className="sample-hint">Click to preview</small></span>;
  return <span className="shop-title-sample"><strong>{account.username}</strong><Title look={wearing}/></span>;
 }
 function Shop({account,wallet,onWallet,inGame,onLogin}){
@@ -279,7 +282,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
    {items.map(item=>{
     const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
-     <button className="shop-sample" title={item.fx?'Click to see the effect':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);if(item.fx)playAt(e.currentTarget.querySelector('.shop-face')||e.currentTarget,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
+     <button className="shop-sample" title={item.fx?'Click to preview':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);const face=e.currentTarget.querySelector('.shop-face')||e.currentTarget;if(item.kind==='mark')previewDeath(face,item,{avatar:account.avatar,name:account.username});else if(item.fx)playAt(face,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
      <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
      <div className="shop-item-action">
       {wearing?<><span className="wearing-tag"><Check size={14}/>Wearing</span><button className="text-button" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:null},`${item.name} is off.`)}>Take off</button></>
@@ -406,7 +409,7 @@ export default function Game(){
   if(kind){setSweep({kind,at:Date.now()});fx('sweep',()=>setSweep(null),1900);}
   if(kind==='dawn'){setDawnHold(true);fx('dawnHold',()=>setDawnHold(false),1500);fx('motes',()=>motes(document.querySelector('.town-inner')),250);}
   // A seat that has just died plays its owner's death mark (a little ash if they have none).
-  if(died.length){fx('fallStart',()=>{setFallen(died);died.forEach(id=>playAt(seatToken(id),markFx(g.players.find(p=>p.id===id)?.look),1.1));fx('fall',()=>setFallen([]),1700);},kind==='dawn'?500:0);}
+  if(died.length){fx('fallStart',()=>{setFallen(died);died.forEach(id=>{const who=g.players.find(p=>p.id===id);playAt(seatToken(id),markFx(who?.look),1.1,pictureOf(who));});fx('fall',()=>setFallen([]),1700);},kind==='dawn'?500:0);}
  },[g]);
  // A hand raised during a vote gives off a small burst of its vote-hand effect. Only hands raised while watching.
  const prevHands=useRef({});
@@ -528,7 +531,7 @@ export default function Game(){
     return <div className={`centerpiece tally ${tally.done?'done':''}`} aria-live="polite"><span className="tally-label">{tally.done?'The count':'Counting'} · {nameOf(b.target)}</span><span key={yes} className={`tally-count ${yes>0?'up':''} ${tally.done&&b.qualified?'enough':''}`}>{yes}</span><span className="center-sub">{tally.done?verdict:`${need} needed`}</span></div>;})()
    :chosen?<div className="seat-menu" role="group" aria-label={`Actions for ${chosen.name}`}><button className="icon-button seat-menu-close" onClick={()=>setSelected(null)} aria-label="Clear selection"><X size={15}/></button><h3><Named name={chosen.name} look={chosen.look}/>{chosen.id===g.me.id?' (you)':''}</h3><button className="primary compact" disabled={busy||g.paused||!!nominateBlock} title={nominateBlock} onClick={()=>action('nominate',{target:chosen.id})}><Hand size={14}/>Nominate</button>{chosen.id!==g.me.id&&<button className="secondary compact" onClick={()=>{openChat(chosen.id);setSelected(null);}}><MessageCircle size={14}/>Whisper</button>}{g.me.moonPending&&chosen.alive&&<button className="primary compact" disabled={busy||g.paused} onClick={()=>action('moonchild',{target:chosen.id})}><Target size={14}/>Moonchild: choose</button>}{script==='tb'&&<button className="secondary compact" disabled={busy||g.paused||!!g.nomination||g.me.slayerUsed} title={g.me.slayerUsed?'You already took your shot.':''} onClick={()=>setDialog('slayer')}><Target size={14}/>Slayer shot</button>}{host&&chosen.pictured&&chosen.id!==g.me.id&&<button className="secondary compact" disabled={busy} onClick={()=>action('hide_avatar',{target:chosen.id})}>{chosen.avatarHidden?<Eye size={14}/>:<EyeOff size={14}/>}{chosen.avatarHidden?'Show picture':'Hide picture'}</button>}{chosen.account&&<button className="secondary compact" onClick={()=>{openLeaders(chosen.account);setSelected(null);}}><Trophy size={14}/>Profile</button>}{nominateBlock&&<small>{nominateBlock}</small>}</div>
    :<div className="centerpiece"><ClockArt timer={dayTimer(g,now)}/><span className="center-sub">{phase==='welcome'||phase==='lobby'?'TRUST IS A FRAGILE THING':phase==='ended'?'EVERY SECRET HAS A STORY':`${living} LIVING · ${seats.length-living} DEAD`}</span></div>}
-   {seats.map((p,i)=>{const a=i/seats.length*Math.PI*2-Math.PI/2,canPick=!p.empty&&pickable(p);return <button key={p.id} data-seat={p.empty?undefined:p.id} className={`seat ${p.empty?'empty':''} ${!p.alive?'dead':''} ${p.away&&phase!=='ended'?'away':''}${p.id===g?.me.id?'you':''} ${targets.includes(p.id)||selected===p.id?'selected':''} ${g?.nomination?.target===p.id?'nominated':''} ${g?.pending&&canPick?'pickable':''} ${tallyYes.has(p.id)?'tally-yes':''} ${tallyOn===p.id?'tally-on':''} ${fallen.includes(p.id)?'falling':''}`} style={{left:`${50+41*Math.cos(a)}%`,top:`${50+41*Math.sin(a)}%`}} onClick={()=>choose(p.id)} disabled={p.empty||!canPick} aria-label={`${p.name}, ${p.alive?'alive':'dead'}${p.away&&phase!=='ended'?', offline':''}${p.id===g?.me.id?', you':''}`}><span className={`seat-token${p.empty?'':frameOf(p.look)}`}>{p.empty?<Armchair size={18}/>:phase==='ended'?<RoleIcon id={p.initialRole}/>:!p.alive?<DeathMark look={p.look}/>:<Avatar src={p.avatar} name={p.name}/>}{p.id===g?.host&&<Crown className="host-crown" size={12}/>}{g?.nomination?.hands[p.id]&&<span className={`hand-indicator ${p.look?.hand?`hand-${p.look.hand}`:''}`}><Hand size={11}/></span>}</span><span className="seat-name"><Named name={p.name} look={p.look}/>{p.id===g?.me.id&&<em>you</em>}</span><span className="seat-sub">{p.empty?'Open':phase==='ended'?ROLES[p.initialRole].name:p.away?'Offline':p.claim?`Claims ${ROLES[p.claim].name}`:!p.alive?(p.ghost?'Ghost vote left':'No vote left'):p.ready?'Ready':phase==='lobby'&&p.look?.title?<Title look={p.look}/>:' '}</span></button>;})}
+   {seats.map((p,i)=>{const a=i/seats.length*Math.PI*2-Math.PI/2,canPick=!p.empty&&pickable(p);return <button key={p.id} data-seat={p.empty?undefined:p.id} className={`seat ${p.empty?'empty':''} ${!p.alive?'dead':''} ${p.away&&phase!=='ended'?'away':''}${p.id===g?.me.id?'you':''} ${targets.includes(p.id)||selected===p.id?'selected':''} ${g?.nomination?.target===p.id?'nominated':''} ${g?.pending&&canPick?'pickable':''} ${tallyYes.has(p.id)?'tally-yes':''} ${tallyOn===p.id?'tally-on':''} ${fallen.includes(p.id)?`falling fall-${p.look?.mark||'plain'}`:''}`} style={{left:`${50+41*Math.cos(a)}%`,top:`${50+41*Math.sin(a)}%`}} onClick={()=>choose(p.id)} disabled={p.empty||!canPick} aria-label={`${p.name}, ${p.alive?'alive':'dead'}${p.away&&phase!=='ended'?', offline':''}${p.id===g?.me.id?', you':''}`}><span className={`seat-token${p.empty?'':frameOf(p.look)}`}>{p.empty?<Armchair size={18}/>:phase==='ended'?<RoleIcon id={p.initialRole}/>:!p.alive?<Skull size={18}/>:<Avatar src={p.avatar} name={p.name}/>}{p.id===g?.host&&<Crown className="host-crown" size={12}/>}{g?.nomination?.hands[p.id]&&<span className={`hand-indicator ${p.look?.hand?`hand-${p.look.hand}`:''}`}><Hand size={11}/></span>}</span><span className="seat-name"><Named name={p.name} look={p.look}/>{p.id===g?.me.id&&<em>you</em>}</span><span className="seat-sub">{p.empty?'Open':phase==='ended'?ROLES[p.initialRole].name:p.away?'Offline':p.claim?`Claims ${ROLES[p.claim].name}`:!p.alive?(p.ghost?'Ghost vote left':'No vote left'):p.ready?'Ready':phase==='lobby'&&p.look?.title?<Title look={p.look}/>:' '}</span></button>;})}
   </div></div>
   {!g?<div className="action-bar"><div className="bar-text"><strong>Everyone has a part to play.</strong><p>A secret character. A circle of friends. Nobody has to sit out as Storyteller.</p></div></div>
   :phase==='lobby'?<div className="action-bar"><Users size={22}/><div className="bar-text"><strong>{seats.length<5?`Waiting for ${5-seats.length} more player${seats.length===4?'':'s'}.`:'Ready when the host is.'}</strong><p>Join from separate devices. Keep this browser to reconnect to your seat.</p></div></div>
