@@ -152,10 +152,17 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .chat-row.dead .chat-avatar{background:#222329;color:#7f808c}
 .avatar-img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
 .nav-avatar{width:22px;height:22px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2d2836;border:1px solid #4c4355;color:#d0bedf;font-size:9px;font-weight:600}
-.account-picture{display:flex;align-items:center;gap:14px;margin:14px 0}
-.account-avatar{width:72px;height:72px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2d2836;border:1px solid #4c4355;color:#d0bedf;font-size:24px;font-weight:600}
+/* Account box: the picture gets its own space, big enough for the widest frames to fit without spilling out. */
+.account-head{display:flex;align-items:center;gap:18px;margin:0 0 16px}
+.account-frame{width:124px;height:124px;flex-shrink:0;display:grid;place-items:center}
+.account-who{min-width:0;display:grid;justify-items:start;gap:2px}
+.account-who h2{margin:2px 0 0;font-size:30px;overflow-wrap:anywhere}
+.account-who .deco-title{margin:0}
+.account-note{font-size:12px;line-height:1.55}
+@media(max-width:420px){.account-head{flex-direction:column;text-align:center}.account-who{justify-items:center}}
+.account-avatar{width:76px;height:76px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2d2836;border:1px solid #4c4355;color:#d0bedf;font-size:24px;font-weight:600}
 .account-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
-.account-picture-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.account-picture-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:12px}
 .file-button{display:inline-flex;flex-direction:row;align-items:center;gap:7px;border-radius:6px;cursor:pointer}
 .file-button.disabled{opacity:.6;cursor:default}
 .file-button input{position:absolute;width:1px;height:1px;opacity:0}
@@ -698,6 +705,20 @@ button.leader-row:hover{background:#ffffff08}
 .gift-box label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .gift-box input{width:100px;padding:7px 10px}
 .gift-box .status-note{margin:0}
+/* The admin page. */
+.admin-grant{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:10px;align-items:end;margin:14px 0 10px}
+.admin-grant label{display:grid;gap:5px;font-size:12px;color:var(--muted)}
+.admin-grant input{width:100%;padding:8px 10px}
+.admin-buttons{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}
+.admin-recent-head{margin-top:18px}
+.admin-recent{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:2px}
+.admin-recent li{display:grid;grid-template-columns:minmax(0,1fr) auto 56px;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.admin-recent li>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-recent small{color:var(--muted)}
+.admin-recent li>small{text-align:right}
+.admin-recent .good{color:#9fd98b}
+.admin-recent .evil{color:#f08f8f}
+@media (max-width:420px){.admin-grant{grid-template-columns:1fr}}
 /* Spectator bets. */
 .bet-panel{display:grid;gap:8px;padding:12px;border:1px solid #4a3f57;border-radius:8px;background:#211e29}
 .bet-panel p{font-size:13px;color:#cfc8d8}

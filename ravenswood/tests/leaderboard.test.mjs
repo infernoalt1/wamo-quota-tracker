@@ -7,6 +7,7 @@ import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
 import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, rollChest } from '../lib/cosmetics.mjs';
 import { createBets } from '../lib/bets.mjs';
+import { adminKeys, GRANT } from '../lib/admin.mjs';
 
 // The same interface as the Postgres store, held in memory.
 function memoryStore(){
@@ -27,8 +28,10 @@ function memoryStore(){
     async openChest(id,{price,refund,held=0,roll}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',at:new Date()});else this.items.push({account:id,item,price:0});return {result:'opened',item,duplicate};},
     async gift({from,to,amount,held=0,daily,since}){if(await this.giftsSent(from,since)+amount>daily)return 'cap';if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
     async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
-    async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
+    async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
+    async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
+    async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
     async addLedger(list){for(const r of list)this.ledger.push({...r,at:new Date()});},
     accountIds:async sessions=>new Map(accounts.filter(a=>sessions.includes(a.session)).map(a=>[a.session,a.id])),
     async saveGame({players,...game}){if(games.some(g=>g.id===game.id))throw Error('duplicate key');games.push({...game,ended_at:new Date(Date.now()+games.length)});for(const p of players)rows.push({game_id:game.id,...p});},
@@ -208,7 +211,7 @@ test('decorations that no longer exist simply disappear',()=>{
 });
 
 async function shop(){
-  const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store}));
+  const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store,admins:adminKeys(' Boss , ')}));
   const server=await new Promise(done=>{const s=app.listen(0,'127.0.0.1',()=>done(s));});
   const base=`http://127.0.0.1:${server.address().port}/botc/api/game`;
   const browser=()=>{let cookie='';return async(path,body)=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(cookie?{cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)}),set=r.headers.get('set-cookie');if(set)cookie=set.split(';')[0];return {status:r.status,data:await r.json()};};};
@@ -266,10 +269,10 @@ async function together(store,a,b,games,points=30){
 shopTest('a chest costs points and gives a random decoration; chest-only items can be worn once found',async({store,member})=>{
   const {call,account}=await member('Ana');
   assert.equal((await call('/shop/chest',{})).status,400);
-  await played(store,account,10,10,{points:30});
+  await played(store,account,10,10,{points:15});
   let r=await call('/shop/chest',{});assert.equal(r.status,200,JSON.stringify(r.data));
   const got=ITEM[r.data.opened.item];assert(got&&(got.price||got.chest));assert.equal(r.data.opened.duplicate,false);
-  assert.equal(r.data.balance,300-CHEST.price);assert(r.data.owned.includes(got.id));
+  assert.equal(r.data.balance,150-CHEST.price);assert(r.data.owned.includes(got.id));
   assert.equal((await call('/shop/chest',{})).status,400);
   assert.equal((await call('/shop/equip',{kind:'frame',item:'eclipse'})).status,400);
   store.items.push({account:account.id,item:'eclipse',price:0});
@@ -338,4 +341,22 @@ shopTest('a spectator bets through the site, and points held in a bet cannot be 
   assert.deepEqual(r.data.bets.mine,{team:'good',stake:100});assert.equal(r.data.bets.pool.good,100);
   const wallet=(await ana.call('/shop')).data;assert.equal(wallet.held,100);assert.equal(wallet.balance,300-100);
   assert.match((await ana.call('/shop/buy',{item:'violet'})).data.error,/enough points/);
+});
+shopTest('only admins can give points, and the player sees them in their shop',async({store,browser,member})=>{
+  assert.deepEqual([...adminKeys('Boss, ana ,,')],['boss','ana']);assert.equal(adminKeys(undefined).size,0);
+  const boss=await member('Boss'),ana=await member('Ana');
+  assert.equal((await boss.call('/account')).data.account.admin,true);assert.equal((await ana.call('/account')).data.account.admin,undefined);
+  assert.equal((await browser()('/admin')).status,403);
+  assert.equal((await ana.call('/admin')).status,403);
+  assert.equal((await ana.call('/admin/grant',{to:'Ana',amount:500})).status,403);
+  let r=await boss.call('/admin');assert.equal(r.status,200);assert.deepEqual(r.data.grants,[]);
+  for(const amount of [0,1.5,'50',GRANT.max+1])assert.equal((await boss.call('/admin/grant',{to:'Ana',amount})).status,400,String(amount));
+  assert.equal((await boss.call('/admin/grant',{to:'Nobody',amount:50})).status,404);
+  r=await boss.call('/admin/grant',{to:'ana',amount:500});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.deepEqual(r.data.granted,{to:'Ana',amount:500,balance:500});
+  r=await boss.call('/admin/grant',{to:'Ana',amount:-200});assert.equal(r.data.granted.balance,300);
+  assert.deepEqual(r.data.grants.map(g=>[g.to,g.by,g.amount]),[['Ana','Boss',-200],['Ana','Boss',500]]);
+  r=await ana.call('/shop');assert.equal(r.data.balance,300);assert.deepEqual(r.data.gifts.map(g=>[g.from,g.amount]),[['Boss',500]]);
+  assert.equal((await ana.call('/shop/buy',{item:'brass'})).status,200);
+  assert.equal((await boss.call('/shop')).data.gift.left,100);
 });

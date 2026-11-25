@@ -148,7 +148,12 @@ export function pgStore(pool){
     },
     giftsSent:async(id,since)=>(await one("SELECT coalesce(-sum(delta),0)::int AS n FROM botc_ledger WHERE account_id=$1 AND kind='gift' AND delta<0 AND at>=$2",[id,since])).n,
     giftsReceived:id=>query(`SELECT a.username,l.delta AS amount,l.at FROM botc_ledger l JOIN botc_accounts a ON a.id=l.other_id
-      WHERE l.account_id=$1 AND l.kind='gift' AND l.delta>0 ORDER BY l.at DESC LIMIT 5`,[id]),
+      WHERE l.account_id=$1 AND l.kind IN ('gift','grant') AND l.delta>0 ORDER BY l.at DESC LIMIT 5`,[id]),
+    balance:async id=>(await one(`SELECT ${BALANCE} AS balance`,[id])).balance,
+    // Points an admin gave (or took back), with who did it.
+    grant:({to,by,amount})=>query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'grant',$4)",[randomUUID(),to,amount,by]),
+    grants:()=>query(`SELECT t.username AS "to",b.username AS "by",l.delta AS amount,l.at FROM botc_ledger l
+      JOIN botc_accounts t ON t.id=l.account_id LEFT JOIN botc_accounts b ON b.id=l.other_id WHERE l.kind='grant' ORDER BY l.at DESC LIMIT 20`),
     sharedGame:async(a,b)=>!!(await one('SELECT 1 FROM botc_game_players x JOIN botc_game_players y ON y.game_id=x.game_id WHERE x.account_id=$1 AND y.account_id=$2 LIMIT 1',[a,b])),
     // Settled bets: one row per bettor, all in one statement.
     async addLedger(rows){
@@ -180,7 +185,9 @@ export function dress(seat,game,look){
 }
 const clientOf=req=>req.headers['x-forwarded-for']?.split(',').at(-1).trim()||req.socket.remoteAddress||'';
 
-export function mountAccounts(router,{store,rooms,identity,setSession}){
+export function mountAccounts(router,{store,rooms,identity,setSession,admins=new Set()}){
+  // Your own account also says whether you are an admin, so the game shows you the admin page.
+  const mine=a=>{const s=summary(a);if(s&&admins.has(keyOf(a.username)))s.admin=true;return s;};
   const hits=new Map();
   function limit(key,max,ms){
     const now=Date.now();
@@ -212,7 +219,7 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
   router.get('/account',handle(async(req,res)=>{
     if(!store)return res.json({enabled:false,account:null});
     const session=identity(req),account=session?await store.bySession(session):null;
-    res.json({enabled:true,account:summary(account),room:account?latestRoom(session):null});
+    res.json({enabled:true,account:mine(account),room:account?latestRoom(session):null});
   }));
   router.post('/account/register',handle(async(req,res)=>{
     limit(`register:${clientOf(req)}`,30,60*MINUTE);
@@ -222,7 +229,7 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
     const account=await store.create({id:randomUUID(),username,key:keyOf(username),hash:await bcrypt.hash(password,10),session});
     if(!account)throw refuse('That username is taken.',409);
     setSession(req,res,session);
-    res.json({account:summary(account),room:latestRoom(session)});
+    res.json({account:mine(account),room:latestRoom(session)});
   }));
   router.post('/account/login',handle(async(req,res)=>{
     const key=keyOf(usernameOf(req.body?.username)),attempts=`login:${key}`;
@@ -233,7 +240,7 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
     const guest=identity(req);
     if(guest&&guest!==account.session&&!await store.bySession(guest))eachSeat(guest,(seat,game)=>{if(game.players.some(p=>p.session===account.session))return false;seat.session=account.session;seat.avatar=pictureOf(account);seat.account=account.username;dress(seat,game,lookOf(account.look));});
     setSession(req,res,account.session);
-    res.json({account:summary(account),room:latestRoom(account.session)});
+    res.json({account:mine(account),room:latestRoom(account.session)});
   }));
   router.post('/account/logout',handle(async(req,res)=>{setSession(req,res,randomUUID());res.json({account:null});}));
   router.post('/account/avatar',handle(async(req,res)=>{
@@ -242,7 +249,7 @@ export function mountAccounts(router,{store,rooms,identity,setSession}){
     limit(`picture:${session}`,30,10*MINUTE);
     const account=await store.setPicture(session,req.body?.image===null?null:jpegOf(req.body?.image));
     eachSeat(session,seat=>{seat.avatar=pictureOf(account);});
-    res.json({account:summary(account)});
+    res.json({account:mine(account)});
   }));
   router.get('/avatar/:id',handle(async(req,res)=>{
     const bytes=store&&UUID.test(req.params.id)?await store.picture(req.params.id):null;
