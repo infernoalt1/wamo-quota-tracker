@@ -125,15 +125,15 @@ export function pgStore(pool){
         return result;
       });
     },
-    // A chest costs points and gives an item; a duplicate gives some points back instead.
-    async openChest(id,{price,refund,held=0,roll}){
+    // A chest costs points and gives an item (a Chroma brings its whole set, from `bundle`); a duplicate gives some points back instead.
+    async openChest(id,{price,refund,held=0,roll,bundle=item=>[item]}){
       return locked([id],async client=>{
         const w=(await client.query(`SELECT ${BALANCE} AS balance,(SELECT coalesce(array_agg(item),'{}') FROM botc_items WHERE account_id=$1) AS owned`,[id])).rows[0];
         if(w.balance-held<price)return {result:'short'};
         const item=roll(),duplicate=w.owned.includes(item);
         await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,item) VALUES($1,$2,$3,'chest',$4)",[randomUUID(),id,-price,item]);
         if(duplicate)await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,item) VALUES($1,$2,$3,'chest_refund',$4)",[randomUUID(),id,refund,item]);
-        else await client.query('INSERT INTO botc_items(account_id,item,price) VALUES($1,$2,0)',[id,item]);
+        else await client.query('INSERT INTO botc_items(account_id,item,price) SELECT $1,x,0 FROM unnest($2::text[]) AS x ON CONFLICT DO NOTHING',[id,bundle(item)]);
         return {result:'opened',item,duplicate};
       });
     },

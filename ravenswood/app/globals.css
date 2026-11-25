@@ -797,3 +797,66 @@ button.leader-row:hover{background:#ffffff08}
 .shop-seat .hand-indicator{right:-6px;top:-4px}
 .sample-hint{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;color:var(--muted)}
 .shop-seat{margin-top:-12px}
+/* Chroma: the rarest chest find. Every piece shifts through the colours of its set. Only 2D transforms, filters and
+   gradients, so it all runs on school computers. */
+@keyframes chroma-hue{to{filter:hue-rotate(360deg)}}
+@keyframes chroma-shift{from{filter:hue-rotate(0deg) saturate(1.2) drop-shadow(0 0 4px #ffffff66)}to{filter:hue-rotate(360deg) saturate(1.2) drop-shadow(0 0 4px #ffffff66)}}
+@keyframes chroma-breathe{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes chroma-border{to{background-position:0 0,-200% 0}}
+/* Frames. Stained Glass: leaded panes whose colours move, with soft light rays behind. */
+.frame-glass{--ring:conic-gradient(#e63946 0 41deg,#120f16 41deg 45deg,#ffb703 45deg 86deg,#120f16 86deg 90deg,#3a86ff 90deg 131deg,#120f16 131deg 135deg,#8338ec 135deg 176deg,#120f16 176deg 180deg,#06d6a0 180deg 221deg,#120f16 221deg 225deg,#fb5607 225deg 266deg,#120f16 266deg 270deg,#4cc9f0 270deg 311deg,#120f16 311deg 315deg,#f72585 315deg 356deg,#120f16 356deg 360deg)}
+.frame-glass::before{padding:10%;animation:chroma-shift 10s linear infinite}
+.frame-glass::after{inset:-40%;z-index:-1;background:repeating-conic-gradient(#fff6d966 0 5deg,transparent 5deg 22.5deg);-webkit-mask:radial-gradient(closest-side,#000 40%,transparent);mask:radial-gradient(closest-side,#000 40%,transparent);animation:deco-spin 40s linear infinite,chroma-breathe 4s ease-in-out infinite}
+/* Will-o-the-Wisps: three marsh lights circling, slowly changing colour. */
+.frame-wisps{--ring:conic-gradient(#1b2233,#3a2d55,#1b3340,#3d3520,#1b2233)}
+.frame-wisps::before{filter:drop-shadow(0 0 3px #9ff6ff88)}
+.frame-wisps::after{inset:-30%;background:radial-gradient(circle at 50% 6%,#fff 0 2.5%,#7df9ff 4%,#7df9ff55 7%,transparent 12%),radial-gradient(circle at 11% 72%,#fff 0 2.5%,#c77dff 4%,#c77dff55 7%,transparent 12%),radial-gradient(circle at 89% 72%,#fff 0 2.5%,#ffd166 4%,#ffd16655 7%,transparent 12%);animation:deco-spin 7s linear infinite,chroma-hue 12s linear infinite}
+/* Kaleidoscope: a rainbow ring, and a mirrored pattern turning the other way behind it. */
+.frame-kaleido{--ring:conic-gradient(#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#5e60ce,#f72585,#ff5d8f)}
+.frame-kaleido::before{animation:chroma-shift 6s linear infinite}
+.frame-kaleido::after{inset:-42%;z-index:-1;background:repeating-conic-gradient(from 15deg,transparent 0 25deg,#ffffff55 25deg 30deg),repeating-conic-gradient(#ff5d8f77 0 10deg,#ffd23f77 10deg 20deg,#3bceac77 20deg 30deg,#5e60ce77 30deg 40deg,#f7258577 40deg 50deg,#4cc9f077 50deg 60deg);-webkit-mask:radial-gradient(closest-side,transparent 34%,#000 52%,transparent);mask:radial-gradient(closest-side,transparent 34%,#000 52%,transparent);animation:deco-spin 16s linear infinite reverse,chroma-breathe 3s ease-in-out infinite}
+/* Name colours. */
+.ink-glass_ink,.ink-wisps_ink,.ink-kaleido_ink{-webkit-background-clip:text;background-clip:text;color:transparent!important;background-size:200% 100%}
+.ink-glass_ink{background-image:linear-gradient(90deg,#ff4d6d,#ffb703,#06d6a0,#3a86ff,#8338ec,#ff4d6d);animation:ink-drift 9s linear infinite;filter:drop-shadow(0 0 3px #ffffff40)}
+.ink-wisps_ink{background-image:linear-gradient(90deg,#7df9ff,#e0c3ff,#c77dff,#ffd166,#80ffdb,#7df9ff);animation:ink-drift 7s linear infinite,wisp-glow 3s ease-in-out infinite}
+.ink-kaleido_ink{background-image:linear-gradient(90deg,#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#5e60ce,#f72585,#ff5d8f);animation:ink-drift 3.5s linear infinite;filter:drop-shadow(0 0 4px #f7258555)}
+@keyframes wisp-glow{0%,100%{filter:drop-shadow(0 0 2px #7df9ff66)}50%{filter:drop-shadow(0 0 7px #c77dffaa)}}
+/* Titles. */
+.deco-title.tier-chroma{font-style:normal;font-weight:600;letter-spacing:.2px;background-image:linear-gradient(90deg,#ff8fab,#ffe08a,#8ff0d0,#9ecbff,#d4a8ff,#ff8fab);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 5s linear infinite;filter:drop-shadow(0 0 4px #ffffff33)}
+.deco-title.tier-chroma::before{content:'\25C8  ';font-style:normal}
+/* Vote hands. */
+.hand-indicator.hand-glass_hand{background:conic-gradient(#e63946 0 60deg,#ffb703 60deg 120deg,#06d6a0 120deg 180deg,#3a86ff 180deg 240deg,#8338ec 240deg 300deg,#fb5607 300deg);color:#fff;box-shadow:0 0 0 1px #120f16,0 0 10px #ffffff77;animation:chroma-hue 6s linear infinite}
+.hand-indicator.hand-wisps_hand{background:radial-gradient(circle at 50% 40%,#2a2340,#0d0b16);color:#f4fbff;border:1px solid #7df9ff88;animation:wisp-hand 2.4s linear infinite}
+.hand-indicator.hand-kaleido_hand{background:conic-gradient(#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#5e60ce,#f72585,#ff5d8f);color:#fff;box-shadow:0 0 10px #f7258588;animation:chroma-hue 3s linear infinite}
+.hand-indicator.hand-glass_hand svg,.hand-indicator.hand-kaleido_hand svg{filter:drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)}
+@keyframes wisp-hand{0%,100%{box-shadow:0 0 8px #7df9ffaa}33%{box-shadow:0 0 8px #c77dffaa}66%{box-shadow:0 0 8px #ffd166aa}}
+/* Death marks: what the seat itself does while the scene plays. */
+.seat.falling.fall-glass_mark .seat-token,.shop-face.sample-die.fall-glass_mark{animation:die-glass 2s ease-out both}
+.seat.falling.fall-wisps_mark .seat-token,.shop-face.sample-die.fall-wisps_mark{animation:die-wisps 2.2s ease-out both}
+.seat.falling.fall-kaleido_mark .seat-token,.shop-face.sample-die.fall-kaleido_mark{animation:die-kaleido 2s ease-in-out both}
+@keyframes die-glass{0%{filter:brightness(1) saturate(1) hue-rotate(0deg) grayscale(0);box-shadow:0 0 0 0 #fff0,0 0 0 #fff0}10%{filter:brightness(2.2) saturate(0) hue-rotate(0deg) grayscale(0);box-shadow:0 0 0 4px #ffffffcc,0 0 34px #ffffff}35%{filter:brightness(1.2) saturate(2) hue-rotate(180deg) grayscale(0);box-shadow:0 0 0 2px #ffb70388,0 0 20px #3a86ff88}100%{filter:brightness(1) saturate(1) hue-rotate(360deg) grayscale(1);box-shadow:0 0 0 0 #fff0,0 0 0 #fff0}}
+@keyframes die-wisps{0%{filter:brightness(1) grayscale(0);box-shadow:0 0 0 0 #7df9ff00,0 0 0 #c77dff00}15%{filter:brightness(1.4) grayscale(0);box-shadow:0 0 0 3px #7df9ffaa,0 0 26px #c77dffaa}60%{filter:brightness(.6) grayscale(.5);box-shadow:0 0 0 0 #7df9ff00,0 0 10px #ffd16655}100%{filter:brightness(1) grayscale(1);box-shadow:0 0 0 0 #7df9ff00,0 0 0 #c77dff00}}
+@keyframes die-kaleido{0%{filter:hue-rotate(0deg) saturate(1) brightness(1) grayscale(0)}45%{filter:hue-rotate(540deg) saturate(2.4) brightness(1.3) grayscale(0)}55%{filter:hue-rotate(600deg) saturate(1) brightness(2) grayscale(0)}100%{filter:hue-rotate(720deg) saturate(1) brightness(1) grayscale(1)}}
+/* In the shop. */
+.shop-item.tier-chroma{border-color:transparent;background:linear-gradient(180deg,#2a2233,#201e27 60%) padding-box,linear-gradient(90deg,#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#c77dff,#ff5d8f) border-box;background-size:100% 100%,200% 100%;animation:chroma-border 6s linear infinite}
+.tier-chroma .tier-tag,.chest-panel.tier-chroma .tier-tag,.odds-chip.tier-chroma,.tier-text-chroma{background-image:linear-gradient(90deg,#ff8fab,#ffe08a,#8ff0d0,#9ecbff,#d4a8ff,#ff8fab);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 5s linear infinite}
+.odds-chip.tier-chroma{border-color:#a77be0;font-weight:600}
+/* Opening one: the chest draws in light and glows through every rarity, then the screen flashes and the set appears. */
+.chest-art.gathering{animation:chest-shake .3s ease-in-out infinite,chest-gather 2.1s linear both}
+@keyframes chest-gather{0%{filter:drop-shadow(0 0 2px #ffffff) drop-shadow(0 0 2px #ffffff)}25%{filter:drop-shadow(0 0 8px #ffffff) drop-shadow(0 0 4px #ffffff)}50%{filter:drop-shadow(0 0 10px #ffd77a) drop-shadow(0 0 4px #ffe29a)}75%{filter:drop-shadow(0 0 12px #b48ae6) drop-shadow(0 0 5px #d9b8ff)}100%{filter:drop-shadow(0 0 16px #ff5d8f) drop-shadow(0 0 8px #4cc9f0)}}
+.chest-panel.gathering{border-color:#d9b8ff;box-shadow:0 0 36px #b48ae644}
+.chest-panel.tier-chroma{border-color:transparent;background:radial-gradient(ellipse at 20% 50%,#2d2440,#1d1b25 70%) padding-box,linear-gradient(90deg,#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#c77dff,#ff5d8f) border-box;background-size:100% 100%,200% 100%;animation:chroma-border 4s linear infinite;box-shadow:0 0 36px #c77dff33}
+.chest-panel.tier-chroma .chest-prize{position:relative;isolation:isolate;animation:chest-burst .9s ease-out both}
+.chest-panel.tier-chroma .chest-prize::before{content:'';position:absolute;inset:-14%;z-index:-1;border-radius:50%;background:repeating-conic-gradient(#ff5d8f88 0 6deg,transparent 6deg 20deg,#ffd23f88 20deg 26deg,transparent 26deg 40deg,#4cc9f088 40deg 46deg,transparent 46deg 60deg);-webkit-mask:radial-gradient(closest-side,#000 30%,transparent);mask:radial-gradient(closest-side,#000 30%,transparent);animation:deco-spin 12s linear infinite}
+.chest-panel.tier-chroma .chest-prize .shop-face{width:70px;height:70px}
+.chroma-name{font-weight:600}
+.chroma-pieces{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 14px}
+.chroma-pieces li{display:grid;gap:1px;font-size:13px;color:var(--text)}
+.chroma-pieces small{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)}
+.chroma-flash{position:fixed;inset:0;z-index:145;pointer-events:none;background:radial-gradient(circle at 50% 45%,#ffffffee,#ffe9f7aa 30%,#c9f3ff55 55%,transparent 80%);animation:chroma-flash 1.2s ease-out both}
+@keyframes chroma-flash{0%{opacity:0}8%{opacity:1}100%{opacity:0}}
+/* The table's announcement when someone finds one. */
+.chroma-banner{position:fixed;left:50%;top:72px;z-index:140;display:flex;align-items:center;gap:10px;width:max-content;max-width:calc(100vw - 32px);padding:10px 18px;border-radius:999px;border:1px solid transparent;background:linear-gradient(#1d1b25f2,#1d1b25f2) padding-box,linear-gradient(90deg,#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#c77dff,#ff5d8f) border-box;background-size:100% 100%,200% 100%;box-shadow:0 6px 30px #0008,0 0 24px #c77dff44;font-size:14px;color:var(--text);transform:translateX(-50%);animation:chroma-banner 5.2s ease-out both,chroma-border 3s linear infinite;pointer-events:none}
+.chroma-banner svg{color:#ffe08a;flex-shrink:0}
+@keyframes chroma-banner{0%{opacity:0;transform:translate(-50%,-14px) scale(.9)}8%{opacity:1;transform:translate(-50%,0) scale(1.04)}14%{transform:translate(-50%,0) scale(1)}88%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}
+@media(prefers-reduced-motion:reduce){.frame-glass::before,.frame-glass::after,.frame-wisps::after,.frame-kaleido::before,.frame-kaleido::after,.ink-glass_ink,.ink-wisps_ink,.ink-kaleido_ink,.deco-title.tier-chroma,.hand-indicator.hand-glass_hand,.hand-indicator.hand-wisps_hand,.hand-indicator.hand-kaleido_hand,.shop-item.tier-chroma,.chest-panel.tier-chroma{animation:none!important}}

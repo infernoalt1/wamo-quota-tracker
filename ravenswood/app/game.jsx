@@ -3,7 +3,7 @@ import {useState,useEffect,useRef,Fragment} from 'react';
 import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,ShieldCheck,Minus} from 'lucide-react';
 import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
-import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT} from '../lib/cosmetics.mjs';
+import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS} from '../lib/cosmetics.mjs';
 const types={townsfolk:'Townsfolk',outsider:'Outsiders',minion:'Minions',demon:'Demon'};
 function RoleIcon({id}){return <img className="role-icon" src={`/botc/icons/${id}.png`} alt="" draggable={false}/>;}
 function Avatar({src,name}){return src?<img className="avatar-img" src={`/botc/api/game/avatar/${src}`} alt="" draggable={false}/>:(name||'').slice(0,2).toUpperCase();}
@@ -168,7 +168,7 @@ async function postJson(url,body){
  catch(e){throw new Error(e.name==='TimeoutError'?TIMED_OUT:e.message);}
 }
 // A treasure chest, drawn flat so its shake works on any computer.
-function ChestArt({shaking}){return <svg viewBox="0 0 120 100" className={`chest-art ${shaking?'shaking':''}`} aria-hidden="true">
+function ChestArt({shaking,gathering}){return <svg viewBox="0 0 120 100" className={`chest-art ${shaking||gathering?'shaking':''} ${gathering?'gathering':''}`} aria-hidden="true">
  <path className="chest-lid" d="M14 46C14 22 32 16 60 16S106 22 106 46Z"/>
  <rect className="chest-body" x="14" y="46" width="92" height="42" rx="4"/>
  <path className="chest-band" d="M14 54H106M36 17V88M84 17V88"/>
@@ -309,6 +309,12 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
  const prize=chest?.stage==='open'?ITEM[chest.item]:null;
  useEffect(()=>{
   if(!prize||!chestStage.current)return;
+  if(prize.tier==='chroma'){
+   playOn(chestStage.current,'chroma',SETS[prize.set].tint,1.5);
+   // The whole screen flashes white for a moment.
+   const flash=document.createElement('div');flash.className='chroma-flash';document.body.appendChild(flash);setTimeout(()=>flash.remove(),1300);
+   return;
+  }
   const colors={common:['#e8e2ef','#c9c1d4'],rare:['#fff1c2','#e6c37c'],epic:['#e3cdfd','#b48ae6','#ffffff'],legendary:['#fff4cf','#ffd77a','#ff9d2e']}[prize.tier]||['#e8e2ef'];
   playOn(chestStage.current,'sparks',colors,prize.tier==='legendary'?2:prize.tier==='epic'?1.6:1.3);
   if(prize.tier==='legendary')playOn(chestStage.current,'embers',['#ffd77a','#ff9d2e'],1.6);
@@ -324,7 +330,13 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
  // The chest shakes for at least a second while the server rolls, then opens on what was inside.
  async function openChest(){
   if(busy)return;setBusy(true);setError('');setNote('');setChest({stage:'shaking'});const started=Date.now();
-  try{const data=await postJson('/botc/api/game/shop/chest',{});await new Promise(done=>setTimeout(done,Math.max(0,1100-(Date.now()-started))));onWallet(data);setChest({stage:'open',...data.opened});}
+  try{
+   const data=await postJson('/botc/api/game/shop/chest',{}),wait=ms=>new Promise(done=>setTimeout(done,ms));await wait(Math.max(0,1100-(Date.now()-started)));
+   // A Chroma takes its time: the chest draws in light, glowing through every rarity, before it opens.
+   const found=ITEM[data.opened.item];
+   if(found?.tier==='chroma'){setChest({stage:'gathering'});playOn(chestStage.current,'gather',SETS[found.set].tint,1.3);await wait(2100);}
+   onWallet(data);setChest({stage:'open',at:Date.now(),...data.opened});
+  }
   catch(e){setChest(null);setError(e.message);}finally{setBusy(false);}
  }
  const items=ITEMS.filter(i=>i.kind===kind);
@@ -347,15 +359,18 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
     {wallet.gifts?.length>0&&<div className="shop-gifts"><span className="eyebrow"><Gift size={12}/>GIFTS FOR YOU</span>{wallet.gifts.map((x,i)=><span key={i}><b>{x.from}</b> sent you {x.amount} points<small> · {new Date(x.at).toLocaleDateString([],{month:'short',day:'numeric'})}</small></span>)}</div>}
   </div>
   <section className={`chest-panel ${chest?.stage||''} ${prize?`tier-${prize.tier}`:''}`} aria-live="polite">
-   <div className="chest-stage" ref={chestStage}>{prize?<div className="chest-prize"><ShopSample item={prize} account={account} look={look}/></div>:<ChestArt shaking={chest?.stage==='shaking'}/>}</div>
+   <div className="chest-stage" ref={chestStage}>{prize?<div className="chest-prize"><ShopSample item={prize} account={account} look={look}/></div>:<ChestArt shaking={chest?.stage==='shaking'} gathering={chest?.stage==='gathering'}/>}</div>
    <div className="chest-text">
-    <span className="tier-tag">{prize?`${TIERS[prize.tier]} ${KINDS[prize.kind].replace(/s$/,'').toLowerCase()}`:'Mystery chest'}</span>
-    <h3>{prize?prize.name:chest?.stage==='shaking'?'Opening…':'What’s inside?'}</h3>
-    <p>{prize?(chest.duplicate?`You already have this, so ${chest.refund} points come back to you.`:prize.blurb):'A random decoration of any kind, including a few you can only find in chests.'}</p>
+    <span className="tier-tag">{prize?.set?'Chroma · a whole set':prize?`${TIERS[prize.tier]} ${KINDS[prize.kind].replace(/s$/,'').toLowerCase()}`:chest?.stage==='gathering'?'Something rare…':'Mystery chest'}</span>
+    <h3>{prize?<span className={prize.set?`chroma-name ink-${prize.set}_ink`:''}>{prize.name}</span>:chest?.stage==='shaking'?'Opening…':chest?.stage==='gathering'?'The chest is glowing…':'What’s inside?'}</h3>
+    <p>{prize?(chest.duplicate?`You already have this${prize.set?' set':''}, so ${chest.refund} points come back to you.`:prize.set?'You found a Chroma, the rarest thing in any chest. Every piece is yours:':prize.blurb):chest?.stage==='gathering'?'':'A random decoration of any kind, including a few you can only find in chests, and, once in a long while, a Chroma.'}</p>
+    {prize?.set&&!chest.duplicate&&<ul className="chroma-pieces">{SETS[prize.set].items.map(id=><li key={id}><small>{KINDS[ITEM[id].kind].replace(/s$/,'')}</small><span>{ITEM[id].name}</span></li>)}</ul>}
     {!prize&&<div className="chest-odds" aria-label="Chances by rarity">{Object.entries(CHEST.odds).map(([t,o])=><span key={t} className={`odds-chip tier-${t}`}>{TIERS[t]} {o}%</span>)}</div>}
     {!prize&&<small className="chest-dupes">Already own what you get? {CHEST.refund} points come back to you.</small>}
     <div className="chest-actions">
-     {prize&&!chest.duplicate&&look[prize.kind]!==prize.id&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:prize.kind,item:prize.id},`You are wearing ${prize.name}.`)}>Wear it</button>}
+     {prize&&!chest.duplicate&&(prize.set
+      ?SETS[prize.set].items.some(id=>look[ITEM[id].kind]!==id)&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip-set',{set:prize.set},`You are wearing all of ${prize.name}.`)}>Wear the whole set</button>
+      :look[prize.kind]!==prize.id&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:prize.kind,item:prize.id},`You are wearing ${prize.name}.`)}>Wear it</button>)}
      <button className={prize?'secondary compact':'primary compact'} disabled={busy||wallet.balance<CHEST.price} onClick={openChest}><Package size={14}/>{prize?'Open another':'Open'} · {CHEST.price}</button>
      {prize&&<button className="text-button" onClick={()=>setChest(null)}>Done</button>}
      {!prize&&wallet.balance<CHEST.price&&<small className="need">{CHEST.price-wallet.balance} more needed</small>}
@@ -370,7 +385,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
     const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
      <button className="shop-sample" title={item.fx?'Click to preview':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);const face=e.currentTarget.querySelector('.shop-face')||e.currentTarget;if(item.kind==='mark')previewDeath(face,item,{avatar:account.avatar,name:account.username});else if(item.fx)playAt(face,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
-     <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
+     <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.set&&item.kind!=='frame'?` · ${SETS[item.set].name} set`:''}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
      <div className="shop-item-action">
       {wearing?<><span className="wearing-tag"><Check size={14}/>Wearing</span><button className="text-button" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:null},`${item.name} is off.`)}>Take off</button></>
       :owned?<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:item.id},`You are wearing ${item.name}.`)}>Wear</button>
@@ -453,6 +468,7 @@ export default function Game(){
  const fx=(name,fn,ms)=>{clearTimeout(fxTimers.current[name]);fxTimers.current[name]=setTimeout(fn,ms);};
  useEffect(()=>()=>Object.values(fxTimers.current).forEach(clearTimeout),[]);
  const narrow=useMedia('(max-width:1099px)'),phone=useMedia('(max-width:899px)');
+ const seenFlair=useRef(null),[flairNote,setFlairNote]=useState(null);
  const chatEnd=useRef(null),polling=useRef(false),mutating=useRef(false),generation=useRef(0),seated=useRef(false),refreshNow=useRef(null),again=useRef(false);
  // One room hosts many games, so per-game browser state is keyed by round as well as code.
  const gameKey=g?`${g.code}#${g.round}`:null;
@@ -508,6 +524,17 @@ export default function Game(){
  // A whisper partner or group can vanish while open (a kick, a leave); fall back to the square.
  useEffect(()=>{if(g&&!['town','journal','notes'].includes(view)&&!g.players.some(p=>p.id===view)&&!g.groups.some(c=>c.id===view)){setView('town');setChatOpen(false);}},[g,view]);
  useEffect(()=>{const close=e=>{if(e.key==='Escape'){setDialog(null);setDrawer(null);setSelected(null);}};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[]);
+ // Someone at this table found a Chroma. What was already there when the page loaded is not replayed.
+ useEffect(()=>{
+  const list=g?.flair||[];
+  if(seenFlair.current?.code!==g?.code){seenFlair.current={code:g?.code,ids:new Set(list.map(x=>x.id))};return;}
+  for(const x of list){
+   if(seenFlair.current.ids.has(x.id))continue;seenFlair.current.ids.add(x.id);
+   const who=g.players.find(p=>p.id===x.seat);if(!who||!SETS[x.set])continue;
+   setFlairNote({id:x.id,name:who.name,set:x.set});setTimeout(()=>setFlairNote(n=>n?.id===x.id?null:n),5200);
+   setTimeout(()=>playOn(seatToken(x.seat),'chroma',SETS[x.set].tint,.9),80);
+  }
+ },[g?.code,g?.flair]);
  const convOf=key=>(g?.messages||[]).filter(m=>m.group?m.group===key:key==='town'?!m.to:m.to&&((m.to===key&&m.from===g.me.id)||(m.from===key&&m.to===g.me.id)));
  const unreadOf=key=>local.code===gameKey?convOf(key).filter(m=>m.from!==g.me.id&&m.at>(local.read[key]||0)).length:0;
  const messages=view==='town'||view==='journal'||view==='notes'?convOf('town'):convOf(view);
@@ -657,6 +684,7 @@ export default function Game(){
  {finaleDue&&!dialog&&<Finale g={g} host={host} busy={busy} onClose={()=>updateLocal({finaleSeen:true})} onNewGame={()=>action('rematch')} onLog={openLog}/>}
  {(dawnDue||newsDue)&&!dialog&&!dawnHold&&<div className="modal-backdrop"><section className="modal dawn" role="dialog" aria-modal="true" aria-label={dawnDue?`Dawn of day ${g.day}`:'A private message'}>{dawnDue?<><span className="eyebrow"><Sun size={14}/>DAWN · DAY {g.day}</span><h2>{deaths.length?`${listNames(deaths)} died in the night.`:'Nobody died in the night.'}</h2></>:<><span className="eyebrow"><LockKeyhole size={14}/>A PRIVATE MESSAGE</span><h2>The Storyteller has news for you.</h2></>}<h3>{dawnDue?'Your private night':'Only you can see this'}</h3>{popupItems.length?popupItems.map(item=><JournalEntry key={item.id} item={item}/>):<p className="small">The Storyteller had nothing for you tonight.</p>}<small>This is saved in your Journal.</small><button className="primary" autoFocus onClick={()=>updateLocal({dawn:g.day,inbox:inboxCount})}>{dawnDue?'Begin the day':'Got it'}<ArrowRight size={17}/></button></section></div>}
  {dialog&&<div className="modal-backdrop" onClick={()=>setDialog(null)}><section className="modal" role="dialog" aria-modal="true" aria-label={dialog==='account'?'Your account':dialog==='slayer'?'Confirm public Slayer claim':dialog==='reset'?'End the game early':dialog==='group'?'Start a group chat':dialog==='create'?'Create a game':'Join a game'} onClick={e=>e.stopPropagation()}><button className="modal-close icon-button" aria-label="Close dialog" onClick={()=>setDialog(null)}><X size={20}/></button>{dialog==='account'?(account?<><div className="account-head"><span className="account-frame"><Face className="account-avatar" src={account.avatar} name={account.username} look={account.look}/></span><div className="account-who"><span className="eyebrow">YOUR ACCOUNT</span><h2><Named name={account.username} look={account.look}/></h2><Title look={account.look}/><div className="account-picture-actions"><label className={`secondary compact file-button ${busy?'disabled':''}`}><Camera size={14}/>{account.avatar?'Change picture':'Add a picture'}<input type="file" accept="image/*" disabled={busy} onChange={e=>{choosePicture(e.target.files[0]);e.target.value='';}}/></label>{account.avatar&&<button className="text-button" disabled={busy} onClick={()=>setPicture(null)}>Remove</button>}</div></div></div><p className="small account-note">You stay logged in on this browser, and your seat follows you to any computer you log in on. If other people use this computer, log out when you finish.</p>{afterAuth&&<button className="primary" onClick={()=>{setDialog(afterAuth);setAfterAuth(null);}}>Continue<ArrowRight size={17}/></button>}<div className="account-actions">{!afterAuth&&<span className="account-links"><button className="secondary compact" onClick={()=>openLeaders(account.username)}><Trophy size={14}/>Your record</button><button className="secondary compact" onClick={()=>openShop()}><Store size={14}/>Shop</button>{account.admin&&<button className="secondary compact" onClick={openAdmin}><ShieldCheck size={14}/>Admin</button>}</span>}<button className="text-button" disabled={busy} onClick={logOut}><LogOut size={14}/>Log out</button></div></>:<><span className="eyebrow">OPTIONAL · NO EMAIL NEEDED</span><h2>{authMode==='register'?'Make an account.':'Welcome back.'}</h2><p>Get a profile picture, and your seat back from any computer.</p><form onSubmit={e=>{e.preventDefault();signIn();}}><label>Username<input autoFocus value={authName} maxLength={20} minLength={2} required autoComplete="username" onChange={e=>setAuthName(e.target.value)}/></label><label>Password<input type="password" value={password} minLength={6} maxLength={72} required autoComplete={authMode==='register'?'new-password':'current-password'} onChange={e=>setPassword(e.target.value)}/></label><button className="primary" disabled={busy}>{authMode==='register'?'Create account':'Log in'}<ArrowRight size={17}/></button></form><button className="text-button" onClick={()=>setAuthMode(authMode==='register'?'login':'register')}>{authMode==='register'?'Already have an account? Log in':'New here? Make an account'}</button>{authMode==='register'&&<small>There is no email reset, so keep your password somewhere safe.</small>}</>):dialog==='reset'?<><span className="eyebrow">END THIS GAME EARLY</span><h2>Ask the table.</h2><p>Ending a game early needs a majority of the players who are online. They get a minute to agree. Either way, nobody wins and the game is not recorded.</p><div className="reset-choices"><button className="secondary" disabled={busy} onClick={()=>action('propose',{kind:'reveal'})}><Eye size={16}/><span><strong>Reveal every character and end</strong><small>Everyone sees who was who, and the full game log.</small></span></button><button className="secondary" disabled={busy} onClick={()=>action('propose',{kind:'lobby'})}><RotateCcw size={16}/><span><strong>Go back to the lobby</strong><small>Characters stay secret. Everyone keeps their seat, and new players can join.</small></span></button></div></>:dialog==='group'?<><span className="eyebrow">A PRIVATE CIRCLE</span><h2>Start a group.</h2><p>Only the players you pick can read it, and only they will see that it exists.</p><form onSubmit={e=>{e.preventDefault();submitGroup();}}><label>Group name<input autoFocus value={groupTitle} maxLength={30} placeholder="Optional" onChange={e=>setGroupTitle(e.target.value)}/></label><fieldset className="member-pick"><legend>Invite at least two players</legend>{seats.filter(p=>p.id!==g.me.id).map(p=><label key={p.id}><input type="checkbox" checked={groupPick.includes(p.id)} onChange={()=>setGroupPick(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])}/>{p.name}{!p.alive&&' (dead)'}</label>)}</fieldset><button className="primary" disabled={busy||groupPick.length<2}>Create group<ArrowRight size={17}/></button></form></>:dialog==='slayer'?<><span className="eyebrow">A PUBLIC, ONCE-PER-GAME CLAIM</span><h2>Take your shot?</h2><p>Everyone will see you claim Slayer and target {chosen?.name}. Anyone can bluff this action. Only a functioning Slayer can cause a death.</p><button className="primary" disabled={busy} onClick={()=>action('slayer',{target:selected})}>Shoot {chosen?.name}<Target size={16}/></button></>:<><span className="eyebrow">THE STORY BEGINS WITH YOU</span><h2>{dialog==='create'?'Gather your circle.':'A seat at the table.'}</h2><p>{dialog==='create'?'Create a room code and invite 4–14 friends. The host plays too.':'Enter your name and the code from your host.'}</p><form onSubmit={e=>{e.preventDefault();action(dialog==='create'?'create':'join');}}><label>Your name<input autoFocus value={name} maxLength={24} required placeholder="What should the town call you?" onChange={e=>setName(e.target.value)}/></label>{dialog==='join'&&<label>Room code<input className="code-input" value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,''))} maxLength={8} minLength={8} required placeholder="ABCDEFGH"/></label>}<button className="primary" disabled={busy}>{busy?'Taking your seat…':dialog==='create'?'Create the table':'Join the table'}<ArrowRight size={17}/></button>{dialog==='join'&&<button type="button" className="secondary" disabled={busy||!name.trim()||joinCode.length!==8} onClick={()=>action('spectate')}><Eye size={16}/>Just watch</button>}</form>{dialog==='join'&&<small>Spectators can watch a game already in progress, but cannot talk or vote.</small>}<small>No account needed. Your seat is saved in this browser.</small>{accountsOn&&!account&&<button className="text-button" onClick={()=>openAccount(dialog)}><Camera size={14}/>Make an account to add a picture</button>}</>}</section></div>}
+ {flairNote&&<div className="chroma-banner" key={flairNote.id} role="status"><Sparkles size={16}/><span><b>{flairNote.name}</b> found a Chroma: <b className={`ink-${flairNote.set}_ink`}>{SETS[flairNote.set].name}</b></span></div>}
  {drawer&&<div className="drawer-backdrop" onClick={()=>setDrawer(null)}><section className="handbook" role="dialog" aria-modal="true" aria-label={drawer==='roles'?'Character reference':drawer==='leaders'?'Players':drawer==='log'?'Game log':drawer==='shop'?'Shop':drawer==='admin'?'Admin':'How to play and Storyteller policy'} onClick={e=>e.stopPropagation()}><button className="modal-close icon-button" aria-label="Close reference" onClick={()=>setDrawer(null)}><X size={21}/></button>{drawer==='roles'?<><span className="eyebrow">THE CHARACTER ALMANAC</span><h2>Know the possibilities.</h2><p>All {scriptRoles.length} {SCRIPTS[script]} characters. The script is public; who is in play is a secret.</p><SetupChart script={script} players={g?seats.length:null}/><div className="role-tabs">{Object.entries(types).map(([key,name])=><button className={tab===key?'active':''} key={key} onClick={()=>setTab(key)}>{name}</button>)}</div>{scriptRoles.filter(r=>r.type===tab).map(r=><article className={`reference-card ${r.type}`} key={r.id}><span className="reference-symbol"><RoleIcon id={r.id}/></span><div><h3>{r.name}</h3><p>{r.help}</p><a href={r.wiki} target="_blank" rel="noreferrer">Official rules & strategy ↗</a></div></article>)}</>:drawer==='leaders'?<Leaderboard key={leaderPlayer||''} me={account?.username} start={leaderPlayer} onWallet={gotWallet}/>:drawer==='log'?(g?.timeline?<GameLog g={g}/>:<p className="small">The game log opens when the game ends.</p>):drawer==='shop'?<Shop account={account} wallet={wallet} onWallet={gotWallet} inGame={!!g&&!['lobby','ended'].includes(phase)} onLogin={()=>{setDrawer(null);openAccount();}}/>:drawer==='admin'?<Admin/>:<Help/>}</section></div>}
  </div>;
 }

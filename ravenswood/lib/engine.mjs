@@ -21,6 +21,8 @@ const active = (g,p) => !!(p?.alive||p?.zombuulUp)&&!impaired(g,p);
 // Every record gets a running number, so the end-of-game log can replay them in the order they happened.
 const stamp=g=>({at:Date.now(),n:g.seq=(g.seq||0)+1});
 function log(g,text){g.events.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text,...stamp(g)});}
+// A moment for the whole table to see, like someone finding a Chroma. Only the last few are kept, and they are not part of the game.
+export function flair(g,seat,set){g.flair=[...(g.flair||[]),{id:crypto.randomUUID(),seat,set,at:Date.now()}].slice(-5);}
 function tell(g,p,text,extra={}){p.inbox.push({id:crypto.randomUUID(),day:g.day,phase:g.phase,text,...stamp(g),...extra});}
 function audit(g,basis,result,reason){g.decisions.push({day:g.day,phase:g.phase,basis,result,reason,...stamp(g)});}
 // What a player picked at night, kept for the end-of-game log. `state` is how their ability was working at that moment.
@@ -665,7 +667,7 @@ export function view(g,session){
  me:me?{id:me.id,role:me.shown,slayerUsed:me.slayerUsed,master:me.master,inbox:me.inbox,moonPending:!!me.moonPending,statementUsed:me.statementDay===g.day}
   :{id:watcher.id,name:watcher.name,spectator:true,role:null,slayerUsed:true,master:null,inbox:[],moonPending:false,statementUsed:true},
  // Night deaths stay hidden until dawn, when the same names are announced publicly.
- nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:me&&g.pending?.id===me.id?g.pending:null,events:g.events,ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
+ nightDeaths:g.phase==='day'?g.nightDeaths:[],pending:me&&g.pending?.id===me.id?g.pending:null,events:g.events,flair:g.flair||[],ballots:g.ballots,nomination:g.nomination?{id:g.nomination.id,target:g.nomination.target,by:g.nomination.by,hands:g.nomination.hands,deadline:g.nomination.deadline}:null,
  proposal:g.proposal?{id:g.proposal.id,kind:g.proposal.kind,by:g.proposal.by,votes:g.proposal.votes,deadline:g.proposal.deadline}:null,
  groups,messages:g.messages.filter(m=>m.group?groups.some(c=>c.id===m.group):!m.to||(me&&(m.from===me.id||m.to===me.id))),
  ...(ended?{decisions:g.decisions,redHerring:player(g,g.redHerring)?.name,bluffs:g.bluffs.map(label),timeline:timeline(g)}:{})};

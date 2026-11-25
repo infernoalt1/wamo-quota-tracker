@@ -5,7 +5,7 @@ import { ROLES } from './characters.mjs';
 export const POINTS = Object.freeze({ finish: 5, win: 25, demon: 10, daily: 15 });
 
 export const KINDS = Object.freeze({ frame: 'Frames', color: 'Name colours', title: 'Titles', hand: 'Vote hands', mark: 'Death marks' });
-export const TIERS = Object.freeze({ common: 'Common', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', unlock: 'Earned' });
+export const TIERS = Object.freeze({ common: 'Common', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', chroma: 'Chroma', unlock: 'Earned' });
 
 // Achievements that unlock decorations nobody can buy. Each counts matching games in a player's history.
 export const UNLOCKS = Object.freeze({
@@ -68,18 +68,48 @@ export const ITEMS = Object.freeze([
   { id: 'collector', kind: 'title', name: 'The Collector', tier: 'common', chest: true, blurb: 'Keeps everything. Just in case.' },
   { id: 'high_roller', kind: 'title', name: 'High Roller', tier: 'rare', chest: true, blurb: 'Bets it all, every time.' },
   { id: 'fortune', kind: 'title', name: 'Fortune’s Favourite', tier: 'epic', chest: true, blurb: 'The dice always seem to land their way.' },
+  // Chroma: the rarest find. Each is a whole set (frame, name, title, vote hand and death mark) that shifts through every colour.
+  // A chest gives the full set at once, so a Chroma counts as one prize.
+  ...chroma('glass', ['#ff4d6d', '#ffb703', '#3a86ff', '#8338ec', '#06d6a0', '#fb5607'], [
+    ['frame', 'Stained Glass', 'A church window around you, its colours moving as the light does.'],
+    ['color', 'Rose Window', 'Your name in glass, lit from behind.'],
+    ['title', 'Through a Glass, Darkly', 'Seeing everything. Understanding some of it.'],
+    ['hand', 'Glass Hand', 'Your vote throws coloured shards into the air.', 'shards'],
+    ['mark', 'Shattered Pane', 'The window breaks, and the pieces fall like rain.', 'shatter'],
+  ]),
+  ...chroma('wisps', ['#7df9ff', '#c77dff', '#ffd166', '#80ffdb'], [
+    ['frame', 'Will-o’-the-Wisps', 'Three marsh lights circle you and never quite settle.'],
+    ['color', 'Marsh Light', 'A soft glow that wanders through your name.'],
+    ['title', 'Pale Fire', 'The moon’s an arrant thief.'],
+    ['hand', 'Lantern Hand', 'Your vote sends the lights spiralling upward.', 'orbit'],
+    ['mark', 'Lights Out', 'The wisps scatter into the dark and go out, one by one.', 'scatter'],
+  ]),
+  ...chroma('kaleido', ['#ff5d8f', '#ffd23f', '#3bceac', '#5e60ce', '#f72585', '#4cc9f0'], [
+    ['frame', 'Kaleidoscope', 'A turning pattern of mirrored colour behind you.'],
+    ['color', 'Prism', 'Your name split into every colour of the light.'],
+    ['title', 'Such Stuff as Dreams', 'We are such stuff as dreams are made on.'],
+    ['hand', 'Prism Hand', 'Your vote fans out into beams of colour.', 'prism'],
+    ['mark', 'Broken Kaleidoscope', 'The pattern spins faster and faster, then flies apart.', 'kaleido'],
+  ]),
 ]);
+// One Chroma set: the frame is named after the set and comes first.
+function chroma(set, tint, pieces) {
+  return pieces.map(([kind, name, blurb, fx]) => ({ id: kind === 'frame' ? set : `${set}_${{ color: 'ink' }[kind] || kind}`, kind, name, tier: 'chroma', chest: true, set, tint, ...(fx ? { fx } : {}), blurb }));
+}
 export const ITEM = Object.freeze(Object.fromEntries(ITEMS.map(i => [i.id, i])));
+export const SETS = Object.freeze(Object.fromEntries(ITEMS.filter(i => i.set && i.kind === 'frame').map(i => [i.set, { id: i.set, name: i.name, tint: i.tint, items: ITEMS.filter(x => x.set === i.set).map(x => x.id) }])));
+// Everything one prize gives: a Chroma gives its whole set, anything else just itself.
+export const bundleOf = id => SETS[ITEM[id]?.set]?.items || [id];
 
 // Mystery chests: a random decoration from everything in the shop plus the chest-only items (never the earned ones).
-// The tier is drawn first with these odds, then an item within it. A duplicate refunds part of the price.
-export const CHEST = Object.freeze({ price: 150, refund: 60, odds: Object.freeze({ common: 55, rare: 30, epic: 11, legendary: 4 }) });
+// The tier is drawn first with these odds, then an item within it (for Chroma, a whole set). A duplicate refunds part of the price.
+export const CHEST = Object.freeze({ price: 100, refund: 40, odds: Object.freeze({ common: 54, rare: 30, epic: 11, legendary: 4, chroma: 1 }) });
 export const CHEST_ITEMS = Object.freeze(ITEMS.filter(i => i.price || i.chest));
 export function rollChest(random = Math.random) {
   const tiers = Object.entries(CHEST.odds), total = tiers.reduce((n, [, w]) => n + w, 0);
   let r = random() * total, tier = tiers[0][0];
   for (const [t, w] of tiers) { if (r < w) { tier = t; break; } r -= w; }
-  const pool = CHEST_ITEMS.filter(i => i.tier === tier);
+  const pool = CHEST_ITEMS.filter(i => i.tier === tier && (!i.set || i.kind === 'frame'));
   return pool[Math.floor(random() * pool.length)].id;
 }
 // Gifting points: small amounts, a daily cap, and only to someone you have played a recorded game with,

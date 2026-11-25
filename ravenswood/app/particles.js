@@ -27,19 +27,21 @@ function glow(color){
   sprites.set(color,c);return c;
 }
 const rnd=(a,b)=>a+Math.random()*(b-a),pick=a=>a[Math.floor(Math.random()*a.length)];
-const LIGHT=new Set(['glow','spark','wisp','flame']);
+const LIGHT=new Set(['glow','spark','wisp','flame','ray']);
 
 // `fadeIn` and `hold` shape how a particle appears and disappears, as shares of its life.
 function add(p){if(parts.length<MAX)parts.push({age:0,rot:0,vr:0,drag:0,ax:0,ay:0,grow:0,sway:0,fadeIn:.15,hold:.15,phase:Math.random()*6.28,...p});}
 // Spawns something every `every` seconds for `dur` seconds, after `delay`.
 function emit(dur,every,spawn,delay=0){emitters.push({t:-delay,dur,every,acc:0,spawn});}
+// Runs once, after `delay` seconds, even on slow machines.
+function later(delay,spawn){emitters.push({t:-delay,once:true,spawn});}
 function start(){if(running)return;running=true;last=performance.now();requestAnimationFrame(step);}
 function step(now){
   const dt=Math.min(.05,(now-last)/1000);last=now;
   // Keep the effects smooth on slow machines by spawning fewer particles.
   if(dt>.034)quality=Math.max(.35,quality-.05);else if(dt<.02)quality=Math.min(1,quality+.01);
-  for(const e of emitters){e.t+=dt;if(e.t<0)continue;e.acc+=dt;while(e.acc>=e.every){e.acc-=e.every;if(Math.random()<quality)e.spawn(e.t);}}
-  emitters=emitters.filter(e=>e.t<e.dur);
+  for(const e of emitters){e.t+=dt;if(e.t<0)continue;if(e.once){if(!e.done){e.done=true;e.spawn(0);}continue;}e.acc+=dt;while(e.acc>=e.every){e.acc-=e.every;if(Math.random()<quality)e.spawn(e.t);}}
+  emitters=emitters.filter(e=>e.once?!e.done:e.t<e.dur);
   ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);
   parts=parts.filter(p=>(p.age+=dt)<p.life);
   for(const p of parts){
@@ -57,6 +59,10 @@ function draw(p,s,t){
   if(p.kind==='glow'||p.kind==='puff'){ctx.drawImage(glow(p.color),p.x-s,p.y-s,s*2,s*2);return;}
   if(p.kind==='ring'){ctx.strokeStyle=p.color;ctx.lineWidth=Math.max(.5,p.width*(1-t));ctx.beginPath();ctx.arc(p.x,p.y,s,0,6.283);ctx.stroke();return;}
   ctx.save();ctx.translate(p.x,p.y);
+  if(p.kind==='shard'){ctx.rotate(p.rot);ctx.fillStyle=p.color;ctx.beginPath();p.pts.forEach(([a,b],i)=>i?ctx.lineTo(a*s,b*s):ctx.moveTo(a*s,b*s));ctx.closePath();ctx.fill();
+    ctx.globalAlpha*=.8;ctx.strokeStyle='#ffffff';ctx.lineWidth=.9;ctx.stroke();ctx.restore();return;}
+  if(p.kind==='ray'){ctx.rotate(p.rot);const g=ctx.createLinearGradient(s*.15,0,s,0);g.addColorStop(0,p.color);g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.strokeStyle=g;ctx.lineWidth=Math.max(.5,p.width*(1-t*.7));ctx.lineCap='round';ctx.beginPath();ctx.moveTo(s*.15,0);ctx.lineTo(s,0);ctx.stroke();ctx.restore();return;}
   if(p.kind==='spark'){const a=Math.atan2(p.vy,p.vx),len=Math.min(14,Math.hypot(p.vx,p.vy)*.035)+s;ctx.rotate(a);ctx.strokeStyle=p.color;ctx.lineWidth=s*.6;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-len,0);ctx.lineTo(0,0);ctx.stroke();}
   else if(p.kind==='wisp'){ctx.rotate(Math.sin(p.age*3+p.phase)*.25);ctx.scale(.45,1.9);ctx.drawImage(glow(p.color),-s,-s,s*2,s*2);}
   else if(p.kind==='flake'){ctx.rotate(p.rot);ctx.fillStyle=p.color;ctx.beginPath();ctx.moveTo(-s,-s*.4);ctx.lineTo(s*.6,-s*.7);ctx.lineTo(s,s*.3);ctx.lineTo(-s*.3,s*.6);ctx.closePath();ctx.fill();}
@@ -90,6 +96,13 @@ function ghostRise(r,extra){
   if(extra?.avatar){const i=document.createElement('img');i.src=extra.avatar;i.alt='';g.appendChild(i);}else g.textContent=(extra?.name||'').slice(0,2).toUpperCase();
   document.body.appendChild(g);setTimeout(()=>g.remove(),2600);
 }
+// A jagged piece of glass, three or four corners.
+const shardShape=()=>{const n=Math.random()<.5?3:4;return Array.from({length:n},(_,i)=>{const a=i/n*6.283+rnd(-.5,.5),d=rnd(.55,1);return [Math.cos(a)*d,Math.sin(a)*d];});};
+const shard=(o,c)=>add({kind:'shard',pts:shardShape(),rot:rnd(0,6.28),vr:rnd(-9,9),alpha:.92,...o,color:o.color||pick(c)});
+// A ring of coloured light rings, one after another.
+const rings=(x,y,c,k,{count=c.length,gap=.07,size=10,grow=2.6,width=2.5,life=.6}={})=>{for(let i=0;i<count;i++)later(i*gap,()=>add({kind:'ring',x,y,vx:0,vy:0,life,size:size*k,grow,width:width*k,color:c[i%c.length]}));};
+// Beams of light fanning out from the centre and turning.
+const rays=(x,y,c,k,{count=10,size=34,grow=.6,width=3,life=.9,spin=1.6}={})=>{const off=rnd(0,6.28);for(let i=0;i<count;i++)add({kind:'ray',x,y,vx:0,vy:0,rot:off+i/count*6.283,vr:spin,life,fadeIn:.12,hold:.3,size:size*k,grow,width:width*k,color:c[i%c.length],alpha:.85});};
 const blot=()=>[[0,0,.62],...Array.from({length:11},()=>{const a=rnd(0,6.283),d=rnd(.55,1.25);return [Math.cos(a)*d,Math.sin(a)*d,rnd(.08,.26)];})];
 // Effects, each spawned around the centre of something. `k` scales them to its size; `n` trims counts on slow machines.
 const PRESETS={
@@ -145,6 +158,65 @@ const PRESETS={
     emit(1.4,.06,()=>add({kind:'wisp',x:x+rnd(-14,14)*k,y:y+rnd(-6,8)*k,vx:rnd(-6,6)*k,vy:rnd(-60,-28)*k,drag:.3,sway:18*k,life:rnd(1.3,2),size:rnd(2.4,4)*k,grow:.5,color:pick(c),alpha:.7}));
   },
 };
+// Chroma effects. Every colour of the set is used, so they look different each time.
+Object.assign(PRESETS,{
+  // Stained Glass vote: a handful of coloured glass flicks up and falls, catching the light.
+  shards:(x,y,c,n,k)=>{
+    add({kind:'ring',x,y,vx:0,vy:0,life:.45,size:8*k,grow:2.4,width:2*k,color:'#ffffff'});
+    for(let i=0;i<n(16);i++){const a=rnd(-3.0,-.15),v=rnd(120,260)*k;shard({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,ay:380*k,drag:.9,life:rnd(.8,1.2),size:rnd(2.6,5)*k},c);}
+    for(let i=0;i<n(6);i++){const a=rnd(0,6.283),v=rnd(60,140)*k;add({kind:'glow',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,drag:2,life:rnd(.3,.5),size:rnd(3,5)*k,color:'#ffffff'});}
+  },
+  // Stained Glass death: a white flash, the pane cracks, and the pieces rain down with glints of light.
+  shatter:(x,y,c,n,k)=>{
+    add({kind:'glow',x,y,vx:0,vy:0,life:.4,fadeIn:.05,size:46*k,grow:.3,color:'#ffffff',alpha:.9});
+    add({kind:'ring',x,y,vx:0,vy:0,life:.5,size:14*k,grow:2.2,width:2.5*k,color:'#ffffff'});
+    c.forEach((col,i)=>add({kind:'glow',x:x+Math.cos(i)*8*k,y:y+Math.sin(i)*8*k,vx:0,vy:-6*k,life:1.8,fadeIn:.1,hold:.4,size:22*k,color:col,alpha:.3}));
+    later(.12,()=>{for(let i=0;i<n(30);i++){const a=rnd(0,6.283),d=Math.sqrt(Math.random())*22*k;shard({x:x+Math.cos(a)*d,y:y+Math.sin(a)*d,vx:Math.cos(a)*rnd(20,90)*k,vy:rnd(-150,-20)*k,ay:560*k,drag:.6,life:rnd(1.4,2.1),hold:.55,size:rnd(3,7.5)*k},c);}});
+    emit(1.3,.05,()=>add({kind:'glow',x:x+rnd(-40,40)*k,y:y+rnd(-10,60)*k,vx:0,vy:0,life:rnd(.2,.35),size:rnd(2.5,4.5)*k,color:'#ffffff'}),.2);
+  },
+  // Will-o'-the-Wisps vote: the three lights spiral up around the hand, then burst.
+  orbit:(x,y,c,n,k)=>{
+    for(let j=0;j<3;j++){const ph=j*2.094,col=c[j%c.length];
+      emit(.9,.014,tt=>{const r=(6+tt*24)*k,a=ph+tt*9;add({kind:'glow',x:x+Math.cos(a)*r,y:y+Math.sin(a)*r*.55-tt*46*k,vx:0,vy:0,life:.5,fadeIn:.05,size:3.4*k,grow:-.6,color:col,alpha:.9});});
+      later(.9,()=>{const a=ph+8.1,r=27.6*k;PRESETS.sparks(x+Math.cos(a)*r,y+Math.sin(a)*r*.55-41*k,[col,'#ffffff'],m=>n(Math.ceil(m/2)),k*.6);});}
+  },
+  // Will-o'-the-Wisps death: the lights break away in three directions, trailing light, and go out one by one.
+  scatter:(x,y,c,n,k)=>{
+    add({kind:'glow',x,y,vx:0,vy:0,life:1.4,fadeIn:.05,hold:.3,size:30*k,color:c[0],alpha:.45});
+    for(let j=0;j<3;j++){const a0=-1.571+j*2.094+rnd(-.3,.3),col=c[j%c.length],dur=.9+j*.35,turn=rnd(.9,1.8)*(Math.random()<.5?-1:1);
+      const at=tt=>{const a=a0+tt*turn,r=tt*78*k;return [x+Math.cos(a)*r,y+Math.sin(a)*r-tt*24*k];};
+      emit(dur,.014,tt=>{const [px,py]=at(tt);add({kind:'glow',x:px,y:py,vx:0,vy:0,life:.55,fadeIn:.05,size:4.2*k,grow:-.7,color:col,alpha:.95});if(Math.random()<.35)add({kind:'glow',x:px,y:py,vx:rnd(-12,12)*k,vy:rnd(-12,12)*k,life:.7,size:1.6*k,color:'#ffffff',alpha:.8});});
+      later(dur,()=>{const [px,py]=at(dur);add({kind:'ring',x:px,y:py,vx:0,vy:0,life:.4,size:4*k,grow:2.5,width:1.5*k,color:col});add({kind:'glow',x:px,y:py,vx:0,vy:0,life:.35,size:12*k,color:col,alpha:.8});});}
+  },
+  // Kaleidoscope vote: coloured rings and turning beams.
+  prism:(x,y,c,n,k)=>{
+    rings(x,y,c.slice(0,3),k,{gap:.08,size:8,grow:2.4,width:2});
+    rays(x,y,c,k,{count:8,size:26,grow:.5,width:2.4,life:.65,spin:2.4});
+    PRESETS.sparks(x,y,c,m=>n(Math.ceil(m*.8)),k*.9);
+  },
+  // Kaleidoscope death: the pattern spins up, rings pulse out in every colour, and the pieces fly apart.
+  kaleido:(x,y,c,n,k)=>{
+    rays(x,y,c,k,{count:12,size:16,grow:2.4,width:3,life:1.5,spin:3.2});
+    rings(x,y,c,k,{gap:.1,size:9,grow:3,width:2.6,life:.8});
+    later(.55,()=>{add({kind:'glow',x,y,vx:0,vy:0,life:.35,size:36*k,color:'#ffffff',alpha:.8});
+      for(let i=0;i<n(24);i++){const a=i/24*6.283+rnd(-.1,.1),v=rnd(110,230)*k;shard({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,ay:60*k,drag:1.4,vr:rnd(-14,14),life:rnd(1,1.5),size:rnd(3,6)*k},c);}});
+  },
+  // Opening a Chroma: a white flash, rings in every colour, turning beams, glass, sparks, and light rising for a while after.
+  chroma:(x,y,c,n,k)=>{
+    add({kind:'glow',x,y,vx:0,vy:0,life:.6,fadeIn:.03,size:80*k,grow:.3,color:'#ffffff',alpha:.95});
+    rings(x,y,c,k,{gap:.06,size:12,grow:3.4,width:3.5,life:.9});
+    rays(x,y,c,k,{count:16,size:60,grow:.7,width:4,life:1.6,spin:.9});
+    for(let i=0;i<n(34);i++){const a=rnd(0,6.283),v=rnd(140,340)*k;add({kind:'spark',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-60*k,ay:220*k,drag:1,life:rnd(.7,1.2),size:rnd(1.8,3)*k,color:pick(c)});}
+    later(.15,()=>{for(let i=0;i<n(22);i++){const a=rnd(0,6.283),v=rnd(80,220)*k;shard({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-80*k,ay:300*k,drag:.8,life:rnd(1.2,1.8),size:rnd(3,6)*k},c);}});
+    emit(2.2,.03,()=>{const a=rnd(0,6.283),d=rnd(0,40)*k;add({kind:'glow',x:x+Math.cos(a)*d,y:y+Math.sin(a)*d,vx:rnd(-12,12)*k,vy:rnd(-110,-40)*k,drag:.3,sway:20*k,life:rnd(1.2,2),size:rnd(2,4)*k,color:pick(c)});},.3);
+  },
+  // While a Chroma chest builds up: light drawn in from all around, white, then gold, then violet, then every colour.
+  gather:(x,y,c,n,k)=>{
+    const stages=[['#ffffff'],['#ffe29a','#ffd77a'],['#d9b8ff','#b48ae6'],c];
+    emit(2,.02,tt=>{const a=rnd(0,6.283),d=rnd(60,110)*k,col=pick(stages[Math.min(3,Math.floor(tt/.5))]);
+      add({kind:'glow',x:x+Math.cos(a)*d,y:y+Math.sin(a)*d,vx:-Math.cos(a)*d*1.6,vy:-Math.sin(a)*d*1.6,life:.6,fadeIn:.3,hold:.6,size:rnd(2,3.6)*k,grow:-.5,color:col,alpha:.9});});
+  },
+});
 // Plays an effect centred on an element. Colours come from the decoration that caused it; `extra` carries the
 // player's picture or name for the effects that show it.
 export function playOn(el,preset,colors,scale,extra){

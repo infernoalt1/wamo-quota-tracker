@@ -1,5 +1,6 @@
 // Spending points on decorations, mystery chests and gifts. Points come only from playing; there is no real money here.
-import { ITEM, KINDS, UNLOCKS, CHEST, GIFT, lookOf, progressOf, unlocked, rollChest } from './cosmetics.mjs';
+import { ITEM, KINDS, UNLOCKS, CHEST, GIFT, SETS, bundleOf, lookOf, progressOf, unlocked, rollChest } from './cosmetics.mjs';
+import { flair } from './engine.mjs';
 import { dress, keyOf, usernameOf } from './accounts.mjs';
 import { dayStart } from './leaderboard.mjs';
 
@@ -43,8 +44,11 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
     res.json({...await stateOf(saved),later});
   }));
   router.post('/shop/chest',handle(async(req,res,account)=>{
-    const opened=await store.openChest(account.id,{price:CHEST.price,refund:CHEST.refund,held:heldFor(account.id),roll:()=>rollChest()});
+    const opened=await store.openChest(account.id,{price:CHEST.price,refund:CHEST.refund,held:heldFor(account.id),roll:()=>rollChest(),bundle:bundleOf});
     if(opened.result==='short')throw refuse(`A chest costs ${CHEST.price} points.`);
+    // A new Chroma is shown to everyone at the account's tables, but only between games, so it can never carry a signal mid-game.
+    const set=ITEM[opened.item]?.set;
+    if(set&&!opened.duplicate)accounts.eachSeat(account.session,(seat,game)=>{if(!['lobby','ended'].includes(game.phase))return false;flair(game,seat.id,set);});
     res.json({...await stateOf(account),opened:{item:opened.item,duplicate:opened.duplicate,refund:opened.duplicate?CHEST.refund:0}});
   }));
   router.post('/shop/gift',handle(async(req,res,account)=>{
@@ -59,6 +63,16 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
     if(sent==='cap')throw refuse(`You can gift up to ${GIFT.daily} points a day.`);
     if(sent==='short')throw refuse('You do not have enough points for that gift.');
     res.json({...await stateOf(account),sent:{to:to.username,amount}});
+  }));
+  // Wear every piece of a Chroma set at once.
+  router.post('/shop/equip-set',handle(async(req,res,account)=>{
+    const set=req.body?.set;
+    if(typeof set!=='string'||!Object.hasOwn(SETS,set))throw refuse('That set does not exist.');
+    const owned=(await store.wallet(account.id)).owned;
+    if(!SETS[set].items.every(id=>owned.includes(id)))throw refuse('Find this Chroma in a chest first.');
+    const look={...lookOf(account.look)};for(const id of SETS[set].items)look[ITEM[id].kind]=id;
+    const {saved,later}=await wear(account,look);
+    res.json({...await stateOf(saved),later});
   }));
   router.post('/shop/equip',handle(async(req,res,account)=>{
     const kind=req.body?.kind,id=req.body?.item??null;

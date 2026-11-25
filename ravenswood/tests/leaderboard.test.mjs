@@ -5,7 +5,7 @@ import { newGame, join, spectate, start, act, kill, view, results } from '../lib
 import { mountLeaderboard } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
-import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, rollChest } from '../lib/cosmetics.mjs';
+import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, SETS, rollChest } from '../lib/cosmetics.mjs';
 import { createBets } from '../lib/bets.mjs';
 import { adminKeys, GRANT } from '../lib/admin.mjs';
 
@@ -25,7 +25,7 @@ function memoryStore(){
     async wallet(id){const mine=this.items.filter(i=>i.account===id);return {earned:rows.filter(r=>r.account===id).reduce((n,r)=>n+(r.points||0),0),spent:mine.reduce((n,i)=>n+i.price,0),adjust:this.ledger.filter(l=>l.account===id).reduce((n,l)=>n+l.delta,0),owned:mine.map(i=>i.item)};},
     async balance(id){const w=await this.wallet(id);return w.earned-w.spent+w.adjust;},
     async buy(id,item,price,held=0){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(await this.balance(id)-held<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
-    async openChest(id,{price,refund,held=0,roll}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',item,at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',item,at:new Date()});else this.items.push({account:id,item,price:0});return {result:'opened',item,duplicate};},
+    async openChest(id,{price,refund,held=0,roll,bundle=item=>[item]}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',item,at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',item,at:new Date()});else for(const x of bundle(item))if(!this.items.some(i=>i.account===id&&i.item===x))this.items.push({account:id,item:x,price:0});return {result:'opened',item,duplicate};},
     async gift({from,to,amount,held=0,daily,since}){if(await this.giftsSent(from,since)+amount>daily)return 'cap';if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
     async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
     async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
@@ -384,4 +384,41 @@ shopTest('an admin sees the points a player earned, spent, opened and was given'
   const kinds=p.activity.map(a=>a.kind);for(const k of ['game','buy','chest','chest_refund','grant'])assert(kinds.includes(k),k);
   assert.equal(p.activity.find(a=>a.kind==='chest').item,'brass');assert.equal(p.activity.find(a=>a.kind==='grant').other,'Boss');
   assert.equal(p.activity.find(a=>a.kind==='game').item,'chef');
+});
+// Opens a chest with chosen dice: the first number picks the tier, the next the item.
+async function rigged(call,...rolls){const random=Math.random;let i=0;Math.random=()=>rolls[Math.min(i++,rolls.length-1)];try{return await call('/shop/chest',{});}finally{Math.random=random;}}
+test('a Chroma is a whole set of five, one of each kind, and only its frame can be rolled',()=>{
+  for(const set of Object.values(SETS)){
+    assert.deepEqual(set.items.map(id=>ITEM[id].kind).sort(),['color','frame','hand','mark','title']);
+    for(const id of set.items){assert.equal(ITEM[id].tier,'chroma');assert(ITEM[id].chest);}
+    assert(ITEM[set.items.find(id=>ITEM[id].kind==='hand')].fx);assert(ITEM[set.items.find(id=>ITEM[id].kind==='mark')].fx);
+  }
+  assert.equal(CHEST.odds.chroma,1);assert.equal(CHEST.price,100);
+  const found=new Set();for(let i=0;i<300;i++)found.add(rollChest((()=>{let n=0;return()=>n++?i/300:.995;})()));
+  assert.deepEqual([...found].sort(),Object.keys(SETS).sort());
+});
+shopTest('a Chroma chest gives the whole set, can be worn at once, and is announced to the table between games',async({store,browser,member})=>{
+  const ana=await member('Ana');await played(store,ana.account,10,10,{points:30});
+  const host=browser(),game=(await host('/',{type:'create',name:'Host'})).data;
+  await ana.call('/',{type:'join',name:'Ana',code:game.code});
+  let r=await rigged(ana.call,.995,.9);assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.deepEqual(r.data.opened,{item:'kaleido',duplicate:false,refund:0});
+  for(const id of SETS.kaleido.items)assert(r.data.owned.includes(id),id);
+  let table=(await host(`/?code=${game.code}`)).data;
+  assert.equal(table.flair.length,1);assert.equal(table.flair[0].set,'kaleido');assert.equal(table.flair[0].seat,table.players.find(p=>p.name==='Ana').id);
+  r=await ana.call('/shop/equip-set',{set:'kaleido'});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.deepEqual(r.data.look,{frame:'kaleido',color:'kaleido_ink',title:'kaleido_title',hand:'kaleido_hand',mark:'kaleido_mark'});
+  for(const set of ['glass','__proto__',42])assert.equal((await ana.call('/shop/equip-set',{set})).status,400);
+  // The same set again is a duplicate: part of the price back, and nothing to announce.
+  r=await rigged(ana.call,.995,.9);assert.equal(r.data.opened.duplicate,true);assert.equal(r.data.balance,300-2*CHEST.price+CHEST.refund);
+  table=(await host(`/?code=${game.code}`)).data;assert.equal(table.flair.length,1);
+});
+shopTest('a Chroma found during a game is not announced at that table',async({store,browser,member})=>{
+  const host=browser(),game=(await host('/',{type:'create',name:'Host'})).data;
+  for(let i=1;i<4;i++)await browser()('/',{type:'join',name:`P${i}`,code:game.code});
+  const bo=await member('Bo');await played(store,bo.account,5,5,{points:30});
+  await bo.call('/',{type:'join',name:'Bo',code:game.code});
+  assert.equal((await host('/',{type:'start',code:game.code})).status,200);
+  const r=await rigged(bo.call,.995,.1);assert.equal(r.data.opened.item,'glass');
+  assert.deepEqual((await host(`/?code=${game.code}`)).data.flair,[]);
 });
