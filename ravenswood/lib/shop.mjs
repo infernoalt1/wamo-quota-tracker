@@ -62,7 +62,7 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
   }));
   router.post('/shop/equip',handle(async(req,res,account)=>{
     const kind=req.body?.kind,id=req.body?.item??null;
-    if(!Object.hasOwn(KINDS,kind))throw refuse('Choose a frame, name colour or title.');
+    if(!Object.hasOwn(KINDS,kind))throw refuse('Choose what kind of decoration to change.');
     if(id!==null){
       const item=itemOf(id);
       if(item?.kind!==kind)throw refuse('That item does not exist.');

@@ -4,7 +4,7 @@ import { ROLES } from './characters.mjs';
 // Points for each finished game that counts on the leaderboard. Winning is worth the most.
 export const POINTS = Object.freeze({ finish: 5, win: 25, demon: 10, daily: 15 });
 
-export const KINDS = Object.freeze({ frame: 'Frames', color: 'Name colours', title: 'Titles' });
+export const KINDS = Object.freeze({ frame: 'Frames', color: 'Name colours', title: 'Titles', hand: 'Vote hands', mark: 'Death marks' });
 export const TIERS = Object.freeze({ common: 'Common', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', unlock: 'Earned' });
 
 // Achievements that unlock decorations nobody can buy. Each counts matching games in a player's history.
@@ -52,6 +52,19 @@ export const ITEMS = Object.freeze([
   { id: 'saint', kind: 'title', name: 'The Saint', tier: 'unlock', unlock: 'saint_win', blurb: 'Survived the town’s judgement.' },
   { id: 'mastermind', kind: 'title', name: 'Mastermind', tier: 'unlock', unlock: 'minion_wins', blurb: 'The hand behind the Demon.' },
   { id: 'veteran', kind: 'title', name: 'Veteran', tier: 'unlock', unlock: 'veteran', blurb: 'Fifty stories told.' },
+  // Vote hands: how your raised hand looks, and the effect when it goes up or is counted. `fx` names a particle effect.
+  { id: 'gilded_hand', kind: 'hand', name: 'Gilded Hand', tier: 'common', price: 150, fx: 'sparks', tint: ['#fff1c2', '#f2c35b', '#d99a2b'], blurb: 'A shower of gold sparks with every vote.' },
+  { id: 'bone_hand', kind: 'hand', name: 'Bone Hand', tier: 'rare', price: 300, fx: 'dust', tint: ['#fff8e8', '#e9dcc0', '#cfc2a4'], blurb: 'Old ivory, and a little dust.' },
+  { id: 'ember_hand', kind: 'hand', name: 'Ember Hand', tier: 'epic', price: 800, fx: 'embers', tint: ['#ffb347', '#ff7a1c', '#ffd27a'], blurb: 'Your vote rises like sparks from a fire.' },
+  { id: 'ghost_hand', kind: 'hand', name: 'Ghostly Hand', tier: 'rare', chest: true, fx: 'wisps', tint: ['#c8f3ff', '#8fd8ff'], blurb: 'Pale wisps curl up from your fingers.' },
+  { id: 'crimson_hand', kind: 'hand', name: 'Crimson Hand', tier: 'legendary', chest: true, fx: 'ink', tint: ['#ff3b4a', '#b5121f', '#ff8a8a'], blurb: 'Every vote leaves a spatter of red.' },
+  // Death marks: what plays when you die, and the mark your seat keeps afterwards.
+  { id: 'ash_mark', kind: 'mark', name: 'Ashes', tier: 'common', price: 150, fx: 'ash', icon: 'wind', tint: ['#8b8794', '#5d5a63', '#b9b4bf'], blurb: 'You crumble, and drift away on the wind.' },
+  { id: 'ink_mark', kind: 'mark', name: 'Ink Splash', tier: 'rare', price: 350, fx: 'ink', icon: 'droplet', tint: ['#2a0b12', '#4d0f1c', '#7a1a2a'], blurb: 'A dark spatter across the town records.' },
+  { id: 'candle_mark', kind: 'mark', name: 'Snuffed Candle', tier: 'epic', price: 850, fx: 'smoke', icon: 'flame', tint: ['#a7a2ad', '#6f6a75'], blurb: 'A thin trail of smoke where a light used to be.' },
+  { id: 'raven_mark', kind: 'mark', name: 'The Raven', tier: 'legendary', price: 1500, fx: 'feathers', icon: 'bird', tint: ['#14161e', '#242a3c', '#0c0d12'], blurb: 'Black feathers scatter as the raven takes you.' },
+  { id: 'ember_mark', kind: 'mark', name: 'Last Embers', tier: 'rare', chest: true, fx: 'embers', icon: 'sparkles', tint: ['#ffb347', '#ff7a1c'], blurb: 'A final glow, rising into the dark.' },
+  { id: 'wisp_mark', kind: 'mark', name: 'Departing Wisp', tier: 'epic', chest: true, fx: 'wisps', icon: 'ghost', tint: ['#c8f3ff', '#9fe0ff'], blurb: 'Your spirit lifts gently from the table.' },
   { id: 'collector', kind: 'title', name: 'The Collector', tier: 'common', chest: true, blurb: 'Keeps everything. Just in case.' },
   { id: 'high_roller', kind: 'title', name: 'High Roller', tier: 'rare', chest: true, blurb: 'Bets it all, every time.' },
   { id: 'fortune', kind: 'title', name: 'Fortune’s Favourite', tier: 'epic', chest: true, blurb: 'The dice always seem to land their way.' },

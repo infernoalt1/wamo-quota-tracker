@@ -1,6 +1,7 @@
 'use client';
 import {useState,useEffect,useRef,Fragment} from 'react';
-import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package} from 'lucide-react';
+import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,Wind,Droplet,Flame,Bird,Ghost} from 'lucide-react';
+import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
 import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT} from '../lib/cosmetics.mjs';
 const types={townsfolk:'Townsfolk',outsider:'Outsiders',minion:'Minions',demon:'Demon'};
@@ -39,6 +40,8 @@ function Finale({g,host,busy,onClose,onNewGame,onLog}){
  const rank=p=>({minion:1,demon:2}[ROLES[p.initialRole]?.type]||0),order=[...g.players].sort((a,b)=>rank(a)-rank(b)),flipAt=p=>2000+order.indexOf(p)*450;
  const [done,setDone]=useState(false);
  useEffect(()=>{const t=setTimeout(()=>setDone(true),2700+order.length*450);return()=>clearTimeout(t);},[]);
+ // Embers rise from the Demon's card as it turns over.
+ useEffect(()=>{const demon=order.find(p=>rank(p)===2);if(!demon)return;const t=setTimeout(()=>playOn(document.querySelector('.finale-card.demon'),'embers',['#ff6a2a','#ffb347','#ff3a1a'],1.8),flipAt(demon)+300);return()=>clearTimeout(t);},[]);
  return <div className={`finale ${called?'called':good?'good':'evil'} ${done?'done':''}`} role="dialog" aria-modal="true" aria-label={called?'The game was called':`${good?'Good':'Evil'} wins`}><div className="finale-flash"/><div className="finale-inner">
   <ClockArt/>
   <span className="eyebrow">THE STORY ENDS</span>
@@ -141,6 +144,14 @@ function SetupChart({script,players}){
  </section>;
 }
 function ChatRow({active,icon,look,title,preview,time,unread,dead,onClick}){return <button className={`chat-row ${active?'active':''} ${unread?'unread':''} ${dead?'dead':''}`} onClick={onClick}><span className={`chat-avatar${frameOf(look)}`}>{icon}</span><span className="chat-row-text"><span className="chat-row-top"><strong>{title}</strong>{time&&<time>{time}</time>}</span><span className="chat-row-bottom"><span className="chat-preview">{preview}</span>{unread>0&&<span className="badge" aria-label={`${unread} unread`}>{unread}</span>}</span></span></button>;}
+// Vote hands and death marks: each plays a particle effect, and a death mark also replaces the skull on a dead seat.
+// Without one, a counted vote gives off small gold sparks and a death a little ash.
+const MARK_ICONS={wind:Wind,droplet:Droplet,flame:Flame,bird:Bird,ghost:Ghost,sparkles:Sparkles};
+function DeathMark({look,size=18}){const item=ITEM[look?.mark],Icon=MARK_ICONS[item?.icon]||Skull;return <Icon size={size} className={item?`mark-icon mark-${item.id}`:undefined}/>;}
+const handFx=look=>ITEM[look?.hand]||{fx:'sparks',tint:['#f6dc9c','#c7ab76']};
+const markFx=look=>ITEM[look?.mark]||{fx:'ash',tint:['#8b8794','#5d5a63','#b9b4bf']};
+const seatToken=id=>document.querySelector(`[data-seat="${id}"] .seat-token`);
+const playAt=(el,item,scale)=>playOn(el,item.fx,item.tint,scale);
 // Shop decorations: a frame around the picture, a colour for the name, and a title.
 const frameOf=look=>look?.frame?` framed frame-${look.frame}`:'';
 function Face({className,src,name,look}){return <span className={`${className}${frameOf(look)}`}><Avatar src={src} name={name}/></span>;}
@@ -172,7 +183,7 @@ function GiftBox({to,onWallet}){
  return <div className="gift-box">
   {open?<form onSubmit={e=>{e.preventDefault();send();}}><label>Points<input type="number" inputMode="numeric" min={GIFT.min} max={GIFT.max} step="1" value={amount} onChange={e=>setAmount(e.target.value)}/></label><button className="primary compact" disabled={busy}><Gift size={14}/>Send to {to}</button><button type="button" className="text-button" onClick={()=>setOpen(false)}>Cancel</button></form>
   :<button className="secondary compact" onClick={()=>setOpen(true)}><Gift size={14}/>Gift points</button>}
-  <small>{GIFT.min}–{GIFT.max} points at a time, up to {GIFT.daily} a day, to people you have played a recorded game with.</small>
+  {open&&<small>{GIFT.min}–{GIFT.max} points at a time, up to {GIFT.daily} a day, to people you have played a recorded game with.</small>}
   {msg&&<p className={`status-note ${msg.ok?'good':'error'}`}>{msg.ok?<Check size={15}/>:<X size={15}/>}<span>{msg.text}</span></p>}
  </div>;
 }
@@ -197,11 +208,21 @@ function ShopSample({item,account,look}){
  const wearing={...look,[item.kind]:item.id};
  if(item.kind==='frame')return <Face className="shop-face" src={account.avatar} name={account.username} look={wearing}/>;
  if(item.kind==='color')return <span className="shop-ink"><Named name={account.username} look={wearing}/></span>;
+ if(item.kind==='hand')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><span className={`hand-indicator hand-${item.id}`}><Hand size={11}/></span></span>;
+ if(item.kind==='mark')return <span className="shop-seat"><span className="shop-face dead-token"><DeathMark look={{mark:item.id}} size={22}/></span></span>;
  return <span className="shop-title-sample"><strong>{account.username}</strong><Title look={wearing}/></span>;
 }
 function Shop({account,wallet,onWallet,inGame,onLogin}){
- const [kind,setKind]=useState('frame'),[preview,setPreview]=useState(null),[confirm,setConfirm]=useState(null),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[error,setError]=useState(''),[chest,setChest]=useState(null);
+ const [kind,setKind]=useState('frame'),[preview,setPreview]=useState(null),[confirm,setConfirm]=useState(null),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[error,setError]=useState(''),[chest,setChest]=useState(null),chestStage=useRef(null);
  useEffect(()=>{setConfirm(null);},[kind]);
+ // What a chest just gave, and a burst of sparks in its tier's colours as it appears.
+ const prize=chest?.stage==='open'?ITEM[chest.item]:null;
+ useEffect(()=>{
+  if(!prize||!chestStage.current)return;
+  const colors={common:['#e8e2ef','#c9c1d4'],rare:['#fff1c2','#e6c37c'],epic:['#e3cdfd','#b48ae6','#ffffff'],legendary:['#fff4cf','#ffd77a','#ff9d2e']}[prize.tier]||['#e8e2ef'];
+  playOn(chestStage.current,'sparks',colors,prize.tier==='legendary'?2:prize.tier==='epic'?1.6:1.3);
+  if(prize.tier==='legendary')playOn(chestStage.current,'embers',['#ffd77a','#ff9d2e'],1.6);
+ },[chest]);
  if(!account)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p>Win games to earn points, then spend them on frames, name colours and titles that everyone at the table can see.</p><div className="shop-guest"><Lock size={18}/><div><strong>Log in to start earning points.</strong><p>Points come from games where at least three players are logged in.</p></div><button className="primary compact" onClick={onLogin}>Log in or sign up</button></div></>;
  if(!wallet)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p className="small">Opening the shop…</p></>;
  const look=wallet.look||{},shown=preview?{...look,[ITEM[preview].kind]:preview}:look;
@@ -216,7 +237,6 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
   try{const data=await postJson('/botc/api/game/shop/chest',{});await new Promise(done=>setTimeout(done,Math.max(0,1100-(Date.now()-started))));onWallet(data);setChest({stage:'open',...data.opened});}
   catch(e){setChest(null);setError(e.message);}finally{setBusy(false);}
  }
- const prize=chest?.stage==='open'?ITEM[chest.item]:null;
  const items=ITEMS.filter(i=>i.kind===kind);
  return <>
   <span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2>
@@ -237,12 +257,13 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
     {wallet.gifts?.length>0&&<div className="shop-gifts"><span className="eyebrow"><Gift size={12}/>GIFTS FOR YOU</span>{wallet.gifts.map((x,i)=><span key={i}><b>{x.from}</b> sent you {x.amount} points<small> · {new Date(x.at).toLocaleDateString([],{month:'short',day:'numeric'})}</small></span>)}</div>}
   </div>
   <section className={`chest-panel ${chest?.stage||''} ${prize?`tier-${prize.tier}`:''}`} aria-live="polite">
-   <div className="chest-stage">{prize?<div className="chest-prize"><ShopSample item={prize} account={account} look={look}/></div>:<ChestArt shaking={chest?.stage==='shaking'}/>}</div>
+   <div className="chest-stage" ref={chestStage}>{prize?<div className="chest-prize"><ShopSample item={prize} account={account} look={look}/></div>:<ChestArt shaking={chest?.stage==='shaking'}/>}</div>
    <div className="chest-text">
     <span className="tier-tag">{prize?`${TIERS[prize.tier]} ${KINDS[prize.kind].replace(/s$/,'').toLowerCase()}`:'Mystery chest'}</span>
     <h3>{prize?prize.name:chest?.stage==='shaking'?'Opening…':'What’s inside?'}</h3>
-    <p>{prize?(chest.duplicate?`You already have this, so ${chest.refund} points come back to you.`:prize.blurb):'A random frame, name colour or title, including a few you can only find in chests.'}</p>
-    {!prize&&<small className="chest-odds">{Object.entries(CHEST.odds).map(([t,o])=>`${TIERS[t]} ${o}%`).join(' · ')} · Duplicates give back {CHEST.refund}</small>}
+    <p>{prize?(chest.duplicate?`You already have this, so ${chest.refund} points come back to you.`:prize.blurb):'A random decoration of any kind, including a few you can only find in chests.'}</p>
+    {!prize&&<div className="chest-odds" aria-label="Chances by rarity">{Object.entries(CHEST.odds).map(([t,o])=><span key={t} className={`odds-chip tier-${t}`}>{TIERS[t]} {o}%</span>)}</div>}
+    {!prize&&<small className="chest-dupes">Already own what you get? {CHEST.refund} points come back to you.</small>}
     <div className="chest-actions">
      {prize&&!chest.duplicate&&look[prize.kind]!==prize.id&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:prize.kind,item:prize.id},`You are wearing ${prize.name}.`)}>Wear it</button>}
      <button className={prize?'secondary compact':'primary compact'} disabled={busy||wallet.balance<CHEST.price} onClick={openChest}><Package size={14}/>{prize?'Open another':'Open'} · {CHEST.price}</button>
@@ -258,7 +279,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
    {items.map(item=>{
     const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
-     <button className="shop-sample" onClick={()=>setPreview(p=>p===item.id?null:item.id)} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
+     <button className="shop-sample" title={item.fx?'Click to see the effect':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);if(item.fx)playAt(e.currentTarget.querySelector('.shop-face')||e.currentTarget,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
      <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
      <div className="shop-item-action">
       {wearing?<><span className="wearing-tag"><Check size={14}/>Wearing</span><button className="text-button" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:null},`${item.name} is off.`)}>Take off</button></>
@@ -303,8 +324,7 @@ function Leaderboard({me,start,onWallet}){
  if(player)return <>
   <button className="text-button back-link" onClick={()=>setPlayer(null)}><ArrowLeft size={14}/>All players</button>
   {error?<p className="status-note">{error}</p>:!profile?<p className="small">Opening the records…</p>:<>
-   <div className="profile-head"><Face className="account-avatar" src={profile.avatar} name={profile.username} look={profile.look}/><div><span className="eyebrow">PLAYER RECORD</span><h2><Named name={profile.username} look={profile.look}/></h2><Title look={profile.look}/></div></div>
-   {me&&me!==profile.username&&<GiftBox to={profile.username} onWallet={onWallet}/>}
+   <div className="profile-head"><Face className="account-avatar" src={profile.avatar} name={profile.username} look={profile.look}/><div><span className="eyebrow">PLAYER RECORD</span><h2><Named name={profile.username} look={profile.look}/></h2><Title look={profile.look}/>{me&&me!==profile.username&&<GiftBox to={profile.username} onWallet={onWallet}/>}</div></div>
    {profile.games===0?<p className="small">No recorded games yet. A game counts when at least three players at the table are logged in.</p>:<>
     <div className="stat-row">{[['Games',profile.games],['Survived',pct(profile.survived,profile.games)],['Demon wins',profile.demonWins]].map(([label,value])=><div className="stat" key={label}><b>{value}</b><small>{label}</small></div>)}</div>
     <h3 className="log-heading">By team</h3>
@@ -370,7 +390,9 @@ export default function Game(){
   if(!g)return;const key=`${gameKey}:${g.day}`,n=g.ballots.length,prev=seenBallots.current;seenBallots.current={key,n};
   if(!prev||prev.key!==key||n<=prev.n||g.phase!=='day')return;
   const b=g.ballots[n-1],steps=b.votes.length,gap=Math.min(260,Math.max(140,2600/steps));let step=0;
-  const next=()=>{step++;setTally({b,step,done:step>=steps});fx('tally',step<steps?next:()=>setTally(null),step<steps?gap:2600);};
+  const next=()=>{step++;setTally({b,step,done:step>=steps});
+   // Each raised hand gives off its vote-hand effect as it is counted.
+   const v=b.votes[step-1];if(v?.yes){const who=g.players.find(p=>p.id===v.id);requestAnimationFrame(()=>playAt(seatToken(v.id),handFx(who?.look),.85));}fx('tally',step<steps?next:()=>setTally(null),step<steps?gap:2600);};
   setSelected(null);setTally({b,step:0,done:false});fx('tally',next,450);
  },[g?.ballots?.length,g?.day,gameKey]);
  // Dusk and dawn glow softly inside the circle only, and a seat that has just died flashes red once.
@@ -382,8 +404,16 @@ export default function Game(){
   const kind=prev.phase==='day'&&g.phase==='night'?'dusk':prev.phase==='night'&&g.phase==='day'?'dawn':null;
   const died=g.players.filter(p=>prev.alive[p.id]&&!p.alive).map(p=>p.id);
   if(kind){setSweep({kind,at:Date.now()});fx('sweep',()=>setSweep(null),1900);}
-  if(kind==='dawn'){setDawnHold(true);fx('dawnHold',()=>setDawnHold(false),1500);}
-  if(died.length){fx('fallStart',()=>{setFallen(died);fx('fall',()=>setFallen([]),1700);},kind==='dawn'?500:0);}
+  if(kind==='dawn'){setDawnHold(true);fx('dawnHold',()=>setDawnHold(false),1500);fx('motes',()=>motes(document.querySelector('.town-inner')),250);}
+  // A seat that has just died plays its owner's death mark (a little ash if they have none).
+  if(died.length){fx('fallStart',()=>{setFallen(died);died.forEach(id=>playAt(seatToken(id),markFx(g.players.find(p=>p.id===id)?.look),1.1));fx('fall',()=>setFallen([]),1700);},kind==='dawn'?500:0);}
+ },[g]);
+ // A hand raised during a vote gives off a small burst of its vote-hand effect. Only hands raised while watching.
+ const prevHands=useRef({});
+ useEffect(()=>{
+  const n=g?.nomination,before=prevHands.current;prevHands.current=n?{id:n.id,hands:{...n.hands}}:{};
+  if(!n||before.id!==n.id)return;
+  for(const [id,up] of Object.entries(n.hands))if(up&&!before.hands[id])playAt(seatToken(id),handFx(g.players.find(p=>p.id===id)?.look),.7);
  },[g]);
  // A whisper partner or group can vanish while open (a kick, a leave); fall back to the square.
  useEffect(()=>{if(g&&!['town','journal','notes'].includes(view)&&!g.players.some(p=>p.id===view)&&!g.groups.some(c=>c.id===view)){setView('town');setChatOpen(false);}},[g,view]);
@@ -498,7 +528,7 @@ export default function Game(){
     return <div className={`centerpiece tally ${tally.done?'done':''}`} aria-live="polite"><span className="tally-label">{tally.done?'The count':'Counting'} · {nameOf(b.target)}</span><span key={yes} className={`tally-count ${yes>0?'up':''} ${tally.done&&b.qualified?'enough':''}`}>{yes}</span><span className="center-sub">{tally.done?verdict:`${need} needed`}</span></div>;})()
    :chosen?<div className="seat-menu" role="group" aria-label={`Actions for ${chosen.name}`}><button className="icon-button seat-menu-close" onClick={()=>setSelected(null)} aria-label="Clear selection"><X size={15}/></button><h3><Named name={chosen.name} look={chosen.look}/>{chosen.id===g.me.id?' (you)':''}</h3><button className="primary compact" disabled={busy||g.paused||!!nominateBlock} title={nominateBlock} onClick={()=>action('nominate',{target:chosen.id})}><Hand size={14}/>Nominate</button>{chosen.id!==g.me.id&&<button className="secondary compact" onClick={()=>{openChat(chosen.id);setSelected(null);}}><MessageCircle size={14}/>Whisper</button>}{g.me.moonPending&&chosen.alive&&<button className="primary compact" disabled={busy||g.paused} onClick={()=>action('moonchild',{target:chosen.id})}><Target size={14}/>Moonchild: choose</button>}{script==='tb'&&<button className="secondary compact" disabled={busy||g.paused||!!g.nomination||g.me.slayerUsed} title={g.me.slayerUsed?'You already took your shot.':''} onClick={()=>setDialog('slayer')}><Target size={14}/>Slayer shot</button>}{host&&chosen.pictured&&chosen.id!==g.me.id&&<button className="secondary compact" disabled={busy} onClick={()=>action('hide_avatar',{target:chosen.id})}>{chosen.avatarHidden?<Eye size={14}/>:<EyeOff size={14}/>}{chosen.avatarHidden?'Show picture':'Hide picture'}</button>}{chosen.account&&<button className="secondary compact" onClick={()=>{openLeaders(chosen.account);setSelected(null);}}><Trophy size={14}/>Profile</button>}{nominateBlock&&<small>{nominateBlock}</small>}</div>
    :<div className="centerpiece"><ClockArt timer={dayTimer(g,now)}/><span className="center-sub">{phase==='welcome'||phase==='lobby'?'TRUST IS A FRAGILE THING':phase==='ended'?'EVERY SECRET HAS A STORY':`${living} LIVING · ${seats.length-living} DEAD`}</span></div>}
-   {seats.map((p,i)=>{const a=i/seats.length*Math.PI*2-Math.PI/2,canPick=!p.empty&&pickable(p);return <button key={p.id} className={`seat ${p.empty?'empty':''} ${!p.alive?'dead':''} ${p.away&&phase!=='ended'?'away':''}${p.id===g?.me.id?'you':''} ${targets.includes(p.id)||selected===p.id?'selected':''} ${g?.nomination?.target===p.id?'nominated':''} ${g?.pending&&canPick?'pickable':''} ${tallyYes.has(p.id)?'tally-yes':''} ${tallyOn===p.id?'tally-on':''} ${fallen.includes(p.id)?'falling':''}`} style={{left:`${50+41*Math.cos(a)}%`,top:`${50+41*Math.sin(a)}%`}} onClick={()=>choose(p.id)} disabled={p.empty||!canPick} aria-label={`${p.name}, ${p.alive?'alive':'dead'}${p.away&&phase!=='ended'?', offline':''}${p.id===g?.me.id?', you':''}`}><span className={`seat-token${p.empty?'':frameOf(p.look)}`}>{p.empty?<Armchair size={18}/>:phase==='ended'?<RoleIcon id={p.initialRole}/>:!p.alive?<Skull size={18}/>:<Avatar src={p.avatar} name={p.name}/>}{p.id===g?.host&&<Crown className="host-crown" size={12}/>}{g?.nomination?.hands[p.id]&&<span className="hand-indicator"><Hand size={11}/></span>}</span><span className="seat-name"><Named name={p.name} look={p.look}/>{p.id===g?.me.id&&<em>you</em>}</span><span className="seat-sub">{p.empty?'Open':phase==='ended'?ROLES[p.initialRole].name:p.away?'Offline':p.claim?`Claims ${ROLES[p.claim].name}`:!p.alive?(p.ghost?'Ghost vote left':'No vote left'):p.ready?'Ready':phase==='lobby'&&p.look?.title?<Title look={p.look}/>:' '}</span></button>;})}
+   {seats.map((p,i)=>{const a=i/seats.length*Math.PI*2-Math.PI/2,canPick=!p.empty&&pickable(p);return <button key={p.id} data-seat={p.empty?undefined:p.id} className={`seat ${p.empty?'empty':''} ${!p.alive?'dead':''} ${p.away&&phase!=='ended'?'away':''}${p.id===g?.me.id?'you':''} ${targets.includes(p.id)||selected===p.id?'selected':''} ${g?.nomination?.target===p.id?'nominated':''} ${g?.pending&&canPick?'pickable':''} ${tallyYes.has(p.id)?'tally-yes':''} ${tallyOn===p.id?'tally-on':''} ${fallen.includes(p.id)?'falling':''}`} style={{left:`${50+41*Math.cos(a)}%`,top:`${50+41*Math.sin(a)}%`}} onClick={()=>choose(p.id)} disabled={p.empty||!canPick} aria-label={`${p.name}, ${p.alive?'alive':'dead'}${p.away&&phase!=='ended'?', offline':''}${p.id===g?.me.id?', you':''}`}><span className={`seat-token${p.empty?'':frameOf(p.look)}`}>{p.empty?<Armchair size={18}/>:phase==='ended'?<RoleIcon id={p.initialRole}/>:!p.alive?<DeathMark look={p.look}/>:<Avatar src={p.avatar} name={p.name}/>}{p.id===g?.host&&<Crown className="host-crown" size={12}/>}{g?.nomination?.hands[p.id]&&<span className={`hand-indicator ${p.look?.hand?`hand-${p.look.hand}`:''}`}><Hand size={11}/></span>}</span><span className="seat-name"><Named name={p.name} look={p.look}/>{p.id===g?.me.id&&<em>you</em>}</span><span className="seat-sub">{p.empty?'Open':phase==='ended'?ROLES[p.initialRole].name:p.away?'Offline':p.claim?`Claims ${ROLES[p.claim].name}`:!p.alive?(p.ghost?'Ghost vote left':'No vote left'):p.ready?'Ready':phase==='lobby'&&p.look?.title?<Title look={p.look}/>:' '}</span></button>;})}
   </div></div>
   {!g?<div className="action-bar"><div className="bar-text"><strong>Everyone has a part to play.</strong><p>A secret character. A circle of friends. Nobody has to sit out as Storyteller.</p></div></div>
   :phase==='lobby'?<div className="action-bar"><Users size={22}/><div className="bar-text"><strong>{seats.length<5?`Waiting for ${5-seats.length} more player${seats.length===4?'':'s'}.`:'Ready when the host is.'}</strong><p>Join from separate devices. Keep this browser to reconnect to your seat.</p></div></div>

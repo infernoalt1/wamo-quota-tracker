@@ -426,7 +426,7 @@ button.leader-row:hover{background:#ffffff08}
 .deco-title.tier-rare{color:#e2c48a}
 .deco-title.tier-epic{color:#cdb2ff}
 .deco-title.tier-epic::before,.deco-title.tier-legendary::before{content:'\2726  ';font-style:normal}
-.deco-title.tier-legendary{font-style:normal;font-weight:600;letter-spacing:.6px;text-transform:uppercase;font-size:10px;background-image:linear-gradient(90deg,#c9963f,#fff2c4,#e0b45e,#fff2c4,#c9963f);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 7s linear infinite}
+.deco-title.tier-legendary{font-style:normal;font-weight:600;letter-spacing:.2px;background-image:linear-gradient(90deg,#c9963f,#fff2c4,#e0b45e,#fff2c4,#c9963f);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 7s linear infinite}
 .deco-title.tier-unlock{color:#8ee0cf;font-style:normal}
 .deco-title.tier-unlock::before{content:'\25C6  ';font-size:9px}
 @media(prefers-reduced-motion:reduce){.framed::before,.framed::after,.ink-moonlit,.ink-bloodmoon,.deco-title.tier-legendary{animation:none!important}}
@@ -474,7 +474,7 @@ button.leader-row:hover{background:#ffffff08}
 .shop-ink{font-family:'Spectral',serif;font-size:22px;font-weight:500;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
 .shop-title-sample{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:14px}
 .shop-title-sample .deco-title{font-size:13px}
-.shop-title-sample .deco-title.tier-legendary{font-size:11px}
+.shop-title-sample .deco-title.tier-legendary{font-size:13px}
 .shop-item-text{padding:10px 12px 4px;flex:1}
 .shop-item-text h3{font-family:'Spectral',serif;font-size:17px;font-weight:500;margin:2px 0}
 .shop-item-text p{font-size:12px;color:var(--muted);line-height:1.45}
@@ -661,10 +661,15 @@ button.leader-row:hover{background:#ffffff08}
 .chest-panel.tier-epic{border-color:#56437a}
 .chest-panel.tier-legendary{border-color:#c9a14f;box-shadow:0 0 30px #f2cf7a33}
 @keyframes chest-burst{0%{opacity:0;transform:scale(.3)}60%{opacity:1;transform:scale(1.12)}100%{transform:scale(1)}}
-.chest-text{flex:1;min-width:0;display:grid;gap:4px}
+.chest-text{flex:1;min-width:0;display:grid;gap:6px}
 .chest-text h3{font-family:'Spectral',serif;font-size:20px;font-weight:500;line-height:1.2}
 .chest-text p{font-size:13px;color:var(--muted);line-height:1.45}
-.chest-odds{font-size:11px;color:#a99d86}
+.chest-odds{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+.odds-chip{white-space:nowrap;font-size:11px;line-height:1;padding:4px 8px;border-radius:10px;border:1px solid #4a4035;color:#bfb39a;font-variant-numeric:tabular-nums}
+.odds-chip.tier-rare{border-color:#6a5733;color:#e2c48a}
+.odds-chip.tier-epic{border-color:#56437a;color:#cdb2ff}
+.odds-chip.tier-legendary{border-color:#8a6a33;color:#f2cf7a}
+.chest-dupes{font-size:11px;color:#a99d86}
 .chest-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px}
 .chest-panel.tier-rare .tier-tag{color:#d6b679}
 .chest-panel.tier-epic .tier-tag{color:#c0a2f5}
@@ -687,7 +692,7 @@ button.leader-row:hover{background:#ffffff08}
 .ink-verdigris{color:#72c9b1}
 .ink-aurora{-webkit-background-clip:text;background-clip:text;color:transparent!important;background-image:linear-gradient(90deg,#7dffb0,#7fd8ff,#c39bff,#7dffb0);background-size:200% 100%;animation:ink-drift 7s linear infinite}
 /* Gifting points from a profile. */
-.gift-box{display:grid;gap:6px;margin:-8px 0 18px;padding-left:14px}
+.gift-box{display:grid;gap:6px;margin-top:12px}
 .gift-box>button{justify-self:start}
 .gift-box form{display:flex;flex-wrap:wrap;align-items:end;gap:8px}
 .gift-box label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
@@ -715,3 +720,24 @@ button.leader-row:hover{background:#ffffff08}
 .bet-result b.lost{color:#e6939b}
 .bet-result b.refunded,.bet-result b.pending{color:var(--muted);font-weight:400}
 @media(prefers-reduced-motion:reduce){.ink-aurora{animation:none!important}}
+
+/* Particle effects draw on one canvas over the whole page; it never catches clicks. */
+.fx-layer{position:fixed;inset:0;z-index:150;pointer-events:none}
+/* Vote hands: the raised-hand badge on a seat, in the style of the hand. */
+.hand-indicator.hand-gilded_hand{background:linear-gradient(160deg,#fff3cc,#e2b04e 60%,#a8741f);color:#3a2608;box-shadow:0 0 8px #f2c35b99}
+.hand-indicator.hand-bone_hand{background:linear-gradient(160deg,#fffaf0,#e5d8bb);color:#4a3f2c;box-shadow:0 0 6px #fff6dd66}
+.hand-indicator.hand-ember_hand{background:radial-gradient(circle at 40% 35%,#ffe1a3,#ff8a1f 60%,#b8400c);color:#3a1204;box-shadow:0 0 10px #ff7a1caa}
+.hand-indicator.hand-ghost_hand{background:radial-gradient(circle at 40% 35%,#f2fcff,#9fe0ff 70%);color:#1d4656;box-shadow:0 0 10px #9fe0ffaa}
+.hand-indicator.hand-crimson_hand{background:radial-gradient(circle at 40% 35%,#ff8a8a,#c4141f 65%,#6e0910);color:#fff0f0;box-shadow:0 0 10px #ff3b4aaa}
+/* Death marks: the icon a dead seat keeps, tinted to match. */
+.seat.dead .mark-icon{opacity:.9}
+.mark-ash_mark{color:#b4afbc}
+.mark-ink_mark{color:#b0485c}
+.mark-candle_mark{color:#d6a65e}
+.mark-raven_mark{color:#9aa7c9}
+.mark-ember_mark{color:#ff9d4a}
+.mark-wisp_mark{color:#bfefff;filter:drop-shadow(0 0 4px #9fe0ff)}
+/* Shop samples for hands and marks. */
+.shop-seat{position:relative;display:inline-grid;place-items:center}
+.shop-seat .hand-indicator{right:-6px;top:-4px}
+.dead-token{display:grid;place-items:center;border-radius:50%;background:#222329;border:1px solid #4b4c55;color:#7f808c}
