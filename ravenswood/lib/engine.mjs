@@ -16,7 +16,16 @@ const evil = p => p.aligned ? p.aligned==='evil' : ['minion','demon'].includes(R
 const isDemon = p => ROLES[p.role]?.type==='demon';
 const label = id => ROLES[id]?.name || id;
 export function poisoned(g,p) {const s=player(g,g.poison?.source);return !!((s?.alive||s?.zombuulUp) && ['poisoner','pukka'].includes(s.role) && g.poison.target===p.id);}
-export function impaired(g,p) {return p.role==='drunk'||poisoned(g,p)||g.drunks.some(d=>d.id===p.id&&g.day<=d.until);}
+export function impaired(g,p,seen=new Set()) {return p.role==='drunk'||poisoned(g,p)||g.drunks.some(d=>d.id===p.id&&g.day<=d.until&&sourceWorks(g,d,seen));}
+// Drunkenness from the Courtier lasts only while the Courtier is alive, sober and healthy: it pauses while they are
+// drunk or poisoned and comes back if they recover in time. A Courtier who named their own character stays drunk.
+function sourceWorks(g,d,seen){
+ if(!d.source)return true;
+ const s=player(g,d.source);
+ if(!s||!(s.alive||s.zombuulUp))return false;
+ if(seen.has(s.id))return false;
+ seen.add(s.id);return !impaired(g,s,seen);
+}
 const active = (g,p) => !!(p?.alive||p?.zombuulUp)&&!impaired(g,p);
 // Every record gets a running number, so the end-of-game log can replay them in the order they happened.
 const stamp=g=>({at:Date.now(),n:g.seq=(g.seq||0)+1});
@@ -240,7 +249,15 @@ function moonBag(g,forced){
  if(minions.includes('godfather')){const more=o===0||rand()<.5;o+=more?1:-1;t+=more?-1:1;audit(g,'Godfather setup',more?'One extra Outsider':'One fewer Outsider','The Godfather adds or removes one Outsider.');}
  return shuffle([...shuffle(moonType('townsfolk')).slice(0,t),...shuffle(moonType('outsider')).slice(0,o),...minions,pick(moonType('demon'))]);
 }
-const drunkUntil=(g,p,until)=>{g.drunks.push({id:p.id,until});};
+// Brought back by the Professor or the Shabaloth: they regain their ability, even a once-per-game one already used,
+// and a first-night ability is used again at once.
+function revive(g,r){
+ r.alive=true;r.ghost=true;r.abilityUsed=false;r.foolUsed=false;r.moonPending=false;g.risen=[...(g.risen||[]),r.id];
+ if(['grandmother','godfather'].includes(r.role))moonAuto(g,r,r.role);
+}
+// The Storyteller never kills the Tinker when that would leave two alive and end the game.
+const tinkerEndsGame=g=>g.players.filter(x=>x.alive||x.zombuulUp).length<=3;
+const drunkUntil=(g,p,until,source)=>{g.drunks.push(source?{id:p.id,until,source}:{id:p.id,until});};
 function nearestLiving(g,p){
  const seats=g.players,at=seats.indexOf(p),found=[];
  for(const step of [1,-1])for(let i=1;i<seats.length;i++){const x=seats[(at+step*i+seats.length*i)%seats.length];if(x.alive){found.push(x);break;}}
@@ -267,9 +284,10 @@ function spared(g,p,cause,by){
 function moonDeath(g,p,cause,by,wasActive){
  if(g.phase==='day'){g.diedToday=true;if(ROLES[p.role].type==='outsider')g.outsiderDied=true;}
  if(by.demon)g.players.filter(x=>x.role==='grandmother'&&x.grandchild===p.id&&active(g,x)).forEach(x=>kill(g,x,cause));
- if(p.role==='moonchild'&&wasActive){p.moonPending=true;tell(g,p,'You died. Publicly choose a living player: select their seat. If they are good, they die tonight.');}
+ // The Moonchild always chooses; whether it works depends on being sober and healthy tonight, not when they died.
+ if(p.role==='moonchild'){p.moonPending=true;tell(g,p,'You died. Publicly choose a living player: select their seat. If they are good, they die tonight.');}
  if(cause==='execution'){
-  if(ROLES[p.role].type==='minion'&&g.players.some(x=>x.role==='minstrel'&&active(g,x)))g.players.filter(x=>x!==p).forEach(x=>drunkUntil(g,x,g.day+1));
+  if(ROLES[p.role].type==='minion'&&g.players.some(x=>x.role==='minstrel'&&active(g,x)))g.players.filter(x=>x!==p&&x.role!=='minstrel').forEach(x=>drunkUntil(g,x,g.day+1));
   // Only an active Mastermind stops the game ending on the Demon's execution.
   if(isDemon(p)&&!g.players.some(x=>isDemon(x)&&(x.alive||x.zombuulUp))&&g.players.some(x=>x.role==='mastermind'&&active(g,x))){g.mastermindDay=g.day+1;audit(g,'Mastermind','One more day','The Demon died by execution with a Mastermind in play.');}
  }
@@ -287,14 +305,16 @@ function moonPrompt(g,p,role){
  if(role==='exorcist')return later&&{count:1,notId:p.lastChoice||null};
  if(role==='gambler')return later&&{count:1,character:true};
  if(role==='courtier')return !p.abilityUsed&&{count:0,character:true,optional:true};
- if(role==='professor')return later&&!p.abilityUsed&&g.players.some(x=>!x.publicAlive)&&{count:1,deadOnly:true,optional:true};
+ // The Professor wakes every night until they use their ability, even with nobody dead yet (they can only decline).
+ if(role==='professor')return later&&!p.abilityUsed&&{count:1,deadOnly:true,optional:true};
  if(role==='devils_advocate')return {count:1,aliveOnly:true,notId:p.lastChoice||null};
  if(role==='assassin')return later&&!p.abilityUsed&&{count:1,optional:true};
  if(role==='godfather')return g.outsiderDied&&{count:1};
  if(role==='pukka')return {count:1};
  if(role==='zombuul')return later&&!g.diedToday&&{count:1};
  if(role==='shabaloth')return later&&{count:2};
- if(role==='po')return later&&{count:p.poCharged?3:1,optional:true};
+ // A charged Po must choose three players; it cannot choose nobody again.
+ if(role==='po')return later&&{count:p.poCharged?3:1,optional:!p.poCharged};
  return null;
 }
 function moonAuto(g,p,role){
@@ -317,10 +337,10 @@ function moonAuto(g,p,role){
    if(target)kill(g,target,'night');
   }else if(said?.by===p.id)audit(g,'Gossip statement',said.truth?'True, but the Gossip was impaired':'False',`Statement read as: ${said.reading}.`);
  }else if(role==='tinker'){
-  if(active(g,p)&&favorEvil(g)&&rand()<.12){audit(g,'Tinker','Died',`The Tinker might die at any time. Balance score ${pressure(g).toFixed(2)}.`);kill(g,p,'night');}
+  if(active(g,p)&&!tinkerEndsGame(g)&&favorEvil(g)&&rand()<.12){audit(g,'Tinker','Died',`The Tinker might die at any time. Balance score ${pressure(g).toFixed(2)}.`);kill(g,p,'night');}
  }else if(role==='moonchild'){
   const target=player(g,g.moonTarget?.target);
-  if(g.moonTarget?.by===p.id&&target?.alive&&!evil(target)&&!impaired(g,p))kill(g,target,'night');
+  if(g.moonTarget?.by===p.id&&target?.alive&&g.moonTarget.good&&!impaired(g,p))kill(g,target,'night');
   if(g.moonTarget?.by===p.id)g.moonTarget=null;
  }
 }
@@ -329,7 +349,9 @@ function moonSkip(g,p,q){if(q.role==='po')p.poCharged=true;}
 function moonResolve(g,p,q,targets,data){
  const real=p.role===q.role,t=targets[0];
  // The first player to choose a sober Goon is drunk before their ability resolves.
- const goon=real&&!g.goonChosen&&targets.find(x=>x.role==='goon'&&active(g,x));
+ const chosen=q.role==='courtier'&&data.character?g.players.filter(x=>x.role===data.character):targets;
+ const goon=real&&!g.goonChosen&&chosen.find(x=>x.role==='goon'&&active(g,x));
+ const soberBefore=real&&active(g,p);
  const chooseGoon=()=>{g.goonChosen=true;drunkUntil(g,p,g.day);goon.aligned=evil(p)?'evil':'good';audit(g,'Goon chosen',`${p.name} is drunk until dusk`,`${goon.name} joined their team.`);};
  // A Shabaloth or Po attacks in the order chosen, so only attacks from the Goon onward fail.
  const inOrder=['shabaloth','po'].includes(q.role);
@@ -355,10 +377,11 @@ function moonResolve(g,p,q,targets,data){
    tell(g,p,`${targets.map(x=>x.name).join(' + ')}: ${impaired(g,p)?discretion(g,'Chambermaid: impaired information',n,pick([0,1,2].filter(x=>x!==n))):n} woke tonight.`);break;}
   case 'exorcist':if(on&&isDemon(t)&&(t.alive||t.zombuulUp)){g.exorcised=t.id;tell(g,t,`The Exorcist is ${p.name}. You do not wake tonight.`);}break;
   case 'gambler':if(on&&t.role!==data.character)kill(g,p,'night');break;
-  case 'courtier':if(on)g.players.filter(x=>x.role===data.character).forEach(x=>drunkUntil(g,x,g.day+2));break;
-  case 'professor':if(on&&!t.alive&&ROLES[t.role].type==='townsfolk'){t.alive=true;t.ghost=true;g.risen=[...(g.risen||[]),t.id];}break;
+  case 'courtier':if(on)g.players.filter(x=>x.role===data.character).forEach(x=>drunkUntil(g,x,g.day+2,p.id));break;
+  case 'professor':if(on&&!t.alive&&ROLES[t.role].type==='townsfolk')revive(g,t);break;
   case 'devils_advocate':if(on)g.advocate={source:p.id,target:t.id};break;
-  case 'assassin':if(on)kill(g,t,'night',false,{force:true});break;
+  // The Goon makes the Assassin drunk, but the Assassin's kill still lands on them.
+  case 'assassin':if(on||(soberBefore&&t===goon))kill(g,t,'night',false,{force:true});break;
   case 'godfather':if(on)kill(g,t,'night');break;
   case 'zombuul':if(on)demonKill(t);break;
   // The previous victim dies while still poisoned, so their own ability cannot save them.
@@ -366,7 +389,7 @@ function moonResolve(g,p,q,targets,data){
   case 'shabaloth':if(on){
    const back=(p.lastChosen||[]).map(id=>player(g,id)).filter(x=>x&&!x.alive);
    attackInOrder();p.lastChosen=targets.map(x=>x.id);
-   if(g.phase==='night'&&active(g,p)&&back.length&&!favorEvil(g)&&rand()<.3){const r=pick(back);r.alive=true;r.ghost=true;g.risen=[...(g.risen||[]),r.id];audit(g,'Shabaloth regurgitation',r.name,'A dead player chosen last night might come back.');}}break;
+   if(g.phase==='night'&&active(g,p)&&back.length&&!favorEvil(g)&&rand()<.3){const r=pick(back);revive(g,r);audit(g,'Shabaloth regurgitation',r.name,'A dead player chosen last night might come back.');}}break;
   // Choosing players spends the charge even when the ability fails (drunk or poisoned): the Po did not choose nobody.
   case 'po':p.poCharged=false;if(on)attackInOrder();break;
   case 'moonchild':p.moonPending=false;log(g,`${p.name} is the Moonchild and chooses ${t.name}.`);if(t.alive&&!evil(t)&&!impaired(g,p))kill(g,t,'night');break;
@@ -375,7 +398,7 @@ function moonResolve(g,p,q,targets,data){
 }
 export function beginNight(g){
  g.phase='night';g.day++;g.deadline=null;g.dawnAt=null;g.paused=false;if(!moon(g))g.poison=null;g.protection=null;g.nightDeaths=[];g.pending=null;g.ready=[];
- g.drunks=g.drunks.filter(d=>g.day<=d.until);g.woke=[];g.innkeep=[];g.exorcised=null;g.goonChosen=false;g.risen=[];g.tinkerAt=null;
+ g.drunks=g.drunks.filter(d=>g.day<=d.until);g.woke=[];g.innkeep=[];g.exorcised=null;g.advocate=null;g.goonChosen=false;g.risen=[];g.tinkerAt=null;
  g.players.forEach(p=>{p.ready=false;p.nominated=false;p.nominator=false;p.publicAlive=p.alive;});
  const order=g.day===1?['poisoner','washerwoman','librarian','investigator','chef','empath','fortune_teller','butler','spy']:['poisoner','monk','imp','undertaker','empath','fortune_teller','butler','spy'];
  g.queue=moon(g)?moonQueue(g):order.flatMap(role=>g.players.filter(p=>p.shown===role).map(p=>({id:p.id,role})));
@@ -388,11 +411,13 @@ export function advanceNight(g){
   // An executed Moonchild has had no daylight to choose in; someone who died tonight only learns at dawn.
   if(item.role==='moonchild'&&p.moonPending&&!g.nightDeaths.includes(p.id)){g.pending={id:p.id,role:'moonchild',key:crypto.randomUUID(),count:1,aliveOnly:true,opened:Date.now()};continue;}
   if(item.auto){moonAuto(g,p,item.role);continue;}
+  // An exorcised Pukka poisons nobody, but the player it poisoned last night still dies and becomes healthy.
+  if(g.exorcised===p.id&&p.role==='pukka'&&active(g,p)&&g.poison?.source===p.id){const earlier=player(g,g.poison.target);g.poison=null;if(earlier)kill(g,earlier,'night',false,{demon:true});}
   if(!(p.alive||p.zombuulUp)||g.exorcised===p.id||g.mastermindDay&&isDemon(p))continue;
   const prompt=moonPrompt(g,p,item.role);
   if(!prompt)continue;
   // Late in a game there may be too few legal targets; waiting on an impossible choice would freeze the night.
-  if(prompt.count>g.players.filter(x=>(!prompt.notSelf||x!==p)&&(!prompt.aliveOnly||x.publicAlive)&&(!prompt.deadOnly||!x.publicAlive)&&x.id!==prompt.notId).length)continue;
+  if(!prompt.optional&&prompt.count>g.players.filter(x=>(!prompt.notSelf||x!==p)&&(!prompt.aliveOnly||x.publicAlive)&&(!prompt.deadOnly||!x.publicAlive)&&x.id!==prompt.notId).length)continue;
   g.woke.push(p.id);g.pending={id:item.id,role:item.role,key:crypto.randomUUID(),...prompt,opened:Date.now()};
  }
  while(g.phase==='night'&&!g.pending&&g.queue.length&&!moon(g)){
@@ -536,7 +561,7 @@ export function tick(g,now=Date.now(),away=new Set()){
  if(g.tinkerAt&&now>=g.tinkerAt){
   g.tinkerAt=null;
   const p=g.players.find(x=>x.role==='tinker'&&active(g,x));
-  if(p){if(!spared(g,p,'day',{}))log(g,`${p.name} dies.`);audit(g,'Tinker','Chosen to die during the day',`The Tinker might die at any time. Balance score ${pressure(g).toFixed(2)}.`);kill(g,p,'day');return true;}
+  if(p&&!tinkerEndsGame(g)){if(!spared(g,p,'day',{}))log(g,`${p.name} dies.`);audit(g,'Tinker','Chosen to die during the day',`The Tinker might die at any time. Balance score ${pressure(g).toFixed(2)}.`);kill(g,p,'day');return true;}
  }
  if(g.nomination&&now>=g.nomination.deadline){finishVote(g);return true;}
  if(!g.nomination&&g.deadline&&now>=g.deadline){endDay(g);return true;}
@@ -610,7 +635,7 @@ export function act(g,session,data,away=new Set()){
  if(data.type==='claim'){assert(data.role===''||ROLES[data.role]?.script===g.settings.script,'Choose a script character.');p.claim=data.role;return;}
  if(data.type==='moonchild'){
   assert(p.moonPending,'You have no Moonchild choice to make.');assert(t?.alive,'Choose a living player.');
-  p.moonPending=false;g.moonTarget={by:p.id,target:t.id};log(g,`${p.name} is the Moonchild and chooses ${t.name}.`);return;
+  p.moonPending=false;g.moonTarget={by:p.id,target:t.id,good:!evil(t)};log(g,`${p.name} is the Moonchild and chooses ${t.name}.`);return;
  }
  if(data.type==='ready'){
   assert(!g.nomination,'Finish the current vote first.');p.ready=!p.ready;
