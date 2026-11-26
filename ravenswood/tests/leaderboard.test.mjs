@@ -16,7 +16,7 @@ function memoryStore(){
     accounts,games,rows,
     items:[],
     add(username){const a={id:crypto.randomUUID(),username,key:keyOf(username),session:crypto.randomUUID(),avatar_version:0,pictured:false,look:null};accounts.push(a);return a;},
-    async create({id,username,key,session}){if(accounts.some(a=>a.key===key||a.session===session))return null;const a={id,username,key,session,password_hash:'x',avatar_version:0,pictured:false,look:null};accounts.push(a);return {...a};},
+    async create({id,username,key,session,hash}){if(accounts.some(a=>a.key===key||a.session===session))return null;const a={id,username,key,session,password_hash:hash??'x',avatar_version:0,pictured:false,look:null};accounts.push(a);return {...a};},
     byKey:async key=>accounts.find(a=>a.key===key)||null,
     bySession:async session=>{const a=accounts.find(x=>x.session===session);return a?{...a}:null;},
     async setLook(id,look){const a=accounts.find(x=>x.id===id);a.look=look;return {...a};},
@@ -30,6 +30,7 @@ function memoryStore(){
     async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
     async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
+    async setPassword(id,hash){accounts.find(a=>a.id===id).password_hash=hash;},
     async resetPassword({id,by,hash}){accounts.find(a=>a.id===id).password_hash=hash;this.ledger.push({account:id,delta:0,kind:'reset',other:by,at:new Date()});},
     async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
     async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
@@ -369,6 +370,16 @@ shopTest('only admins can give points, and the player sees them in their shop',a
   r=await boss.call('/admin');const row=r.data.players.find(p=>p.username==='Ana');
   assert.equal(row.balance,300-ITEM.brass.price);assert.equal(row.spent,ITEM.brass.price);assert.equal(r.data.players.length,2);
 });
+shopTest('a player can change their own password, given the current one',async({browser,member})=>{
+  const ana=await member('Ana');
+  assert.equal((await browser()('/account/password',{current:'hunter22',password:'new password'})).status,401);
+  assert.equal((await ana.call('/account/password',{current:'wrong one',password:'new password'})).status,401);
+  assert.equal((await ana.call('/account/password',{current:'hunter22',password:'short'})).status,400);
+  const r=await ana.call('/account/password',{current:'hunter22',password:'new password'});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal((await browser()('/account/login',{username:'Ana',password:'hunter22'})).status,401);
+  assert.equal((await browser()('/account/login',{username:'Ana',password:'new password'})).status,200);
+  assert.equal((await ana.call('/account')).data.account.username,'Ana');
+});
 shopTest('an admin can give a player who forgot their password a new one',async({store,browser,member})=>{
   const boss=await member('Boss'),ana=await member('Ana');
   assert.equal((await ana.call('/admin/reset',{username:'Boss'})).status,403);
@@ -380,6 +391,10 @@ shopTest('an admin can give a player who forgot their password a new one',async(
   assert.equal(login.status,200,JSON.stringify(login.data));assert.equal(login.data.account.username,'Ana');
   const p=(await boss.call('/admin/player?username=Ana')).data.player;
   assert.deepEqual(p.activity.map(a=>[a.kind,a.delta,a.other]),[['reset',0,'Boss']]);assert.equal(p.balance,0);
+  // Or the admin picks it.
+  for(const password of ['short',42,'x'.repeat(73)])assert.equal((await boss.call('/admin/reset',{username:'Ana',password})).status,400,String(password));
+  assert.equal((await boss.call('/admin/reset',{username:'Ana',password:'moonlit raven'})).data.reset.password,'moonlit raven');
+  assert.equal((await browser()('/account/login',{username:'Ana',password:'moonlit raven'})).status,200);
 });
 shopTest('an admin sees the points a player earned, spent, opened and was given',async({store,member})=>{
   const boss=await member('Boss'),ana=await member('Ana');

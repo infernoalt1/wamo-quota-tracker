@@ -1,7 +1,7 @@
 // Tools for whoever runs the site. Admins are the accounts named in BOTC_ADMINS (comma-separated usernames).
 import { randomInt } from 'node:crypto';
 import bcrypt from 'bcrypt';
-import { keyOf, usernameOf } from './accounts.mjs';
+import { keyOf, usernameOf, passwordOf } from './accounts.mjs';
 
 export const GRANT=Object.freeze({max:100000});
 
@@ -55,9 +55,9 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
     await store.grant({to:to.id,by:account.id,amount});
     res.json({...await overview(),granted:{to:to.username,amount,balance:await store.balance(to.id)-heldFor(to.id)}});
   }));
-  // A player who forgot their password gets a new one, shown once to the admin to pass on.
+  // A player who forgot their password gets a new one: the admin's choice, or a random one. It is shown once, for the admin to pass on.
   router.post('/admin/reset',handle(async(req,res,account)=>{
-    const p=await playerNamed(req.body?.username),password=tempPassword();
+    const chosen=req.body?.password,password=chosen==null||chosen===''?tempPassword():passwordOf(chosen),p=await playerNamed(req.body?.username);
     await store.resetPassword({id:p.id,by:account.id,hash:await bcrypt.hash(password,10)});
     res.json({reset:{username:p.username,password}});
   }));

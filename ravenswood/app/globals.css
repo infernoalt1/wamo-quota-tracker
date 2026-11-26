@@ -159,6 +159,13 @@ small,.small{font-size:12px;line-height:1.5;color:var(--muted)}
 .account-who h2{margin:2px 0 0;font-size:30px;overflow-wrap:anywhere}
 .account-who .deco-title{margin:0}
 .account-note{font-size:12px;line-height:1.55}
+.change-password{margin:4px 0 0;display:grid;gap:8px}
+.change-password>.text-button{justify-self:start}
+.change-password form{display:grid;gap:10px;max-width:340px}
+.change-password label{display:grid;gap:5px;font-size:12px;color:var(--muted)}
+.change-password input{width:100%;padding:8px 10px}
+.change-password-hint{color:#f08f8f}
+.change-password .status-note{margin:0}
 @media(max-width:420px){.account-head{flex-direction:column;text-align:center}.account-who{justify-items:center}}
 .account-avatar{width:76px;height:76px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2d2836;border:1px solid #4c4355;color:#d0bedf;font-size:24px;font-weight:600}
 .account-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
@@ -741,6 +748,9 @@ button.leader-row:hover{background:#ffffff08}
 .admin-reset p{margin:0;font-size:13px;color:var(--muted)}
 .admin-reset p b{color:var(--text,#e8e2ef)}
 .admin-reset>button{justify-self:start}
+.admin-reset-input{display:grid;gap:5px;font-size:12px;color:var(--muted);max-width:320px}
+.admin-reset-input input{width:100%;padding:8px 10px}
+.admin-reset-hint{color:#f08f8f}
 .admin-reset-password{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .admin-reset-password code{font-size:18px;letter-spacing:1px;padding:6px 12px;border:1px solid #5b4f6b;border-radius:6px;background:#15151b;color:#f0d9a6;user-select:all}
 @media (max-width:420px){.admin-grant,.admin-filter{grid-template-columns:1fr}.admin-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-recent li{grid-template-columns:minmax(0,1fr) auto}.admin-recent li>small{grid-column:1/-1;text-align:left}}

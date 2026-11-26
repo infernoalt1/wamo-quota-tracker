@@ -152,6 +152,7 @@ export function pgStore(pool){
     balance:async id=>(await one(`SELECT ${BALANCE} AS balance`,[id])).balance,
     // Points an admin gave (or took back), with who did it.
     grant:({to,by,amount})=>query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'grant',$4)",[randomUUID(),to,amount,by]),
+    setPassword:(id,hash)=>query('UPDATE botc_accounts SET password_hash=$2 WHERE id=$1',[id,hash]),
     // A new password set by an admin, kept in the player's history (it moves no points).
     async resetPassword({id,by,hash}){
       await query('UPDATE botc_accounts SET password_hash=$2 WHERE id=$1',[id,hash]);
@@ -199,7 +200,7 @@ export const pictureOf=a=>a?.pictured?`${a.id}?v=${a.avatar_version}`:null;
 const summary=a=>a?{username:a.username,avatar:pictureOf(a),look:lookOf(a.look)}:null;
 export const keyOf=username=>username.toLocaleLowerCase('en');
 export function usernameOf(value){const v=String(value||'').normalize('NFKC').trim().replace(/\s+/g,' ');if(!/^[\p{L}\p{N}][\p{L}\p{N} _.-]{1,19}$/u.test(v))throw refuse('Usernames are 2–20 letters or numbers.');return v;}
-function passwordOf(value){const v=String(value||'');if(v.length<6||Buffer.byteLength(v)>72)throw refuse('Passwords are 6–72 characters.');return v;}
+export function passwordOf(value){const v=String(value||'');if(v.length<6||Buffer.byteLength(v)>72)throw refuse('Passwords are 6–72 characters.');return v;}
 function jpegOf(image){const m=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(image)),bytes=m&&Buffer.from(m[1],'base64');if(!bytes||bytes.length>MAX_PICTURE||bytes[0]!==0xff||bytes[1]!==0xd8||bytes[2]!==0xff)throw refuse('Please choose a different picture.');return bytes;}
 // Decorations cannot change mid-game: chat closes at night, so a change could be a secret signal.
 // A change made during a game waits on the seat and is worn from the next game on.
@@ -274,6 +275,16 @@ export function mountAccounts(router,{store,rooms,identity,setSession,admins=new
     const account=await store.setPicture(session,req.body?.image===null?null:jpegOf(req.body?.image));
     eachSeat(session,seat=>{seat.avatar=pictureOf(account);});
     res.json({account:mine(account)});
+  }));
+  // Changing your own password needs the current one, so a computer someone left logged in can't be locked away from them.
+  router.post('/account/password',handle(async(req,res)=>{
+    const session=identity(req),account=session?await store.bySession(session):null;
+    if(!account)throw refuse('Log in first.',401);
+    const next=passwordOf(req.body?.password);
+    limit(`password:${account.id}`,10,15*MINUTE);
+    if(!await bcrypt.compare(String(req.body?.current||''),account.password_hash))throw refuse('Your current password is wrong.',401);
+    await store.setPassword(account.id,await bcrypt.hash(next,10));
+    res.json({ok:true});
   }));
   router.get('/avatar/:id',handle(async(req,res)=>{
     const bytes=store&&UUID.test(req.params.id)?await store.picture(req.params.id):null;
