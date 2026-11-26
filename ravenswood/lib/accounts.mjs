@@ -137,16 +137,14 @@ export function pgStore(pool){
         return {result:'opened',item,duplicate};
       });
     },
-    async gift({from,to,amount,held=0,daily,since}){
+    async gift({from,to,amount,held=0}){
       return locked([from,to],async client=>{
-        const w=(await client.query(`SELECT ${BALANCE} AS balance,(SELECT coalesce(-sum(delta),0)::int FROM botc_ledger WHERE account_id=$1 AND kind='gift' AND delta<0 AND at>=$2) AS sent`,[from,since])).rows[0];
-        if(w.sent+amount>daily)return 'cap';
+        const w=(await client.query(`SELECT ${BALANCE} AS balance`,[from])).rows[0];
         if(w.balance-held<amount)return 'short';
         await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'gift',$4),($5,$4,$6,'gift',$2)",[randomUUID(),from,-amount,to,randomUUID(),amount]);
         return 'sent';
       });
     },
-    giftsSent:async(id,since)=>(await one("SELECT coalesce(-sum(delta),0)::int AS n FROM botc_ledger WHERE account_id=$1 AND kind='gift' AND delta<0 AND at>=$2",[id,since])).n,
     giftsReceived:id=>query(`SELECT a.username,l.delta AS amount,l.at FROM botc_ledger l JOIN botc_accounts a ON a.id=l.other_id
       WHERE l.account_id=$1 AND l.kind IN ('gift','grant') AND l.delta>0 ORDER BY l.at DESC LIMIT 5`,[id]),
     balance:async id=>(await one(`SELECT ${BALANCE} AS balance`,[id])).balance,

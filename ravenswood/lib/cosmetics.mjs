@@ -112,9 +112,9 @@ export function rollChest(random = Math.random) {
   const pool = CHEST_ITEMS.filter(i => i.tier === tier && (!i.set || i.kind === 'frame'));
   return pool[Math.floor(random() * pool.length)].id;
 }
-// Gifting points: small amounts, a daily cap, and only to someone you have played a recorded game with,
-// so a second account cannot simply funnel points to a main one.
-export const GIFT = Object.freeze({ min: 10, max: 100, daily: 100, minGames: 5 });
+// Gifting points: any amount from 10 up, but only to someone you have played a recorded game with,
+// once you have played a few, so a fresh second account cannot simply funnel points to a main one.
+export const GIFT = Object.freeze({ min: 10, minGames: 5 });
 // Spectator bets on which team wins: a right call pays back double the stake.
 export const BET = Object.freeze({ min: 10, max: 100 });
 

@@ -182,13 +182,13 @@ function GiftBox({to,onWallet}){
  const [open,setOpen]=useState(false),[amount,setAmount]=useState(50),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null);
  async function send(){
   if(busy)return;setBusy(true);setMsg(null);
-  try{const data=await postJson('/botc/api/game/shop/gift',{to,amount:Number(amount)});onWallet?.(data);setMsg({ok:true,text:`You sent ${to} ${data.sent.amount} points. You can gift ${data.gift.left} more today.`});setOpen(false);}
+  try{const data=await postJson('/botc/api/game/shop/gift',{to,amount:Number(amount)});onWallet?.(data);setMsg({ok:true,text:`You sent ${to} ${data.sent.amount} points.`});setOpen(false);}
   catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
  }
  return <div className="gift-box">
-  {open?<form onSubmit={e=>{e.preventDefault();send();}}><label>Points<input type="number" inputMode="numeric" min={GIFT.min} max={GIFT.max} step="1" value={amount} onChange={e=>setAmount(e.target.value)}/></label><button className="primary compact" disabled={busy}><Gift size={14}/>Send to {to}</button><button type="button" className="text-button" onClick={()=>setOpen(false)}>Cancel</button></form>
+  {open?<form onSubmit={e=>{e.preventDefault();send();}}><label>Points<input type="number" inputMode="numeric" min={GIFT.min} step="1" value={amount} onChange={e=>setAmount(e.target.value)}/></label><button className="primary compact" disabled={busy}><Gift size={14}/>Send to {to}</button><button type="button" className="text-button" onClick={()=>setOpen(false)}>Cancel</button></form>
   :<button className="secondary compact" onClick={()=>setOpen(true)}><Gift size={14}/>Gift points</button>}
-  {open&&<small>{GIFT.min}–{GIFT.max} points at a time, up to {GIFT.daily} a day, to people you have played a recorded game with.</small>}
+  {open&&<small>At least {GIFT.min} points, to people you have played a recorded game with.</small>}
   {msg&&<p className={`status-note ${msg.ok?'good':'error'}`}>{msg.ok?<Check size={15}/>:<X size={15}/>}<span>{msg.text}</span></p>}
  </div>;
 }

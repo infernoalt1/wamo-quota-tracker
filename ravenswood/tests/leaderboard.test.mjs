@@ -26,8 +26,7 @@ function memoryStore(){
     async balance(id){const w=await this.wallet(id);return w.earned-w.spent+w.adjust;},
     async buy(id,item,price,held=0){const w=await this.wallet(id);if(w.owned.includes(item))return 'owned';if(await this.balance(id)-held<price)return 'short';this.items.push({account:id,item,price});return 'bought';},
     async openChest(id,{price,refund,held=0,roll,bundle=item=>[item]}){if(await this.balance(id)-held<price)return {result:'short'};const item=roll(),duplicate=(await this.wallet(id)).owned.includes(item);this.ledger.push({account:id,delta:-price,kind:'chest',item,at:new Date()});if(duplicate)this.ledger.push({account:id,delta:refund,kind:'chest_refund',item,at:new Date()});else for(const x of bundle(item))if(!this.items.some(i=>i.account===id&&i.item===x))this.items.push({account:id,item:x,price:0});return {result:'opened',item,duplicate};},
-    async gift({from,to,amount,held=0,daily,since}){if(await this.giftsSent(from,since)+amount>daily)return 'cap';if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
-    async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
+    async gift({from,to,amount,held=0}){if(await this.balance(from)-held<amount)return 'short';const at=new Date();this.ledger.push({account:from,delta:-amount,kind:'gift',other:to,at},{account:to,delta:amount,kind:'gift',other:from,at});return 'sent';},
     async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
     async setPassword(id,hash){accounts.find(a=>a.id===id).password_hash=hash;},
@@ -299,7 +298,7 @@ test('chest odds follow the published tiers and never give an earned-only item',
   for(const [tier,odds] of Object.entries(CHEST.odds))assert(Math.abs(seen[tier]/4000*100-odds)<4,`${tier}: ${seen[tier]}`);
   assert.equal(rollChest(()=>0),CHEST_ITEMS.find(i=>i.tier==='common').id);
 });
-shopTest('gifts go only to people you have played with, up to a daily limit, and need some games first',async({store,member})=>{
+shopTest('gifts go only to people you have played with, any amount they can afford, and need some games first',async({store,member})=>{
   const ana=await member('Ana'),bo=await member('Bo'),cy=await member('Cy');
   await together(store,ana.account,bo.account,2);
   assert.match((await ana.call('/shop/gift',{to:'Bo',amount:20})).data.error,/recorded games/);
@@ -310,9 +309,11 @@ shopTest('gifts go only to people you have played with, up to a daily limit, and
   assert.equal((await ana.call('/shop/gift',{to:'Bo',amount:5})).status,400);
   assert.equal((await ana.call('/shop/gift',{to:'Bo',amount:20.5})).status,400);
   let r=await ana.call('/shop/gift',{to:'Bo',amount:60});assert.equal(r.status,200,JSON.stringify(r.data));
-  assert.equal(r.data.balance,150-60);assert.equal(r.data.gift.left,40);assert.deepEqual(r.data.sent,{to:'Bo',amount:60});
-  assert.match((await ana.call('/shop/gift',{to:'Bo',amount:50})).data.error,/a day/);
-  r=await bo.call('/shop');assert.equal(r.data.balance,150+60);assert.equal(r.data.gifts[0].from,'Ana');assert.equal(r.data.gifts[0].amount,60);
+  assert.equal(r.data.balance,150-60);assert.deepEqual(r.data.sent,{to:'Bo',amount:60});
+  // No daily limit and no top size: only what you can afford.
+  r=await ana.call('/shop/gift',{to:'Bo',amount:90});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.balance,0);
+  assert.match((await ana.call('/shop/gift',{to:'Bo',amount:10})).data.error,/enough points/);
+  r=await bo.call('/shop');assert.equal(r.data.balance,150+150);assert.equal(r.data.gifts[0].from,'Ana');assert.equal(r.data.gifts[0].amount,90);
 });
 test('bets: only spectators, only before Day 2, within limits and what they can afford, once per game',async()=>{
   const store=memoryStore(),bets=createBets({store}),ana=store.add('Ana'),bo=store.add('Bo');await played(store,ana,4,4,{points:30});
@@ -366,7 +367,6 @@ shopTest('only admins can give points, and the player sees them in their shop',a
   assert.deepEqual(r.data.grants.map(g=>[g.to,g.by,g.amount]),[['Ana','Boss',-200],['Ana','Boss',500]]);
   r=await ana.call('/shop');assert.equal(r.data.balance,300);assert.deepEqual(r.data.gifts.map(g=>[g.from,g.amount]),[['Boss',500]]);
   assert.equal((await ana.call('/shop/buy',{item:'brass'})).status,200);
-  assert.equal((await boss.call('/shop')).data.gift.left,100);
   r=await boss.call('/admin');const row=r.data.players.find(p=>p.username==='Ana');
   assert.equal(row.balance,300-ITEM.brass.price);assert.equal(row.spent,ITEM.brass.price);assert.equal(r.data.players.length,2);
 });
