@@ -324,7 +324,8 @@ function moonAuto(g,p,role){
   if(g.moonTarget?.by===p.id)g.moonTarget=null;
  }
 }
-function moonSkip(g,p,q){if(q.role==='po'&&(p.role==='lunatic'||p.role==='po'&&active(g,p)))p.poCharged=true;}
+// The Po's charge follows its choices, as the ability reads, whether or not it is drunk or poisoned at the time.
+function moonSkip(g,p,q){if(q.role==='po')p.poCharged=true;}
 function moonResolve(g,p,q,targets,data){
  const real=p.role===q.role,t=targets[0];
  // The first player to choose a sober Goon is drunk before their ability resolves.
@@ -366,7 +367,8 @@ function moonResolve(g,p,q,targets,data){
    const back=(p.lastChosen||[]).map(id=>player(g,id)).filter(x=>x&&!x.alive);
    attackInOrder();p.lastChosen=targets.map(x=>x.id);
    if(g.phase==='night'&&active(g,p)&&back.length&&!favorEvil(g)&&rand()<.3){const r=pick(back);r.alive=true;r.ghost=true;g.risen=[...(g.risen||[]),r.id];audit(g,'Shabaloth regurgitation',r.name,'A dead player chosen last night might come back.');}}break;
-  case 'po':if(p.role==='lunatic')p.poCharged=false;if(on){p.poCharged=false;attackInOrder();}break;
+  // Choosing players spends the charge even when the ability fails (drunk or poisoned): the Po did not choose nobody.
+  case 'po':p.poCharged=false;if(on)attackInOrder();break;
   case 'moonchild':p.moonPending=false;log(g,`${p.name} is the Moonchild and chooses ${t.name}.`);if(t.alive&&!evil(t)&&!impaired(g,p))kill(g,t,'night');break;
  }
  if(q.role!=='chambermaid')tell(g,p,`Your choice: ${[...targets.map(x=>x.name),...(data.character?[label(data.character)]:[])].join(', ')}.`);
