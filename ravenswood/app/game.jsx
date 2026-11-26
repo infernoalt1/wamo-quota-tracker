@@ -158,10 +158,16 @@ function previewDeath(el,item,who){if(!el)return;playAt(el,item,1.2,pictureOf(wh
 // Shop decorations: a frame around the picture, a colour for the name, and a title.
 const frameOf=look=>look?.frame?` framed frame-${look.frame}`:'';
 // Frames drawn from artwork rather than CSS get their own layer over the picture.
-function FrameArt({look}){return look?.frame==='wisps'?<span className="deco-wisps" aria-hidden="true">{['green','blue','pink'].map(c=><i key={c} className={`wisp-orbit wisp-${c}`}><i/></i>)}</span>:null;}
+function FrameArt({look}){
+ switch(look?.frame){
+  case 'wisps':return <span className="deco-wisps" aria-hidden="true">{['green','blue','pink'].map(c=><i key={c} className={`wisp-orbit wisp-${c}`}><i/></i>)}</span>;
+  case 'glass':return <span className="deco-art deco-glass" aria-hidden="true"><i className="glass-base"/><i className="glass-shine"><i/></i></span>;
+  default:return null;
+ }
+}
 function Face({className,src,name,look}){return <span className={`${className}${frameOf(look)}`}><Avatar src={src} name={name}/><FrameArt look={look}/></span>;}
 function Named({name,look}){return look?.color?<span className={`ink-${look.color}`}>{name}</span>:name;}
-function Title({look}){const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}`}>{t.name}</span>:null;}
+function Title({look}){const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}${t.set?` title-${t.set}`:''}`}>{t.name}</span>:null;}
 // A chat picture opens the sender's profile, when they have one.
 function ChatFace({who,name,onOpen}){const face=<Face className="chat-avatar" src={who?.avatar} name={name} look={who?.look}/>;return who?.account?<button className="face-button" onClick={()=>onOpen(who.account)} aria-label={`See ${name}'s profile`} title="See profile">{face}</button>:face;}
 const pct=(wins,games)=>games?`${Math.round(wins/games*100)}%`:'–';
@@ -222,6 +228,7 @@ function activityText(a){
   case 'grant':return a.delta>0?<>Given by <b>{a.other||'an admin'}</b></>:<>Taken back by <b>{a.other||'an admin'}</b></>;
   case 'bet':return a.delta>0?'Won a spectator bet':'Lost a spectator bet';
   case 'reset':return <>Password reset by <b>{a.other||'an admin'}</b></>;
+  case 'recall':return <>Chroma taken back: <b className="tier-text-chroma">{item}</b></>;
   default:return a.kind;
  }
 }
@@ -255,6 +262,7 @@ function AdminPlayer({p}){
   ['Gifts',sum('gift','gift_out'),`${count('gift')} in · ${count('gift_out')} out`],
   ['Bets',sum('bet','bet_out'),`${count('bet')} won · ${count('bet_out')} lost`],
   ['Admin',sum('grant','grant_out'),plural(count('grant')+count('grant_out'),'change')],
+  ...(count('recall')?[['Chromas back',sum('recall'),plural(count('recall'),'set')]]:[]),
  ];
  return <>
   <div className="admin-player-head"><h3>{p.username}</h3><span className="shop-balance"><Coins size={18}/>{p.balance}<small>points</small></span></div>
@@ -270,7 +278,7 @@ function Admin(){
   [to,setTo]=useState(''),[amount,setAmount]=useState(100),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null),[error,setError]=useState('');
  useEffect(()=>{getJson('/botc/api/game/admin').then(setData).catch(e=>setError(e.message));},[]);
  const loadPlayer=name=>getJson(`/botc/api/game/admin/player?username=${encodeURIComponent(name)}`).then(d=>setDetail(d.player)).catch(e=>setMsg({ok:false,text:e.message}));
- const [reset,setReset]=useState(null),[copiedReset,setCopiedReset]=useState(false),[newPassword,setNewPassword]=useState('');
+ const [reset,setReset]=useState(null),[copiedReset,setCopiedReset]=useState(false),[newPassword,setNewPassword]=useState(''),[recall,setRecall]=useState(false),[per,setPer]=useState(5000);
  useEffect(()=>{setDetail(null);setReset(null);setNewPassword('');if(player){setTo(player);loadPlayer(player);}},[player]);
  async function resetPassword(){
   if(busy)return;setBusy(true);setMsg(null);
@@ -285,6 +293,15 @@ function Admin(){
    const d=await postJson('/botc/api/game/admin/grant',{to:to.trim(),amount:n}),g=d.granted;setData(d);
    setMsg({ok:true,text:`${g.amount>0?`Gave ${g.to} ${g.amount}`:`Took ${-g.amount} from ${g.to}`} points. They now have ${g.balance}.`});
    if(player&&player.toLowerCase()===g.to.toLowerCase())loadPlayer(player);
+  }catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
+ }
+ async function recallChromas(){
+  const n=Math.round(Number(per));
+  if(busy||!Number.isInteger(n)||n<0)return;setBusy(true);setMsg(null);
+  try{
+   const d=await postJson('/botc/api/game/admin/recall-chromas',{per:n}),sets=d.recalled.reduce((s,x)=>s+x.sets.length,0),paid=d.recalled.reduce((s,x)=>s+x.amount,0);
+   setData(d);setRecall(false);
+   setMsg({ok:true,text:`Took back ${sets} Chroma set${sets===1?'':'s'} from ${d.recalled.length} player${d.recalled.length===1?'':'s'} and paid ${paid} points.`});
   }catch(e){setMsg({ok:false,text:e.message});}finally{setBusy(false);}
  }
  const head=<><span className="eyebrow"><ShieldCheck size={13}/>ADMIN</span><h2>The town’s purse.</h2></>;
@@ -332,6 +349,15 @@ function Admin(){
    </button></li>)}</ul>:<p className="small">No players match.</p>}
    <span className="eyebrow admin-recent-head">RECENT ADMIN CHANGES</span>
    {data.grants.length?<ul className="admin-recent">{data.grants.map((x,i)=><li key={i}><span><b>{x.to}</b>{x.by?<small> · by {x.by}</small>:null}</span><b className={x.amount>0?'good':'evil'}>{signed(x.amount)}</b><small>{when(x.at)}</small></li>)}</ul>:<p className="small">Nobody has been given points yet.</p>}
+   <span className="eyebrow admin-recent-head">CHROMAS · {data.chromas.reduce((s,c)=>s+c.sets.length,0)} OWNED</span>
+   {data.chromas.length?<div className="admin-recall">
+    <ul className="admin-recent">{data.chromas.map(c=><li key={c.username}><span><b>{c.username}</b><small> · {c.sets.map(s=>SETS[s]?.name||s).join(', ')}</small></span></li>)}</ul>
+    {recall?<>
+     <label className="admin-reset-input">Points for each set<input type="number" inputMode="numeric" min="0" max={data.max} step="1" value={per} onChange={e=>setPer(e.target.value)}/></label>
+     <p>Take back every Chroma above and pay each player {Math.max(0,Math.round(Number(per))||0)} points per set? They come off anyone wearing them. This can’t be undone.</p>
+     <div className="admin-buttons"><button className="primary compact" disabled={busy||!(Number(per)>=0)} onClick={recallChromas}>Yes, take them back</button><button className="secondary compact" disabled={busy} onClick={()=>setRecall(false)}>Cancel</button></div>
+    </>:<button className="secondary compact" onClick={()=>{setPer(data.recallPer);setRecall(true);}}><RotateCcw size={14}/>Take back all Chromas</button>}
+   </div>:<p className="small">Nobody owns a Chroma.</p>}
   </>}
  </>;
 }

@@ -31,6 +31,8 @@ function memoryStore(){
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
     async setPassword(id,hash){accounts.find(a=>a.id===id).password_hash=hash;},
     async resetPassword({id,by,hash}){accounts.find(a=>a.id===id).password_hash=hash;this.ledger.push({account:id,delta:0,kind:'reset',other:by,at:new Date()});},
+    async chromaOwners(items){const by=new Map();for(const i of this.items)if(items.includes(i.item)){const a=accounts.find(x=>x.id===i.account);by.set(a.username,[...(by.get(a.username)||[]),i.item].sort());}return [...by].sort().map(([username,items])=>({username,items}));},
+    async recallChromas({items,setOf,by,per}){const out=[];for(const a of accounts){const mine=this.items.filter(i=>i.account===a.id&&items.includes(i.item)).map(i=>i.item);if(!mine.length)continue;const sets=[...new Set(mine.map(setOf))].sort();this.items=this.items.filter(i=>!(i.account===a.id&&items.includes(i.item)));const look=Object.fromEntries(Object.entries(a.look||{}).filter(([,v])=>!items.includes(v)));a.look=Object.keys(look).length?look:null;for(const set of sets)this.ledger.push({account:a.id,delta:per,kind:'recall',other:by,item:set,at:new Date()});out.push({username:a.username,sets,amount:per*sets.length});}return out.sort((x,y)=>x.username.localeCompare(y.username));},
     async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
     async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
     async balances(){return Promise.all(accounts.map(async a=>{const w=await this.wallet(a.id);return {id:a.id,username:a.username,created_at:new Date(),earned:w.earned,spent:w.spent,adjust:w.adjust,games:rows.filter(r=>r.account===a.id).length};}));},
@@ -379,6 +381,23 @@ shopTest('a player can change their own password, given the current one',async({
   assert.equal((await browser()('/account/login',{username:'Ana',password:'hunter22'})).status,401);
   assert.equal((await browser()('/account/login',{username:'Ana',password:'new password'})).status,200);
   assert.equal((await ana.call('/account')).data.account.username,'Ana');
+});
+shopTest('an admin can take back every Chroma, paying for each set',async({store,member})=>{
+  const boss=await member('Boss'),ana=await member('Ana'),bo=await member('Bo');
+  for(const item of [...SETS.glass.items,...SETS.wisps.items,'brass'])store.items.push({account:ana.account.id,item,price:0});
+  for(const item of SETS.kaleido.items)store.items.push({account:bo.account.id,item,price:0});
+  await store.setLook(ana.account.id,{frame:'glass',title:'wisps_title',color:'glass_ink'});await store.setLook(bo.account.id,{frame:'kaleido'});
+  assert.equal((await ana.call('/admin/recall-chromas',{})).status,403);
+  let r=await boss.call('/admin');assert.equal(r.data.recallPer,5000);
+  assert.deepEqual(r.data.chromas,[{username:'Ana',sets:['glass','wisps']},{username:'Bo',sets:['kaleido']}]);
+  for(const per of [-1,1.5,'5000'])assert.equal((await boss.call('/admin/recall-chromas',{per})).status,400,String(per));
+  r=await boss.call('/admin/recall-chromas',{});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.deepEqual(r.data.recalled,[{username:'Ana',sets:['glass','wisps'],amount:10000},{username:'Bo',sets:['kaleido'],amount:5000}]);
+  assert.deepEqual(r.data.chromas,[]);
+  r=await ana.call('/shop');assert.equal(r.data.balance,10000);assert.deepEqual(r.data.owned,['brass']);assert.deepEqual(r.data.look,{});
+  r=await bo.call('/shop');assert.equal(r.data.balance,5000);assert.deepEqual(r.data.owned,[]);
+  r=await boss.call('/admin/player?username=Ana');assert.deepEqual(r.data.player.activity.filter(a=>a.kind==='recall').map(a=>[a.item,a.delta,a.other]).sort(),[['glass',5000,'Boss'],['wisps',5000,'Boss']]);
+  assert.deepEqual((await boss.call('/admin/recall-chromas',{per:0})).data.recalled,[]);
 });
 shopTest('an admin can give a player who forgot their password a new one',async({store,browser,member})=>{
   const boss=await member('Boss'),ana=await member('Ana');

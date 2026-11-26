@@ -73,7 +73,7 @@ export const ITEMS = Object.freeze([
   ...chroma('glass', ['#ff4d6d', '#ffb703', '#3a86ff', '#8338ec', '#06d6a0', '#fb5607'], [
     ['frame', 'Stained Glass', 'A church window around you, its colours moving as the light does.'],
     ['color', 'Rose Window', 'Your name in glass, lit from behind.'],
-    ['title', 'Through a Glass, Darkly', 'Seeing everything. Understanding some of it.'],
+    ['title', 'Illuminated', 'Lit from within, and very sure of it.'],
     ['hand', 'Glass Hand', 'Your vote throws coloured shards into the air.', 'shards'],
     ['mark', 'Shattered Pane', 'The window breaks, and the pieces fall like rain.', 'shatter'],
   ]),
@@ -87,7 +87,7 @@ export const ITEMS = Object.freeze([
   ...chroma('kaleido', ['#ff5d8f', '#ffd23f', '#3bceac', '#5e60ce', '#f72585', '#4cc9f0'], [
     ['frame', 'Kaleidoscope', 'A turning pattern of mirrored colour behind you.'],
     ['color', 'Prism', 'Your name split into every colour of the light.'],
-    ['title', 'Such Stuff as Dreams', 'We are such stuff as dreams are made on.'],
+    ['title', 'Look Closer', 'Every turn shows a different story.'],
     ['hand', 'Prism Hand', 'Your vote fans out into beams of colour.', 'prism'],
     ['mark', 'Broken Kaleidoscope', 'The pattern spins faster and faster, then flies apart.', 'kaleido'],
   ]),

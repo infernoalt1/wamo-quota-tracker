@@ -156,6 +156,25 @@ export function pgStore(pool){
       await query('UPDATE botc_accounts SET password_hash=$2 WHERE id=$1',[id,hash]);
       await query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,0,'reset',$3)",[randomUUID(),id,by]);
     },
+    // Who owns any of these items, for the admin to see before taking them back.
+    chromaOwners:items=>query('SELECT a.username,array_agg(i.item ORDER BY i.item) AS items FROM botc_items i JOIN botc_accounts a ON a.id=i.account_id WHERE i.item=ANY($1::text[]) GROUP BY a.id,a.username ORDER BY a.username',[items]),
+    // Takes these items back from everyone who has them: they leave the account and what it wears, and each set
+    // (`setOf` an item) pays `per` points, kept in the player's history.
+    async recallChromas({items,setOf,by,per}){
+      const owners=await query('SELECT DISTINCT account_id FROM botc_items WHERE item=ANY($1::text[])',[items]);
+      if(!owners.length)return [];
+      return locked(owners.map(o=>o.account_id),async client=>{
+        const rows=(await client.query('SELECT a.id,a.username,a.look,array_agg(i.item) AS items FROM botc_items i JOIN botc_accounts a ON a.id=i.account_id WHERE i.item=ANY($1::text[]) GROUP BY a.id',[items])).rows,out=[];
+        for(const r of rows){
+          const sets=[...new Set(r.items.map(setOf))].sort(),look=Object.fromEntries(Object.entries(r.look||{}).filter(([,v])=>!items.includes(v)));
+          await client.query('DELETE FROM botc_items WHERE account_id=$1 AND item=ANY($2::text[])',[r.id,items]);
+          await client.query('UPDATE botc_accounts SET look=$2 WHERE id=$1',[r.id,Object.keys(look).length?JSON.stringify(look):null]);
+          for(const set of sets)await client.query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id,item) VALUES($1,$2,$3,'recall',$4,$5)",[randomUUID(),r.id,per,by,set]);
+          out.push({username:r.username,sets,amount:per*sets.length});
+        }
+        return out.sort((a,b)=>a.username.localeCompare(b.username));
+      });
+    },
     grants:()=>query(`SELECT t.username AS "to",b.username AS "by",l.delta AS amount,l.at FROM botc_ledger l
       JOIN botc_accounts t ON t.id=l.account_id LEFT JOIN botc_accounts b ON b.id=l.other_id WHERE l.kind='grant' ORDER BY l.at DESC LIMIT 20`),
     // Every account's points, for the admin page.

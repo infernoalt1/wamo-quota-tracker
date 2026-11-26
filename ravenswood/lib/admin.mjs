@@ -2,8 +2,12 @@
 import { randomInt } from 'node:crypto';
 import bcrypt from 'bcrypt';
 import { keyOf, usernameOf, passwordOf } from './accounts.mjs';
+import { ITEM, ITEMS } from './cosmetics.mjs';
 
 export const GRANT=Object.freeze({max:100000});
+// Taking Chromas back pays this much for each set, unless the admin chooses another amount.
+export const RECALL=Object.freeze({per:5000});
+const CHROMA=ITEMS.filter(i=>i.tier==='chroma').map(i=>i.id),setOf=id=>ITEM[id].set;
 
 export function adminKeys(list=process.env.BOTC_ADMINS){
   return new Set(String(list||'').split(',').map(n=>n.trim()).filter(Boolean).map(keyOf));
@@ -28,9 +32,10 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
 
   // Everyone's points, and the latest grants.
   async function overview(){
-    const [grants,rows]=await Promise.all([store.grants(),store.balances()]);
+    const [grants,rows,chromas]=await Promise.all([store.grants(),store.balances(),store.chromaOwners(CHROMA)]);
     return {
-      max:GRANT.max,
+      max:GRANT.max,recallPer:RECALL.per,
+      chromas:chromas.map(c=>({username:c.username,sets:[...new Set(c.items.map(setOf))].sort()})),
       grants:grants.map(g=>({to:g.to,by:g.by,amount:g.amount,at:time(g.at)})),
       players:rows.map(r=>{const held=heldFor(r.id);return {username:r.username,balance:r.earned-r.spent+r.adjust-held,held,earned:r.earned,spent:r.spent,games:r.games,joined:time(r.created_at)};}),
     };
@@ -54,6 +59,13 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
     const to=await playerNamed(req.body?.to);
     await store.grant({to:to.id,by:account.id,amount});
     res.json({...await overview(),granted:{to:to.username,amount,balance:await store.balance(to.id)-heldFor(to.id)}});
+  }));
+  // Take every Chroma back from everyone, paying `per` points for each set.
+  router.post('/admin/recall-chromas',handle(async(req,res,account)=>{
+    const per=req.body?.per??RECALL.per;
+    if(!Number.isInteger(per)||per<0||per>GRANT.max)throw refuse(`Pay between 0 and ${GRANT.max} points for each set.`);
+    const recalled=await store.recallChromas({items:CHROMA,setOf,by:account.id,per});
+    res.json({...await overview(),recalled});
   }));
   // A player who forgot their password gets a new one: the admin's choice, or a random one. It is shown once, for the admin to pass on.
   router.post('/admin/reset',handle(async(req,res,account)=>{
