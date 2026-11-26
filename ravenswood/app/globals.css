@@ -806,8 +806,10 @@ button.leader-row:hover{background:#ffffff08}
 .frame-glass::before{padding:10%;animation:chroma-shift 10s linear infinite}
 .frame-glass::after{inset:-40%;z-index:-1;background:repeating-conic-gradient(#fff6d966 0 5deg,transparent 5deg 22.5deg);-webkit-mask:radial-gradient(closest-side,#000 40%,transparent);mask:radial-gradient(closest-side,#000 40%,transparent);animation:deco-spin 40s linear infinite,chroma-breathe 4s ease-in-out infinite}
 /* Will-o-the-Wisps: three marsh lights circling, slowly changing colour. */
-/* Will-o'-the-Wisps: a ring of mist hugging the picture (125% of it, behind), and three wisps (24% each) circling evenly spaced at one steady speed. */
-.frame-wisps::before{inset:-12.5%;padding:0;background:url(/botc/deco/wisps-mist.png) center/100% 100% no-repeat;-webkit-mask:none;mask:none;animation:wisp-mist 48s linear infinite}
+/* Will-o'-the-Wisps: a ring of mist over the picture's edge (125% of it), and three wisps (24% each) circling evenly spaced at one steady speed. */
+.frame-wisps::before{display:none}
+/* The mist sits over the picture's edge, the way a decoration wraps a profile picture. */
+.deco-wisps::before{content:'';position:absolute;inset:-12.5%;background:url(/botc/deco/wisps-mist.png) center/100% 100% no-repeat;animation:wisp-mist 48s linear infinite}
 .deco-wisps{position:absolute;inset:0;pointer-events:none;z-index:2;border-radius:50%}
 .wisp-orbit{position:absolute;inset:0;animation:wisp-orbit 12s linear infinite}
 .wisp-orbit>i{position:absolute;left:38%;top:-18%;width:24%;height:24%;background:center/contain no-repeat;transform:rotate(-45deg);animation:wisp-float 3.6s ease-in-out infinite}
@@ -820,7 +822,7 @@ button.leader-row:hover{background:#ffffff08}
 @keyframes wisp-float{0%,100%{transform:translateY(0) rotate(-45deg) scale(1);opacity:.95}50%{transform:translateY(-6%) rotate(-45deg) scale(1.08);opacity:1}}
 @keyframes wisp-mist{0%{transform:rotate(0) scale(1);opacity:1}12.5%{transform:rotate(45deg) scale(.975);opacity:.82}25%{transform:rotate(90deg) scale(1);opacity:1}37.5%{transform:rotate(135deg) scale(.98);opacity:.85}50%{transform:rotate(180deg) scale(1);opacity:1}62.5%{transform:rotate(225deg) scale(.975);opacity:.8}75%{transform:rotate(270deg) scale(1);opacity:1}87.5%{transform:rotate(315deg) scale(.98);opacity:.86}100%{transform:rotate(360deg) scale(1);opacity:1}}
 /* Without motion, the wisps rest a third of the way round from each other. */
-@media(prefers-reduced-motion:reduce){.wisp-orbit,.wisp-orbit>i{animation:none!important}.wisp-blue{transform:rotate(120deg)}.wisp-pink{transform:rotate(240deg)}}
+@media(prefers-reduced-motion:reduce){.deco-wisps::before,.wisp-orbit,.wisp-orbit>i{animation:none!important}.wisp-blue{transform:rotate(120deg)}.wisp-pink{transform:rotate(240deg)}}
 /* Kaleidoscope: a rainbow ring, and a mirrored pattern turning the other way behind it. */
 .frame-kaleido{--ring:conic-gradient(#ff5d8f,#ffd23f,#3bceac,#4cc9f0,#5e60ce,#f72585,#ff5d8f)}
 .frame-kaleido::before{animation:chroma-shift 6s linear infinite}
