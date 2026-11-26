@@ -103,7 +103,7 @@ export const bundleOf = id => SETS[ITEM[id]?.set]?.items || [id];
 
 // Mystery chests: a random decoration from everything in the shop plus the chest-only items (never the earned ones).
 // The tier is drawn first with these odds, then an item within it (for Chroma, a whole set). A duplicate refunds part of the price.
-export const CHEST = Object.freeze({ price: 100, refund: 40, odds: Object.freeze({ common: 54, rare: 30, epic: 11, legendary: 4, chroma: 1 }) });
+export const CHEST = Object.freeze({ price: 100, refund: 40, odds: Object.freeze({ common: 54, rare: 30, epic: 11, legendary: 4.7, chroma: 0.3 }) });
 export const CHEST_ITEMS = Object.freeze(ITEMS.filter(i => i.price || i.chest));
 export function rollChest(random = Math.random) {
   const tiers = Object.entries(CHEST.odds), total = tiers.reduce((n, [, w]) => n + w, 0);

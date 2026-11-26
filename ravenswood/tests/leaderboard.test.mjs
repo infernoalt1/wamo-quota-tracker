@@ -440,15 +440,15 @@ test('a Chroma is a whole set of five, one of each kind, and only its frame can 
     for(const id of set.items){assert.equal(ITEM[id].tier,'chroma');assert(ITEM[id].chest);}
     assert(ITEM[set.items.find(id=>ITEM[id].kind==='hand')].fx);assert(ITEM[set.items.find(id=>ITEM[id].kind==='mark')].fx);
   }
-  assert.equal(CHEST.odds.chroma,1);assert.equal(CHEST.price,100);
-  const found=new Set();for(let i=0;i<300;i++)found.add(rollChest((()=>{let n=0;return()=>n++?i/300:.995;})()));
+  assert.equal(CHEST.odds.chroma,0.3);assert.equal(CHEST.price,100);
+  const found=new Set();for(let i=0;i<300;i++)found.add(rollChest((()=>{let n=0;return()=>n++?i/300:.999;})()));
   assert.deepEqual([...found].sort(),Object.keys(SETS).sort());
 });
 shopTest('a Chroma chest gives the whole set, can be worn at once, and is announced to the table between games',async({store,browser,member})=>{
   const ana=await member('Ana');await played(store,ana.account,10,10,{points:30});
   const host=browser(),game=(await host('/',{type:'create',name:'Host'})).data;
   await ana.call('/',{type:'join',name:'Ana',code:game.code});
-  let r=await rigged(ana.call,.995,.9);assert.equal(r.status,200,JSON.stringify(r.data));
+  let r=await rigged(ana.call,.999,.9);assert.equal(r.status,200,JSON.stringify(r.data));
   assert.deepEqual(r.data.opened,{item:'kaleido',duplicate:false,refund:0});
   for(const id of SETS.kaleido.items)assert(r.data.owned.includes(id),id);
   let table=(await host(`/?code=${game.code}`)).data;
@@ -457,7 +457,7 @@ shopTest('a Chroma chest gives the whole set, can be worn at once, and is announ
   assert.deepEqual(r.data.look,{frame:'kaleido',color:'kaleido_ink',title:'kaleido_title',hand:'kaleido_hand',mark:'kaleido_mark'});
   for(const set of ['glass','__proto__',42])assert.equal((await ana.call('/shop/equip-set',{set})).status,400);
   // The same set again is a duplicate: part of the price back, and nothing to announce.
-  r=await rigged(ana.call,.995,.9);assert.equal(r.data.opened.duplicate,true);assert.equal(r.data.balance,300-2*CHEST.price+CHEST.refund);
+  r=await rigged(ana.call,.999,.9);assert.equal(r.data.opened.duplicate,true);assert.equal(r.data.balance,300-2*CHEST.price+CHEST.refund);
   table=(await host(`/?code=${game.code}`)).data;assert.equal(table.flair.length,1);
 });
 shopTest('a Chroma found during a game is not announced at that table',async({store,browser,member})=>{
@@ -466,6 +466,6 @@ shopTest('a Chroma found during a game is not announced at that table',async({st
   const bo=await member('Bo');await played(store,bo.account,5,5,{points:30});
   await bo.call('/',{type:'join',name:'Bo',code:game.code});
   assert.equal((await host('/',{type:'start',code:game.code})).status,200);
-  const r=await rigged(bo.call,.995,.1);assert.equal(r.data.opened.item,'glass');
+  const r=await rigged(bo.call,.999,.1);assert.equal(r.data.opened.item,'glass');
   assert.deepEqual((await host(`/?code=${game.code}`)).data.flair,[]);
 });
