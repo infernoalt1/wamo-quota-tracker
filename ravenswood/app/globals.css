@@ -432,10 +432,8 @@ button.leader-row:hover{background:#ffffff08}
 .deco-title{font-size:11px;font-style:italic;color:#b5acc1;letter-spacing:.2px}
 .deco-title.tier-rare{color:#e2c48a}
 .deco-title.tier-epic{color:#cdb2ff}
-.deco-title.tier-epic::before,.deco-title.tier-legendary::before{content:'\2726  ';font-style:normal}
 .deco-title.tier-legendary{font-style:normal;font-weight:600;letter-spacing:.2px;background-image:linear-gradient(90deg,#c9963f,#fff2c4,#e0b45e,#fff2c4,#c9963f);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 7s linear infinite}
 .deco-title.tier-unlock{color:#8ee0cf;font-style:normal}
-.deco-title.tier-unlock::before{content:'\25C6  ';font-size:9px}
 @media(prefers-reduced-motion:reduce){.framed::before,.framed::after,.ink-moonlit,.ink-bloodmoon,.deco-title.tier-legendary{animation:none!important}}
 
 /* Shop */
@@ -823,7 +821,6 @@ button.leader-row:hover{background:#ffffff08}
 @keyframes wisp-glow{0%,100%{filter:drop-shadow(0 0 2px #7df9ff66)}50%{filter:drop-shadow(0 0 7px #c77dffaa)}}
 /* Titles. */
 .deco-title.tier-chroma{font-style:normal;font-weight:600;letter-spacing:.2px;background-image:linear-gradient(90deg,#ff8fab,#ffe08a,#8ff0d0,#9ecbff,#d4a8ff,#ff8fab);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 5s linear infinite;filter:drop-shadow(0 0 4px #ffffff33)}
-.deco-title.tier-chroma::before{content:'\25C8  ';font-style:normal}
 /* Vote hands. */
 .hand-indicator.hand-glass_hand{background:conic-gradient(#e63946 0 60deg,#ffb703 60deg 120deg,#06d6a0 120deg 180deg,#3a86ff 180deg 240deg,#8338ec 240deg 300deg,#fb5607 300deg);color:#fff;box-shadow:0 0 0 1px #120f16,0 0 10px #ffffff77;animation:chroma-hue 6s linear infinite}
 .hand-indicator.hand-wisps_hand{background:radial-gradient(circle at 50% 40%,#2a2340,#0d0b16);color:#f4fbff;border:1px solid #7df9ff88;animation:wisp-hand 2.4s linear infinite}
