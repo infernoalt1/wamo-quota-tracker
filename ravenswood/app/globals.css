@@ -737,6 +737,12 @@ button.leader-row:hover{background:#ffffff08}
 .admin-tile>b{font-family:'Spectral',serif;font-size:20px;font-variant-numeric:tabular-nums}
 .admin-history{max-height:420px;overflow-y:auto}
 .admin-owned{margin-top:12px}
+.admin-reset{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:8px}
+.admin-reset p{margin:0;font-size:13px;color:var(--muted)}
+.admin-reset p b{color:var(--text,#e8e2ef)}
+.admin-reset>button{justify-self:start}
+.admin-reset-password{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.admin-reset-password code{font-size:18px;letter-spacing:1px;padding:6px 12px;border:1px solid #5b4f6b;border-radius:6px;background:#15151b;color:#f0d9a6;user-select:all}
 @media (max-width:420px){.admin-grant,.admin-filter{grid-template-columns:1fr}.admin-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-recent li{grid-template-columns:minmax(0,1fr) auto}.admin-recent li>small{grid-column:1/-1;text-align:left}}
 /* Spectator bets. */
 .bet-panel{display:grid;gap:8px;padding:12px;border:1px solid #4a3f57;border-radius:8px;background:#211e29}

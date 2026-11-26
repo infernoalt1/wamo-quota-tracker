@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useRef,Fragment} from 'react';
-import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,ShieldCheck,Minus} from 'lucide-react';
+import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,ShieldCheck,Minus,KeyRound} from 'lucide-react';
 import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
 import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS} from '../lib/cosmetics.mjs';
@@ -221,6 +221,7 @@ function activityText(a){
   case 'gift':return a.delta>0?<>Gift from <b>{a.other||'someone'}</b></>:<>Gift to <b>{a.other||'someone'}</b></>;
   case 'grant':return a.delta>0?<>Given by <b>{a.other||'an admin'}</b></>:<>Taken back by <b>{a.other||'an admin'}</b></>;
   case 'bet':return a.delta>0?'Won a spectator bet':'Lost a spectator bet';
+  case 'reset':return <>Password reset by <b>{a.other||'an admin'}</b></>;
   default:return a.kind;
  }
 }
@@ -248,7 +249,14 @@ function Admin(){
   [to,setTo]=useState(''),[amount,setAmount]=useState(100),[busy,setBusy]=useState(false),[msg,setMsg]=useState(null),[error,setError]=useState('');
  useEffect(()=>{getJson('/botc/api/game/admin').then(setData).catch(e=>setError(e.message));},[]);
  const loadPlayer=name=>getJson(`/botc/api/game/admin/player?username=${encodeURIComponent(name)}`).then(d=>setDetail(d.player)).catch(e=>setMsg({ok:false,text:e.message}));
- useEffect(()=>{setDetail(null);if(player){setTo(player);loadPlayer(player);}},[player]);
+ const [reset,setReset]=useState(null),[copiedReset,setCopiedReset]=useState(false);
+ useEffect(()=>{setDetail(null);setReset(null);if(player){setTo(player);loadPlayer(player);}},[player]);
+ async function resetPassword(){
+  if(busy)return;setBusy(true);setMsg(null);
+  try{const d=await postJson('/botc/api/game/admin/reset',{username:player});setReset({...d.reset,stage:'done'});loadPlayer(player);}
+  catch(e){setMsg({ok:false,text:e.message});setReset(null);}finally{setBusy(false);}
+ }
+ async function copyReset(){try{await navigator.clipboard.writeText(reset.password);setCopiedReset(true);setTimeout(()=>setCopiedReset(false),2000);}catch{}}
  async function grant(sign){
   const n=Math.abs(Math.round(Number(amount)))*sign;
   if(busy||!to.trim()||!n)return;setBusy(true);setMsg(null);
@@ -280,6 +288,15 @@ function Admin(){
   {player?<>
    <button className="text-button back-link" onClick={()=>setPlayer(null)}><ArrowLeft size={14}/>All players</button>
    {detail?<AdminPlayer p={detail}/>:<p className="small">Opening {player}’s history…</p>}
+   <div className="admin-reset">
+    {reset?.stage==='done'?<>
+     <p>New password for <b>{reset.username}</b>. Send it to them; it won’t be shown again.</p>
+     <div className="admin-reset-password"><code>{reset.password}</code><button className="secondary compact" onClick={copyReset}>{copiedReset?<Check size={14}/>:<Copy size={14}/>}{copiedReset?'Copied':'Copy'}</button></div>
+    </>:reset?.stage==='ask'?<>
+     <p>Give <b>{player}</b> a new password? Their old one will stop working.</p>
+     <div className="admin-buttons"><button className="primary compact" disabled={busy} onClick={resetPassword}><KeyRound size={14}/>Yes, reset it</button><button className="secondary compact" disabled={busy} onClick={()=>setReset(null)}>Cancel</button></div>
+    </>:<button className="secondary compact" onClick={()=>setReset({stage:'ask'})}><KeyRound size={14}/>Reset password</button>}
+   </div>
   </>:<>
    <div className="admin-list-head"><span className="eyebrow">PLAYERS · {data.players.length}</span><small>{total} points in all</small></div>
    <div className="admin-filter">

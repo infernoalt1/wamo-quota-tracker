@@ -30,6 +30,7 @@ function memoryStore(){
     async giftsSent(id,since){return -this.ledger.filter(l=>l.account===id&&l.kind==='gift'&&l.delta<0&&l.at>=since).reduce((n,l)=>n+l.delta,0);},
     async giftsReceived(id){return this.ledger.filter(l=>l.account===id&&['gift','grant'].includes(l.kind)&&l.delta>0).reverse().slice(0,5).map(l=>({username:accounts.find(a=>a.id===l.other).username,amount:l.delta,at:l.at}));},
     async sharedGame(a,b){return rows.some(r=>r.account===a&&rows.some(x=>x.account===b&&x.game_id===r.game_id));},
+    async resetPassword({id,by,hash}){accounts.find(a=>a.id===id).password_hash=hash;this.ledger.push({account:id,delta:0,kind:'reset',other:by,at:new Date()});},
     async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
     async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
     async balances(){return Promise.all(accounts.map(async a=>{const w=await this.wallet(a.id);return {id:a.id,username:a.username,created_at:new Date(),earned:w.earned,spent:w.spent,adjust:w.adjust,games:rows.filter(r=>r.account===a.id).length};}));},
@@ -367,6 +368,18 @@ shopTest('only admins can give points, and the player sees them in their shop',a
   assert.equal((await boss.call('/shop')).data.gift.left,100);
   r=await boss.call('/admin');const row=r.data.players.find(p=>p.username==='Ana');
   assert.equal(row.balance,300-ITEM.brass.price);assert.equal(row.spent,ITEM.brass.price);assert.equal(r.data.players.length,2);
+});
+shopTest('an admin can give a player who forgot their password a new one',async({store,browser,member})=>{
+  const boss=await member('Boss'),ana=await member('Ana');
+  assert.equal((await ana.call('/admin/reset',{username:'Boss'})).status,403);
+  assert.equal((await boss.call('/admin/reset',{username:'Nobody'})).status,404);
+  const r=await boss.call('/admin/reset',{username:'ana'});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal(r.data.reset.username,'Ana');assert.match(r.data.reset.password,/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
+  assert.equal((await browser()('/account/login',{username:'Ana',password:'hunter22'})).status,401);
+  const login=await browser()('/account/login',{username:'Ana',password:r.data.reset.password});
+  assert.equal(login.status,200,JSON.stringify(login.data));assert.equal(login.data.account.username,'Ana');
+  const p=(await boss.call('/admin/player?username=Ana')).data.player;
+  assert.deepEqual(p.activity.map(a=>[a.kind,a.delta,a.other]),[['reset',0,'Boss']]);assert.equal(p.balance,0);
 });
 shopTest('an admin sees the points a player earned, spent, opened and was given',async({store,member})=>{
   const boss=await member('Boss'),ana=await member('Ana');

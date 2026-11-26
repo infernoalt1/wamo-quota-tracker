@@ -152,6 +152,11 @@ export function pgStore(pool){
     balance:async id=>(await one(`SELECT ${BALANCE} AS balance`,[id])).balance,
     // Points an admin gave (or took back), with who did it.
     grant:({to,by,amount})=>query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,$3,'grant',$4)",[randomUUID(),to,amount,by]),
+    // A new password set by an admin, kept in the player's history (it moves no points).
+    async resetPassword({id,by,hash}){
+      await query('UPDATE botc_accounts SET password_hash=$2 WHERE id=$1',[id,hash]);
+      await query("INSERT INTO botc_ledger(id,account_id,delta,kind,other_id) VALUES($1,$2,0,'reset',$3)",[randomUUID(),id,by]);
+    },
     grants:()=>query(`SELECT t.username AS "to",b.username AS "by",l.delta AS amount,l.at FROM botc_ledger l
       JOIN botc_accounts t ON t.id=l.account_id LEFT JOIN botc_accounts b ON b.id=l.other_id WHERE l.kind='grant' ORDER BY l.at DESC LIMIT 20`),
     // Every account's points, for the admin page.
