@@ -182,7 +182,7 @@ function Backdrop({watermark}){return <>{<span className="champion-glow" aria-hi
 function ChampionBanner({champion,onOpen}){
  if(!champion)return null;
  const bg=champion.title?champion.style?.bg:null;
- return <button className={`champion-banner ${backdropClass(bg)}`} style={backdropOf(bg)} onClick={onOpen}><Backdrop/><Trophy size={20}/><span><small>CHAMPION OF THE WEEK</small><strong><Named name={champion.username} look={champion.look}/></strong>{champion.title&&<ChampionTitle title={champion.title} style={champion.style}/>}</span></button>;
+ return <button className={`champion-banner ${backdropClass(bg)}`} style={backdropOf(bg)} onClick={onOpen}><Backdrop/><Trophy size={20}/><span><small>REIGNING CHAMPION</small><strong><Named name={champion.username} look={champion.look}/></strong>{champion.title&&<ChampionTitle title={champion.title} style={champion.style}/>}</span></button>;
 }
 const timeLeft=at=>{const d=Math.floor((at-Date.now())/86400000);return d>=1?`${d} day${d===1?'':'s'}`:hoursLeft(at);};
 // Blends a list of colours (t from 0 to 1), for the Wave effect's letters.
@@ -231,7 +231,7 @@ function TitleEditor({initial,onSave,onCancel,busy}){
   <div className="admin-buttons"><button className="primary compact" disabled={busy||!text.trim()}>Save title</button><button type="button" className="text-button" onClick={onCancel}>Cancel</button></div>
  </form>;
 }
-// This week's points. Last week's winner is champion: a trophy at every table and a title they design themself.
+// This round's points. Last round's winner is champion: a trophy at every table and a title they design themself.
 function WeekBoard({me,admin,onPick,onWeek}){
  const [week,setWeek]=useState(null),[error,setError]=useState(''),[editing,setEditing]=useState(false),[busy,setBusy]=useState(false);
  const got=d=>{setWeek(d);onWeek?.(d);};
@@ -243,8 +243,8 @@ function WeekBoard({me,admin,onPick,onWeek}){
  if(!week)return error?<p className="status-note">{error}</p>:<p className="small">Opening the records…</p>;
  const champ=week.champion,mine=!!champ&&champ.username===me;
  return <>
-  <p>Points earned in recorded games since Monday. Gifts, bets and admin changes don’t count. The board resets in {timeLeft(week.ends)}, and whoever is on top becomes next week’s champion.</p>
-  {champ&&<section className={`champion-card ${backdropClass(champ.title?champ.style?.bg:null)}`} style={backdropOf(champ.title?champ.style?.bg:null)} aria-label="Champion of the week">
+  <p>Points earned in recorded games this round ({week.round}). Gifts, bets and admin changes don’t count. The round ends in {timeLeft(week.ends)}, and whoever is on top is champion for the next one.</p>
+  {champ&&<section className={`champion-card ${backdropClass(champ.title?champ.style?.bg:null)}`} style={backdropOf(champ.title?champ.style?.bg:null)} aria-label="Reigning champion">
    <Backdrop watermark/>
    {!editing&&(mine||admin&&champ.title)&&<div className="champion-tools">
     {mine&&<button className="icon-button" onClick={()=>setEditing(true)} aria-label={champ.title?'Edit your title':'Design your title'} title={champ.title?'Edit your title':'Design your title'}><Pencil size={14}/></button>}
@@ -260,7 +260,7 @@ function WeekBoard({me,admin,onPick,onWeek}){
   </section>}
   {champ&&mine&&editing&&<TitleEditor initial={champ} busy={busy} onSave={save} onCancel={()=>setEditing(false)}/>}
   {error&&<p className="status-note error">{error}</p>}
-  {week.players.length===0?<p className="small">Nobody has finished a recorded game this week yet.</p>:
+  {week.players.length===0?<p className="small">Nobody has finished a recorded game this round yet.</p>:
   <div className="leader-list">
    <div className="leader-row leader-head" aria-hidden="true"><span>#</span><span>Player</span><span>Wins</span><span>Points</span></div>
    {week.players.map((p,i)=><button key={p.username} className={`leader-row ${p.username===me?'you':''}`} onClick={()=>onPick(p.username)}>
@@ -271,7 +271,7 @@ function WeekBoard({me,admin,onPick,onWeek}){
   </div>}
   <section className="champion-showcase">
    <span className="eyebrow"><Trophy size={12}/>THE CHAMPION’S TITLE</span>
-   <p>Finish the week on top and you design your own title: any words, any colours, and an effect. It goes on your seat at every table and in every lobby for the whole next week.</p>
+   <p>Finish a round on top and you design your own title: any words, any colours, an effect and a background. It shows everywhere your name does until the next round ends. Rounds run Monday–Thursday and Friday–Sunday.</p>
    <div className="showcase-grid">{SHOWCASE.map(([t,st])=><div key={t} className="showcase-item"><ChampionTitle title={t} style={st}/><small>{CHAMPION_STYLE.effects[st.effect]}</small></div>)}</div>
   </section>
  </>;
@@ -635,8 +635,8 @@ function Leaderboard({me,start,onWallet,admin,onWeek}){
   </>}
  </>;
  const rows=board?.players||[];
- const tabs=<div className="role-tabs"><button className={tab==='week'?'active':''} onClick={()=>setTab('week')}>This week</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>All players</button></div>;
- if(tab==='week')return <><span className="eyebrow">THE TOWN RECORDS</span><h2>This week.</h2>{tabs}<WeekBoard me={me} admin={admin} onPick={setPlayer} onWeek={onWeek}/></>;
+ const tabs=<div className="role-tabs"><button className={tab==='week'?'active':''} onClick={()=>setTab('week')}>This round</button><button className={tab==='all'?'active':''} onClick={()=>setTab('all')}>All players</button></div>;
+ if(tab==='week')return <><span className="eyebrow">THE TOWN RECORDS</span><h2>This round.</h2>{tabs}<WeekBoard me={me} admin={admin} onPick={setPlayer} onWeek={onWeek}/></>;
  return <>
   <span className="eyebrow">THE TOWN RECORDS</span><h2>Players.</h2>{tabs}
   <p>Everyone with a recorded game, A–Z. A game counts when at least {board?.minAccounts||3} players at the table are logged in. Pick a name to see their record.</p>

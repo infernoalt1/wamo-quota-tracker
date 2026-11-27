@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { newGame, join, spectate, start, act, kill, view, results } from '../lib/engine.mjs';
-import { mountLeaderboard, pointsFor, weekStart, championTitleOf } from '../lib/leaderboard.mjs';
+import { mountLeaderboard, pointsFor, roundOf, championTitleOf } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
 import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, SETS, rollChest, championStyleOf, CHAMPION_STYLE } from '../lib/cosmetics.mjs';
@@ -46,7 +46,7 @@ function memoryStore(){
     async saveGame({players,...game}){if(games.some(g=>g.id===game.id))throw Error('duplicate key');games.push({...game,ended_at:new Date(Date.now()+games.length)});for(const p of players)rows.push({game_id:game.id,...p});},
     async totals(script){
       const by=new Map();
-      for(const r of rows){const g=games.find(x=>x.id===r.game_id);if(script&&g.script!==script)continue;const list=by.get(r.account)||[];list.push(r);by.set(r.account,list);}
+      for(const r of rows){const g=games.find(x=>x.id===r.game_id);if(script&&g.script!==script||accounts.find(a=>a.id===r.account)?.alt)continue;const list=by.get(r.account)||[];list.push(r);by.set(r.account,list);}
       const n=(list,f)=>list.filter(f).length;
       return [...by].map(([id,list])=>{const a=accounts.find(x=>x.id===id);return {id,username:a.username,avatar_version:a.avatar_version,pictured:a.pictured,games:list.length,wins:n(list,r=>r.won),good_games:n(list,r=>!r.evil),good_wins:n(list,r=>!r.evil&&r.won),evil_games:n(list,r=>r.evil),evil_wins:n(list,r=>r.evil&&r.won),demon_wins:n(list,r=>r.demon&&r.won)};});
     },
@@ -54,12 +54,12 @@ function memoryStore(){
     playedRows(){return rows.map(r=>({...r,ended_at:games.find(g=>g.id===r.game_id).ended_at})).sort((a,b)=>b.ended_at-a.ended_at);},
     async weekly(from,to){
       const by=new Map();
-      for(const r of this.playedRows())if(r.ended_at>=from&&r.ended_at<to){const t=by.get(r.account)||{points:0,games:0,wins:0};t.points+=r.points||0;t.games++;t.wins+=r.won?1:0;by.set(r.account,t);}
+      for(const r of this.playedRows())if(r.ended_at>=from&&r.ended_at<to&&!accounts.find(a=>a.id===r.account)?.alt){const t=by.get(r.account)||{points:0,games:0,wins:0};t.points+=r.points||0;t.games++;t.wins+=r.won?1:0;by.set(r.account,t);}
       return [...by].map(([id,t])=>{const a=accounts.find(x=>x.id===id);return {id,username:a.username,avatar_version:a.avatar_version,pictured:a.pictured,look:a.look,...t};});
     },
     streakOf(id){let n=0;for(const r of this.playedRows().filter(r=>r.account===id)){if(!r.won)break;n++;}return n;},
     async streaksOf(ids){return new Map(ids.map(id=>[id,this.streakOf(id)]).filter(([,n])=>n));},
-    async streaks(min){return accounts.map(a=>({id:a.id,username:a.username,streak:this.streakOf(a.id)})).filter(s=>s.streak>=min);},
+    async streaks(min){return accounts.filter(a=>!a.alt).map(a=>({id:a.id,username:a.username,streak:this.streakOf(a.id)})).filter(s=>s.streak>=min);},
     champions:[],
     async champion(week){return this.champions.find(c=>c.week.getTime()===week.getTime())||null;},
     async setChampion(week,id,title,style){this.champions=this.champions.filter(c=>c.week.getTime()!==week.getTime());this.champions.push({week,account_id:id,title,style});},
@@ -341,10 +341,21 @@ test('a game won on a streak pays the streak bonus, and a loss ends the streak',
   await played(store,ana,1,0);
   assert.equal(store.streakOf(ana.id),0);
 });
-test('weeks start at midnight UTC on Monday',()=>{
-  assert.equal(weekStart(Date.UTC(2026,10,27,18)).toISOString(),'2026-11-23T00:00:00.000Z');
-  assert.equal(weekStart(Date.UTC(2026,10,23)).toISOString(),'2026-11-23T00:00:00.000Z');
-  assert.equal(weekStart(Date.UTC(2026,10,22,23,59)).toISOString(),'2026-11-16T00:00:00.000Z');
+test('rounds run Monday–Thursday and Friday–Sunday from midnight Pacific time, summer time included',()=>{
+  const at=t=>{const r=roundOf(t);return [r.start.toISOString(),r.end.toISOString(),r.name];};
+  // Winter (UTC−8): Friday 27 November 2026, 10am Pacific.
+  assert.deepEqual(at(Date.UTC(2026,10,27,18)),['2026-11-27T08:00:00.000Z','2026-11-30T08:00:00.000Z','Friday–Sunday']);
+  // Thursday 11:59pm Pacific is still Monday–Thursday; a minute later is Friday–Sunday.
+  assert.deepEqual(at(Date.UTC(2026,10,27,7,59)),['2026-11-23T08:00:00.000Z','2026-11-27T08:00:00.000Z','Monday–Thursday']);
+  assert.equal(at(Date.UTC(2026,10,27,8))[2],'Friday–Sunday');
+  // Sunday night rolls over at Monday midnight, across a month end.
+  assert.deepEqual(at(Date.UTC(2026,10,30,7,59)).slice(0,2),['2026-11-27T08:00:00.000Z','2026-11-30T08:00:00.000Z']);
+  // Summer (UTC−7).
+  assert.deepEqual(at(Date.UTC(2026,6,15,20)),['2026-07-13T07:00:00.000Z','2026-07-17T07:00:00.000Z','Monday–Thursday']);
+  // The round that spans the spring clock change (Sunday 8 March 2026) is an hour shorter.
+  assert.deepEqual(at(Date.UTC(2026,2,7,20)).slice(0,2),['2026-03-06T08:00:00.000Z','2026-03-09T07:00:00.000Z']);
+  // The round before the start of a round is the previous one.
+  const r=roundOf(Date.UTC(2026,10,27,18));assert.equal(roundOf(r.start.getTime()-1).start.toISOString(),'2026-11-23T08:00:00.000Z');
 });
 test('a champion’s title is any text up to the limit, and its style keeps only real colours, effects and letterings',()=>{
   assert.equal(championTitleOf('  The   Unbeatable '),'The Unbeatable');
@@ -356,8 +367,9 @@ test('a champion’s title is any text up to the limit, and its style keeps only
   assert.deepEqual(championStyleOf({colors:'#fff',effect:'explode',font:'__proto__'}),{...CHAMPION_STYLE.standard,colors:[...CHAMPION_STYLE.standard.colors],bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]}});
   assert.deepEqual(championStyleOf(null),championStyleOf({}));
 });
-test('the weekly board ranks this week’s points, last week’s winner is champion, and only they can write the title',async()=>{
-  const now=Date.UTC(2026,10,27,18),lastWeek=new Date(Date.UTC(2026,10,18,12)),thisWeek=new Date(Date.UTC(2026,10,24,12));
+test('the board ranks this round’s points, last round’s winner is champion, and only they can write the title',async()=>{
+  // Now is Friday 27 November, 10am Pacific: this round started that midnight; the last ran Monday 23–Thursday 26.
+  const now=Date.UTC(2026,10,27,18),lastWeek=new Date(Date.UTC(2026,10,24,12)),thisWeek=new Date(Date.UTC(2026,10,27,12));
   const s=await shop(()=>now);
   try{
     const ana=await s.member('Ana'),bo=await s.member('Bo'),boss=await s.member('Boss');
@@ -366,7 +378,7 @@ test('the weekly board ranks this week’s points, last week’s winner is champ
     await played(s.store,bo.account,3,1,{points:20});
     s.store.games.slice(3).forEach(g=>{g.ended_at=thisWeek;});
     let r=await ana.call('/leaderboard/week');
-    assert.equal(r.status,200);assert.equal(r.data.start,Date.UTC(2026,10,23));assert.equal(r.data.ends,Date.UTC(2026,10,30));
+    assert.equal(r.status,200);assert.equal(r.data.start,Date.UTC(2026,10,27,8));assert.equal(r.data.ends,Date.UTC(2026,10,30,8));assert.equal(r.data.round,'Friday–Sunday');
     assert.deepEqual(r.data.players.map(p=>[p.username,p.points,p.games,p.wins]),[['Bo',60,3,1]]);
     assert.equal(r.data.champion.username,'Ana');assert.equal(r.data.champion.title,null);assert.equal(r.data.champion.points,60);
     assert.equal((await bo.call('/leaderboard/champion-title',{title:'Not me'})).status,403);
@@ -375,6 +387,12 @@ test('the weekly board ranks this week’s points, last week’s winner is champ
     assert.deepEqual(r.data.champion.style,{bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]},colors:['#ff0000','#0000ff'],effect:'glow',font:'bold'});
     assert.equal((await bo.call('/leaderboard/champion-title',{clear:true})).status,403);
     r=await boss.call('/leaderboard/champion-title',{clear:true});assert.equal(r.status,200);assert.equal(r.data.champion.title,null);
+    // An alt is left off every board and can't be champion.
+    await boss.call('/admin/alt',{username:'Bo',alt:true});
+    r=await ana.call('/leaderboard/week');assert.deepEqual(r.data.players,[]);assert.equal(r.data.streaks.Bo,undefined);
+    assert.equal((await ana.call('/leaderboard')).data.players.some(p=>p.username==='Bo'),false);
+    await boss.call('/admin/alt',{username:'Ana',alt:true});
+    r=await ana.call('/leaderboard/week');assert.equal(r.data.champion,null);
   }finally{s.close();}
 });
 shopTest('an admin can mark an alt account, which then can’t start, join or watch games, or bet',async({store,member})=>{

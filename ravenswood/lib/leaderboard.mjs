@@ -12,9 +12,22 @@ export const MIN_ACCOUNTS=3;
 const tally=rows=>({games:rows.length,wins:rows.filter(r=>r.won).length});
 // The daily bonus resets at midnight UTC, the same moment for everyone.
 export const dayStart=(now=Date.now())=>new Date(Math.floor(now/86400000)*86400000);
-// The weekly board resets at midnight UTC on Monday (1 January 1970 was a Thursday).
-const DAY=86400000,WEEK=7*DAY;
-export const weekStart=(now=Date.now())=>{const day=Math.floor(now/DAY);return new Date((day-(day+3)%7)*DAY);};
+// Leaderboard rounds run Monday–Thursday and Friday–Sunday, from midnight Pacific time (where the players are).
+// The winner of one round is champion during the next.
+const ZONE='America/Los_Angeles',DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const zoned=new Intl.DateTimeFormat('en-US',{timeZone:ZONE,year:'numeric',month:'numeric',day:'numeric',weekday:'short',hour:'numeric',minute:'numeric',second:'numeric',hourCycle:'h23'});
+const partsAt=t=>Object.fromEntries(zoned.formatToParts(t).map(p=>[p.type,p.value]));
+// The moment a Pacific calendar day begins. Date.UTC rolls day overflow into the next month, so y/m/d can run past month ends.
+function midnight(y,m,d){
+  let t=Date.UTC(y,m,d,8);
+  for(let i=0;i<3;i++){const p=partsAt(t);t+=Date.UTC(y,m,d)-Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second);}
+  return t;
+}
+export function roundOf(now=Date.now()){
+  const p=partsAt(now),dow=DAYS.indexOf(p.weekday),early=dow>=1&&dow<=4;
+  const back=early?dow-1:(dow+2)%7,y=+p.year,m=+p.month-1,d=+p.day-back;
+  return {start:new Date(midnight(y,m,d)),end:new Date(midnight(y,m,d+(early?4:3))),name:early?'Monday–Thursday':'Friday–Sunday'};
+}
 // Each win in a row is worth more than the last. `before` is how many wins in a row came before this one.
 export const streakBonus=before=>Math.min(POINTS.streakMax,POINTS.streak*before);
 // Points for one player's game, itemised so the end screen can explain them.
@@ -26,7 +39,7 @@ export function pointsFor(p,firstWinToday,streak=0){
   if(p.won&&streak>0)parts.push([`${streak+1} wins in a row`,streakBonus(streak)]);
   return {total:parts.reduce((n,[,v])=>n+v,0),parts};
 }
-// The weekly board: most points first, then most wins, then fewest games.
+// The round's board: most points first, then most wins, then fewest games.
 const byPoints=(a,b)=>b.points-a.points||b.wins-a.wins||a.games-b.games||a.username.localeCompare(b.username);
 const entry=t=>({username:t.username,avatar:pictureOf(t),look:lookOf(t.look),points:t.points,games:t.games,wins:t.wins});
 const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
@@ -74,12 +87,12 @@ export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=ad
     res.json({minAccounts:MIN_ACCOUNTS,player:profileOf(account,await store.history(account.id))});
   }));
 
-  // This week's board, last week's winner (this week's champion) and everyone on a win streak of two or more.
+  // This round's board, last round's winner (the reigning champion) and everyone on a win streak of two or more.
   async function week(){
-    const start=weekStart(clock()),end=new Date(start.getTime()+WEEK),last=new Date(start.getTime()-WEEK);
+    const {start,end,name}=roundOf(clock()),last=roundOf(start.getTime()-1).start;
     const [rows,prev,streaks,crowned]=await Promise.all([store.weekly(start,end),store.weekly(last,start),store.streaks(2),store.champion(start)]);
     const top=prev.sort(byPoints)[0]||null;
-    return {start:start.getTime(),ends:end.getTime(),players:rows.sort(byPoints).slice(0,10).map(entry),
+    return {start:start.getTime(),ends:end.getTime(),round:name,players:rows.sort(byPoints).slice(0,10).map(entry),
       champion:top&&{...entry(top),...(crowned?.account_id===top.id?{title:crowned.title,style:crowned.style&&championStyleOf(crowned.style)}:{title:null,style:null})},
       streaks:Object.fromEntries(streaks.map(s=>[s.username,s.streak]))};
   }
@@ -90,14 +103,14 @@ export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=ad
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw refuse('Use the game website to change your title.',403);
     const session=identity(req),account=session?await store.bySession(session):null;
     if(!account)throw refuse('Log in first.',401);
-    const start=weekStart(clock()),top=(await store.weekly(new Date(start.getTime()-WEEK),start)).sort(byPoints)[0];
+    const {start}=roundOf(clock()),top=(await store.weekly(roundOf(start.getTime()-1).start,start)).sort(byPoints)[0];
     // An admin can clear a title nobody should see.
     if(req.body?.clear){
       if(!admins.has(keyOf(account.username)))throw refuse('Only an admin can clear the champion’s title.',403);
       if(top)await store.setChampion(start,top.id,null,null);
       return res.json(await week());
     }
-    if(top?.id!==account.id)throw refuse('Only this week’s champion can write the title.',403);
+    if(top?.id!==account.id)throw refuse('Only the reigning champion can write the title.',403);
     if(playing(session))throw refuse('Change your title between games.');
     await store.setChampion(start,account.id,championTitleOf(req.body?.title),championStyleOf(req.body?.style));
     res.json(await week());

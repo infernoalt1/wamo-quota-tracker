@@ -923,7 +923,8 @@ button.leader-row:hover{background:#ffffff08}
 .champion-banner>span{display:flex;flex-direction:column;gap:1px;min-width:0}
 .champion-banner small{font-size:10px;letter-spacing:2px;color:#bfae86}
 .champion-banner strong{font-size:15px;font-weight:600}
-.streak-flame{display:inline-flex;align-items:center;gap:1px;margin-left:4px;font-size:10px;font-weight:700;font-style:normal;color:#ff9a3c;vertical-align:1px}
+.streak-flame{display:inline;margin-left:5px;font-size:10px;font-weight:700;font-style:normal;color:#ff9a3c}
+.streak-flame svg{vertical-align:-1px;margin-right:1px}
 .champion-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
 .champion-form input{flex:1;min-width:150px}
 .leader-name small{color:var(--muted);font-size:11px}
@@ -1054,3 +1055,6 @@ button.leader-row:hover{background:#ffffff08}
 .champion-tools{position:absolute;top:8px;right:8px;z-index:1;display:flex;gap:4px}
 .champion-tools .icon-button{width:30px;height:30px;border-radius:50%;background:#0000004d;border:1px solid #ffffff1f;color:#ffffffb3}
 .champion-tools .icon-button:hover{color:#fff;border-color:var(--ca)}
+/* On the champion card the name is larger, so the title is too. */
+.champion-card .champ-title.big{font-size:14px}
+.champion-card .champion-none{font-size:13px}

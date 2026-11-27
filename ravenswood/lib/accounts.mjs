@@ -80,7 +80,7 @@ const TOTALS=`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pi
   count(*) FILTER(WHERE p.evil)::int AS evil_games,count(*) FILTER(WHERE p.evil AND p.won)::int AS evil_wins,
   count(*) FILTER(WHERE p.demon AND p.won)::int AS demon_wins
 FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts a ON a.id=p.account_id
-WHERE $1::text IS NULL OR g.script=$1 GROUP BY a.id`;
+WHERE ($1::text IS NULL OR g.script=$1) AND NOT a.alt GROUP BY a.id`;
 export function pgStore(pool){
   let ready;
   const prepare=()=>ready||=pool.query(SCHEMA).catch(e=>{ready=null;throw e;});
@@ -122,9 +122,10 @@ export function pgStore(pool){
     weekly:(from,to)=>query(`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,a.look,
       coalesce(sum(p.points),0)::int AS points,count(*)::int AS games,count(*) FILTER(WHERE p.won)::int AS wins
       FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts a ON a.id=p.account_id
-      WHERE g.ended_at>=$1 AND g.ended_at<$2 GROUP BY a.id`,[from,to]),
+      WHERE g.ended_at>=$1 AND g.ended_at<$2 AND NOT a.alt GROUP BY a.id`,[from,to]),
     streaksOf:async ids=>new Map((await query(STREAK+' AND p.account_id=ANY($1::uuid[]) GROUP BY a.id,a.username',[ids])).map(r=>[r.id,r.streak])),
-    streaks:min=>query(STREAK+' GROUP BY a.id,a.username HAVING count(*)>=$1',[min]),
+    // Alt accounts are left off every board, the champion pick and the streaks.
+    streaks:min=>query(STREAK+' AND NOT a.alt GROUP BY a.id,a.username HAVING count(*)>=$1',[min]),
     // The title a week's champion wrote for themself.
     champion:week=>one('SELECT account_id,title,style FROM botc_champions WHERE week=$1',[week]),
     setChampion:(week,id,title,style)=>query('INSERT INTO botc_champions(week,account_id,title,style) VALUES($1,$2,$3,$4) ON CONFLICT(week) DO UPDATE SET account_id=$2,title=$3,style=$4,set_at=now()',[week,id,title,style&&JSON.stringify(style)]),
