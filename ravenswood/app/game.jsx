@@ -191,24 +191,24 @@ function blend(colors,t){
  const x=t*(colors.length-1),i=Math.min(colors.length-2,Math.floor(x)),f=x-i,rgb=h=>[1,3,5].map(k=>parseInt(h.slice(k,k+2),16));
  const a=rgb(colors[i]),b=rgb(colors[i+1]);return `rgb(${a.map((v,k)=>Math.round(v+(b[k]-v)*f)).join(',')})`;
 }
-// The champion's title, in the colours, effect and lettering they chose.
+// The champion's title, in the colours and effect they chose.
 function ChampionTitle({title,style,className=''}){
- const st=style||CHAMPION_STYLE.standard,[c1,c2=c1,c3=c2]=st.colors,cls=`champ-title fx-${st.effect} font-${st.font} ${className}`,vars={'--c1':c1,'--c2':c2,'--c3':c3};
+ const st=style||CHAMPION_STYLE.standard,[c1,c2=c1,c3=c2]=st.colors,cls=`champ-title fx-${st.effect} ${className}`,vars={'--c1':c1,'--c2':c2,'--c3':c3};
  if(st.effect==='wave'){const letters=[...title];return <span className={cls} style={vars} aria-label={title}>{letters.map((ch,i)=><span key={i} aria-hidden="true" style={{color:blend(st.colors,letters.length<2?0:i/(letters.length-1)),animationDelay:`${(i*0.09).toFixed(2)}s`}}>{ch===' '?'\u00a0':ch}</span>)}</span>;}
  return <span className={cls} style={vars}>{title}</span>;
 }
 // What a champion can make, shown to everyone on the weekly board.
 const SHOWCASE=[
- ['Unbeatable',{colors:['#ff3d3d','#ffb347','#ff3d3d'],effect:'glow',font:'caps'}],
- ['Night Owl',{colors:['#8f7bff','#e6dcff','#8f7bff'],effect:'shimmer',font:'serif'}],
- ['Trust Nobody',{colors:['#5dffb0','#2fbf6a'],effect:'flicker',font:'bold'}],
- ['Demon Slayer',{colors:['#ff5c7a','#ffd24a','#5ec8ff'],effect:'rainbow',font:'bold'}],
- ['Sweet Talker',{colors:['#ff8fc8','#ffe08a','#8ff0d0'],effect:'wave',font:'serif'}],
- ['Clockwork',{colors:['#9fd8ff','#ffffff','#9fb4ff'],effect:'pulse',font:'caps'}],
- ['Ice Cold',{colors:['#bff3ff','#5fb8ff','#ffffff'],effect:'shift',font:'bold'}],
- ['Old Money',{colors:['#e9c46a','#a67c2e'],effect:'gradient',font:'serif'}],
+ ['Unbeatable',{colors:['#ff3d3d','#ffb347','#ff3d3d'],effect:'glow'}],
+ ['Night Owl',{colors:['#8f7bff','#e6dcff','#8f7bff'],effect:'shimmer'}],
+ ['Trust Nobody',{colors:['#5dffb0','#2fbf6a'],effect:'flicker'}],
+ ['Demon Slayer',{colors:['#ff5c7a','#ffd24a','#5ec8ff'],effect:'rainbow'}],
+ ['Sweet Talker',{colors:['#ff8fc8','#ffe08a','#8ff0d0'],effect:'wave'}],
+ ['Clockwork',{colors:['#9fd8ff','#ffffff','#9fb4ff'],effect:'pulse'}],
+ ['Ice Cold',{colors:['#bff3ff','#5fb8ff','#ffffff'],effect:'shift'}],
+ ['Old Money',{colors:['#e9c46a','#a67c2e'],effect:'gradient'}],
 ];
-// The champion writes their title: any text, any colours, an effect and a lettering, with a live preview.
+// The champion writes their title: any text, any colours, an effect and a background, with a live preview.
 function TitleEditor({initial,onSave,onCancel,busy}){
  const [text,setText]=useState(initial.title||''),[style,setStyle]=useState(initial.style||CHAMPION_STYLE.standard);
  const set=(k,v)=>setStyle(x=>({...x,[k]:v})),setColor=(i,v)=>set('colors',style.colors.map((c,j)=>j===i?v:c));
@@ -220,14 +220,13 @@ function TitleEditor({initial,onSave,onCancel,busy}){
    {style.colors.map((c,i)=><span key={i} className="title-color"><input type="color" value={c} onChange={e=>setColor(i,e.target.value)} aria-label={`Colour ${i+1}`}/>{style.colors.length>1&&<button type="button" className="icon-button" onClick={()=>set('colors',style.colors.filter((_,j)=>j!==i))} aria-label={`Remove colour ${i+1}`}><X size={12}/></button>}</span>)}
    {style.colors.length<3&&<button type="button" className="secondary compact" onClick={()=>set('colors',[...style.colors,style.colors.at(-1)])}><Plus size={13}/>Colour</button>}
   </div></div>
-  <div className="title-row"><span>Effect</span><div className="title-chips">{Object.entries(CHAMPION_STYLE.effects).map(([id,name])=><button type="button" key={id} className={style.effect===id?'active':''} onClick={()=>set('effect',id)}><ChampionTitle title={name} style={{...style,effect:id,font:'bold'}}/></button>)}</div></div>
+  <div className="title-row"><span>Effect</span><div className="title-chips">{Object.entries(CHAMPION_STYLE.effects).map(([id,name])=><button type="button" key={id} className={style.effect===id?'active':''} onClick={()=>set('effect',id)}><ChampionTitle title={name} style={{...style,effect:id}}/></button>)}</div></div>
   <div className="title-row"><span>Background</span><div className="title-colors">
    <label className="title-color named">Base<input type="color" value={bg.colors[0]} onChange={e=>setBg('colors',[e.target.value,bg.colors[1]])}/></label>
    <label className="title-color named">Glow<input type="color" value={bg.colors[1]} onChange={e=>setBg('colors',[bg.colors[0],e.target.value])}/></label>
    <button type="button" className="secondary compact" onClick={()=>setBg('colors',[shade(style.colors.at(-1),-.78),style.colors[0]])}>Match my title</button>
   </div></div>
   <div className="title-row"><span></span><div className="title-chips">{Object.entries(CHAMPION_STYLE.backgrounds).map(([id,name])=><button type="button" key={id} className={bg.effect===id?'active':''} onClick={()=>setBg('effect',id)}>{name}</button>)}</div></div>
-  <div className="title-row"><span>Lettering</span><div className="title-chips">{Object.entries(CHAMPION_STYLE.fonts).map(([id,name])=><button type="button" key={id} className={style.font===id?'active':''} onClick={()=>set('font',id)}><ChampionTitle title={name} style={{...style,effect:'solid',font:id}}/></button>)}</div></div>
   <div className="admin-buttons"><button className="primary compact" disabled={busy||!text.trim()}>Save title</button><button type="button" className="text-button" onClick={onCancel}>Cancel</button></div>
  </form>;
 }

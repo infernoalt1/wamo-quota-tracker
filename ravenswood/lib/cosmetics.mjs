@@ -97,13 +97,12 @@ export const ITEMS = Object.freeze([
 function chroma(set, tint, pieces) {
   return pieces.map(([kind, name, blurb, fx]) => ({ id: kind === 'frame' ? set : `${set}_${{ color: 'ink' }[kind] || kind}`, kind, name, tier: 'chroma', chest: true, set, tint, ...(fx ? { fx } : {}), blurb }));
 }
-// The weekly champion's own title: any colours (one to three), one effect and one lettering.
+// The champion's own title: any colours (one to three) and an effect, always in the page's italic.
 export const CHAMPION_STYLE = Object.freeze({
   effects: Object.freeze({ solid: 'Solid', gradient: 'Gradient', shift: 'Shifting', glow: 'Glow', pulse: 'Pulse', shimmer: 'Shimmer', flicker: 'Flicker', rainbow: 'Rainbow', wave: 'Wave' }),
-  fonts: Object.freeze({ serif: 'Classic', italic: 'Italic', bold: 'Bold', caps: 'Capitals' }),
   // The card and banner behind the title: a base colour, a glow colour and an effect.
   backgrounds: Object.freeze({ radiant: 'Radiant', shine: 'Shine', stars: 'Stars', still: 'Still' }),
-  standard: Object.freeze({ colors: ['#f2c35b', '#fff2c4', '#c9963f'], effect: 'shift', font: 'serif', bg: Object.freeze({ colors: ['#2b1e10', '#f2c35b'], effect: 'radiant' }) }),
+  standard: Object.freeze({ colors: ['#f2c35b', '#fff2c4', '#c9963f'], effect: 'shift', bg: Object.freeze({ colors: ['#2b1e10', '#f2c35b'], effect: 'radiant' }) }),
   maxLength: 24,
 });
 const hexes = (list, max) => Array.isArray(list) ? list.filter(c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)).slice(0, max).map(c => c.toLowerCase()) : [];
@@ -113,7 +112,6 @@ export function championStyleOf(raw) {
     bg: { colors: bg.length === 2 ? bg : [...base.colors], effect: Object.hasOwn(CHAMPION_STYLE.backgrounds, raw?.bg?.effect) ? raw.bg.effect : base.effect },
     colors: colors.length ? colors : [...CHAMPION_STYLE.standard.colors],
     effect: Object.hasOwn(CHAMPION_STYLE.effects, raw?.effect) ? raw.effect : CHAMPION_STYLE.standard.effect,
-    font: Object.hasOwn(CHAMPION_STYLE.fonts, raw?.font) ? raw.font : CHAMPION_STYLE.standard.font,
   };
 }
 export const ITEM = Object.freeze(Object.fromEntries(ITEMS.map(i => [i.id, i])));

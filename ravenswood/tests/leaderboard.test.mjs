@@ -362,7 +362,7 @@ test('a champion’s title is any text up to the limit, and its style keeps only
   assert.equal(championTitleOf('x'),'x');assert.equal(championTitleOf('Ana’s Revenge! 🔥'),'Ana’s Revenge! 🔥');
   assert.equal(championTitleOf('a\u200bb\u0007c'),'abc');
   for(const bad of ['','   ','a'.repeat(25),'\u200b'])assert.throws(()=>championTitleOf(bad),JSON.stringify(bad));
-  assert.deepEqual(championStyleOf({colors:['#FF0000','red','#00ff00','#0000ff','#ffffff'],effect:'wave',font:'caps',bg:{colors:['#101010','#ABCDEF'],effect:'stars'}}),{bg:{colors:['#101010','#abcdef'],effect:'stars'},colors:['#ff0000','#00ff00','#0000ff'],effect:'wave',font:'caps'});
+  assert.deepEqual(championStyleOf({colors:['#FF0000','red','#00ff00','#0000ff','#ffffff'],effect:'wave',font:'caps',bg:{colors:['#101010','#ABCDEF'],effect:'stars'}}),{bg:{colors:['#101010','#abcdef'],effect:'stars'},colors:['#ff0000','#00ff00','#0000ff'],effect:'wave'});
   assert.deepEqual(championStyleOf({bg:{colors:['#101010'],effect:'boom'}}).bg,{colors:[...CHAMPION_STYLE.standard.bg.colors],effect:'radiant'});
   assert.deepEqual(championStyleOf({colors:'#fff',effect:'explode',font:'__proto__'}),{...CHAMPION_STYLE.standard,colors:[...CHAMPION_STYLE.standard.colors],bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]}});
   assert.deepEqual(championStyleOf(null),championStyleOf({}));
@@ -384,7 +384,7 @@ test('the board ranks this round’s points, last round’s winner is champion, 
     assert.equal((await bo.call('/leaderboard/champion-title',{title:'Not me'})).status,403);
     assert.equal((await ana.call('/leaderboard/champion-title',{title:''})).status,400);
     r=await ana.call('/leaderboard/champion-title',{title:'Queen of Ravenswood',style:{colors:['#ff0000','#0000ff'],effect:'glow',font:'bold'}});assert.equal(r.status,200);assert.equal(r.data.champion.title,'Queen of Ravenswood');
-    assert.deepEqual(r.data.champion.style,{bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]},colors:['#ff0000','#0000ff'],effect:'glow',font:'bold'});
+    assert.deepEqual(r.data.champion.style,{bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]},colors:['#ff0000','#0000ff'],effect:'glow'});
     assert.equal((await bo.call('/leaderboard/champion-title',{clear:true})).status,403);
     r=await boss.call('/leaderboard/champion-title',{clear:true});assert.equal(r.status,200);assert.equal(r.data.champion.title,null);
     // An alt is left off every board and can't be champion.
