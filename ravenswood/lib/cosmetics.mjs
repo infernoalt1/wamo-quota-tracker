@@ -2,7 +2,8 @@
 import { ROLES } from './characters.mjs';
 
 // Points for each finished game that counts on the leaderboard. Winning is worth the most.
-export const POINTS = Object.freeze({ finish: 5, win: 25, demon: 10, daily: 15 });
+// A win streak adds `streak` more points for each win in a row before this one, up to `streakMax` a win.
+export const POINTS = Object.freeze({ finish: 5, win: 25, demon: 10, daily: 15, streak: 15, streakMax: 75 });
 
 export const KINDS = Object.freeze({ frame: 'Frames', color: 'Name colours', title: 'Titles', hand: 'Vote hands', mark: 'Death marks' });
 export const TIERS = Object.freeze({ common: 'Common', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', chroma: 'Chroma', unlock: 'Earned' });
@@ -15,13 +16,6 @@ export const UNLOCKS = Object.freeze({
   saint_win: { goal: 1, text: 'Win a game as the Saint', counts: r => r.won && r.initial_role === 'saint' },
   minion_wins: { goal: 5, text: 'Win 5 games as a Minion', counts: r => r.won && ROLES[r.initial_role]?.type === 'minion' },
   veteran: { goal: 50, text: 'Play 50 games', counts: () => true },
-  // The goddess titles.
-  artemis: { goal: 10, text: 'Win 10 games on the good team and live to see it', counts: r => r.won && !r.evil && r.survived },
-  athena: { goal: 15, text: 'Win 15 games as a Townsfolk', counts: r => r.won && ROLES[r.initial_role]?.type === 'townsfolk' },
-  eris: { goal: 5, text: 'Win 5 games as an Outsider', counts: r => r.won && ROLES[r.initial_role]?.type === 'outsider' },
-  hecate: { goal: 3, text: 'Win 3 games as the Poisoner or the Pukka', counts: r => r.won && ['poisoner', 'pukka'].includes(r.initial_role) },
-  nyx: { goal: 15, text: 'Win 15 games on the evil team', counts: r => r.won && r.evil },
-  persephone: { goal: 10, text: 'Win 10 games after dying', counts: r => r.won && !r.survived },
 });
 
 export const ITEMS = Object.freeze([
@@ -59,15 +53,6 @@ export const ITEMS = Object.freeze([
   { id: 'saint', kind: 'title', name: 'The Saint', tier: 'unlock', unlock: 'saint_win', blurb: 'Survived the town’s judgement.' },
   { id: 'mastermind', kind: 'title', name: 'Mastermind', tier: 'unlock', unlock: 'minion_wins', blurb: 'The hand behind the Demon.' },
   { id: 'veteran', kind: 'title', name: 'Veteran', tier: 'unlock', unlock: 'veteran', blurb: 'Fifty stories told.' },
-  // Goddess titles: earned only, each with its own light.
-  ...[
-    ['artemis', 'Artemis', 'The huntress under the moon, still standing when the hunt is over.'],
-    ['athena', 'Athena', 'Wisdom, and the patience to be right.'],
-    ['eris', 'Eris', 'One golden apple, and the whole town at each other’s throats.'],
-    ['hecate', 'Hecate', 'Queen of the crossroads. Mind what you drink.'],
-    ['nyx', 'Nyx', 'Even the Demon is afraid of the night.'],
-    ['persephone', 'Persephone', 'Went down to the underworld, and came back to win.'],
-  ].map(([id, name, blurb]) => ({ id, kind: 'title', name, tier: 'unlock', unlock: id, goddess: true, blurb })),
   // Vote hands: how your raised hand looks, and the effect when it goes up or is counted. `fx` names a particle effect.
   { id: 'gilded_hand', kind: 'hand', name: 'Gilded Hand', tier: 'common', price: 150, fx: 'sparks', tint: ['#fff1c2', '#f2c35b', '#d99a2b'], blurb: 'A shower of gold sparks with every vote.' },
   { id: 'bone_hand', kind: 'hand', name: 'Bone Hand', tier: 'rare', price: 300, fx: 'dust', tint: ['#fff8e8', '#e9dcc0', '#cfc2a4'], blurb: 'Old ivory, and a little dust.' },
@@ -111,6 +96,25 @@ export const ITEMS = Object.freeze([
 // One Chroma set: the frame is named after the set and comes first.
 function chroma(set, tint, pieces) {
   return pieces.map(([kind, name, blurb, fx]) => ({ id: kind === 'frame' ? set : `${set}_${{ color: 'ink' }[kind] || kind}`, kind, name, tier: 'chroma', chest: true, set, tint, ...(fx ? { fx } : {}), blurb }));
+}
+// The weekly champion's own title: any colours (one to three), one effect and one lettering.
+export const CHAMPION_STYLE = Object.freeze({
+  effects: Object.freeze({ solid: 'Solid', gradient: 'Gradient', shift: 'Shifting', glow: 'Glow', pulse: 'Pulse', shimmer: 'Shimmer', flicker: 'Flicker', rainbow: 'Rainbow', wave: 'Wave' }),
+  fonts: Object.freeze({ serif: 'Classic', bold: 'Bold', caps: 'Capitals' }),
+  // The card and banner behind the title: a base colour, a glow colour and an effect.
+  backgrounds: Object.freeze({ radiant: 'Radiant', shine: 'Shine', stars: 'Stars', still: 'Still' }),
+  standard: Object.freeze({ colors: ['#f2c35b', '#fff2c4', '#c9963f'], effect: 'shift', font: 'serif', bg: Object.freeze({ colors: ['#2b1e10', '#f2c35b'], effect: 'radiant' }) }),
+  maxLength: 24,
+});
+const hexes = (list, max) => Array.isArray(list) ? list.filter(c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)).slice(0, max).map(c => c.toLowerCase()) : [];
+export function championStyleOf(raw) {
+  const colors = hexes(raw?.colors, 3), bg = hexes(raw?.bg?.colors, 2), base = CHAMPION_STYLE.standard.bg;
+  return {
+    bg: { colors: bg.length === 2 ? bg : [...base.colors], effect: Object.hasOwn(CHAMPION_STYLE.backgrounds, raw?.bg?.effect) ? raw.bg.effect : base.effect },
+    colors: colors.length ? colors : [...CHAMPION_STYLE.standard.colors],
+    effect: Object.hasOwn(CHAMPION_STYLE.effects, raw?.effect) ? raw.effect : CHAMPION_STYLE.standard.effect,
+    font: Object.hasOwn(CHAMPION_STYLE.fonts, raw?.font) ? raw.font : CHAMPION_STYLE.standard.font,
+  };
 }
 export const ITEM = Object.freeze(Object.fromEntries(ITEMS.map(i => [i.id, i])));
 export const SETS = Object.freeze(Object.fromEntries(ITEMS.filter(i => i.set && i.kind === 'frame').map(i => [i.set, { id: i.set, name: i.name, tint: i.tint, items: ITEMS.filter(x => x.set === i.set).map(x => x.id) }])));

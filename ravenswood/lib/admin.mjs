@@ -37,7 +37,7 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
       max:GRANT.max,recallPer:RECALL.per,
       chromas:chromas.map(c=>({username:c.username,sets:[...new Set(c.items.map(setOf))].sort()})),
       grants:grants.map(g=>({to:g.to,by:g.by,amount:g.amount,at:time(g.at)})),
-      players:rows.map(r=>{const held=heldFor(r.id);return {username:r.username,balance:r.earned-r.spent+r.adjust-held,held,earned:r.earned,spent:r.spent,games:r.games,joined:time(r.created_at)};}),
+      players:rows.map(r=>{const held=heldFor(r.id);return {username:r.username,alt:!!r.alt,balance:r.earned-r.spent+r.adjust-held,held,earned:r.earned,spent:r.spent,games:r.games,joined:time(r.created_at)};}),
     };
   }
   router.get('/admin',handle(async(req,res)=>res.json(await overview())));
@@ -47,7 +47,7 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
     const [wallet,rows,totals]=await Promise.all([store.wallet(p.id),store.activity(p.id),store.activityTotals(p.id)]);
     const held=heldFor(p.id);
     res.json({player:{
-      username:p.username,balance:wallet.earned-wallet.spent+(wallet.adjust||0)-held,held,owned:wallet.owned,
+      username:p.username,alt:!!p.alt,balance:wallet.earned-wallet.spent+(wallet.adjust||0)-held,held,owned:wallet.owned,
       totals:Object.fromEntries(totals.map(t=>[t.kind,{n:t.n,total:t.total}])),
       activity:rows.map(r=>({kind:r.kind,delta:r.delta,item:r.item??null,other:r.other??null,won:r.won??null,script:r.script??null,at:time(r.at)})),
     }});
@@ -66,6 +66,14 @@ export function mountAdmin(router,{store,identity,admins=adminKeys(),heldFor=()=
     if(!Number.isInteger(per)||per<0||per>GRANT.max)throw refuse(`Pay between 0 and ${GRANT.max} points for each set.`);
     const recalled=await store.recallChromas({items:CHROMA,setOf,by:account.id,per});
     res.json({...await overview(),recalled});
+  }));
+  // Mark (or unmark) a spare account as an alt: it can't join, start or watch games, or bet.
+  router.post('/admin/alt',handle(async(req,res,account)=>{
+    const p=await playerNamed(req.body?.username);
+    if(typeof req.body?.alt!=='boolean')throw refuse('Say whether this is an alt account.');
+    if(p.id===account.id&&req.body.alt)throw refuse('You can’t mark your own account as an alt.');
+    await store.setAlt(p.id,req.body.alt);
+    res.json({...await overview(),alt:{username:p.username,alt:req.body.alt}});
   }));
   // A player who forgot their password gets a new one: the admin's choice, or a random one. It is shown once, for the admin to pass on.
   router.post('/admin/reset',handle(async(req,res,account)=>{

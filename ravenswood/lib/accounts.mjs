@@ -7,7 +7,7 @@ import { lookOf } from './cosmetics.mjs';
 const MAX_PICTURE=48*1024;
 const MINUTE=60*1000;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
-const COLUMNS='id,username,password_hash,session,avatar_version,avatar IS NOT NULL AS pictured,look';
+const COLUMNS='id,username,password_hash,session,avatar_version,avatar IS NOT NULL AS pictured,look,alt';
 const SCHEMA=`CREATE TABLE IF NOT EXISTS botc_accounts(
   id UUID PRIMARY KEY,
   username TEXT NOT NULL,
@@ -56,7 +56,19 @@ CREATE TABLE IF NOT EXISTS botc_ledger(
   item TEXT,
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS botc_ledger_account ON botc_ledger(account_id,at)`;
+CREATE INDEX IF NOT EXISTS botc_ledger_account ON botc_ledger(account_id,at);
+CREATE TABLE IF NOT EXISTS botc_champions(
+  week TIMESTAMPTZ PRIMARY KEY,
+  account_id UUID NOT NULL REFERENCES botc_accounts(id) ON DELETE CASCADE,
+  title TEXT,
+  style JSONB,
+  set_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- An alt is a spare account an admin has marked: it can't join, start or watch games, or bet.
+ALTER TABLE botc_accounts ADD COLUMN IF NOT EXISTS alt BOOLEAN NOT NULL DEFAULT false`;
+// A win streak is every win since the account's last loss.
+const STREAK=`SELECT a.id,a.username,count(*)::int AS streak FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts a ON a.id=p.account_id
+  WHERE p.won AND g.ended_at>coalesce((SELECT max(g2.ended_at) FROM botc_game_players p2 JOIN botc_games g2 ON g2.id=p2.game_id WHERE p2.account_id=p.account_id AND NOT p2.won),'-infinity'::timestamptz)`;
 // A balance is what games earned, less what was bought, plus everything in the ledger (chests, gifts and bets).
 const BALANCE=`(SELECT coalesce(sum(points),0)::int FROM botc_game_players WHERE account_id=$1)
   -(SELECT coalesce(sum(price),0)::int FROM botc_items WHERE account_id=$1)
@@ -106,6 +118,17 @@ export function pgStore(pool){
         [id,script,winner,reason,size,JSON.stringify(players.map(p=>({account_id:p.account,role:p.role,initial_role:p.initialRole,evil:p.evil,won:p.won,survived:p.survived,demon:p.demon,points:p.points||0})))]);
     },
     totals:script=>query(TOTALS,[script||null]),
+    // Points, games and wins per account for games that ended in [from, to).
+    weekly:(from,to)=>query(`SELECT a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,a.look,
+      coalesce(sum(p.points),0)::int AS points,count(*)::int AS games,count(*) FILTER(WHERE p.won)::int AS wins
+      FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id JOIN botc_accounts a ON a.id=p.account_id
+      WHERE g.ended_at>=$1 AND g.ended_at<$2 GROUP BY a.id`,[from,to]),
+    streaksOf:async ids=>new Map((await query(STREAK+' AND p.account_id=ANY($1::uuid[]) GROUP BY a.id,a.username',[ids])).map(r=>[r.id,r.streak])),
+    streaks:min=>query(STREAK+' GROUP BY a.id,a.username HAVING count(*)>=$1',[min]),
+    // The title a week's champion wrote for themself.
+    champion:week=>one('SELECT account_id,title,style FROM botc_champions WHERE week=$1',[week]),
+    setChampion:(week,id,title,style)=>query('INSERT INTO botc_champions(week,account_id,title,style) VALUES($1,$2,$3,$4) ON CONFLICT(week) DO UPDATE SET account_id=$2,title=$3,style=$4,set_at=now()',[week,id,title,style&&JSON.stringify(style)]),
+    setAlt:(id,alt)=>query('UPDATE botc_accounts SET alt=$2 WHERE id=$1',[id,alt]),
     history:id=>query(`SELECT g.script,g.ended_at,g.players,p.role,p.initial_role,p.evil,p.won,p.survived,p.demon
       FROM botc_game_players p JOIN botc_games g ON g.id=p.game_id WHERE p.account_id=$1 ORDER BY g.ended_at DESC`,[id]),
     setLook:(id,look)=>one(`UPDATE botc_accounts SET look=$2 WHERE id=$1 RETURNING ${COLUMNS}`,[id,look&&JSON.stringify(look)]),
@@ -178,7 +201,7 @@ export function pgStore(pool){
     grants:()=>query(`SELECT t.username AS "to",b.username AS "by",l.delta AS amount,l.at FROM botc_ledger l
       JOIN botc_accounts t ON t.id=l.account_id LEFT JOIN botc_accounts b ON b.id=l.other_id WHERE l.kind='grant' ORDER BY l.at DESC LIMIT 20`),
     // Every account's points, for the admin page.
-    balances:()=>query(`SELECT a.id,a.username,a.created_at,coalesce(g.earned,0)::int AS earned,coalesce(g.games,0)::int AS games,
+    balances:()=>query(`SELECT a.id,a.username,a.created_at,a.alt,coalesce(g.earned,0)::int AS earned,coalesce(g.games,0)::int AS games,
       coalesce(i.spent,0)::int AS spent,coalesce(l.adjust,0)::int AS adjust FROM botc_accounts a
       LEFT JOIN (SELECT account_id,sum(points) AS earned,count(*) AS games FROM botc_game_players GROUP BY account_id) g ON g.account_id=a.id
       LEFT JOIN (SELECT account_id,sum(price) AS spent FROM botc_items GROUP BY account_id) i ON i.account_id=a.id
@@ -314,5 +337,10 @@ export function mountAccounts(router,{store,rooms,identity,setSession,admins=new
     if(!store)return {};
     try{const a=await store.bySession(session);return a?{avatar:pictureOf(a),account:a.username,look:lookOf(a.look)}:{};}catch{return {};}
   }
-  return {seatFor,eachSeat};
+  // An account marked as an alt can't take part in games.
+  async function refuseAlt(session){
+    const a=store&&session?await store.bySession(session).catch(()=>null):null;
+    if(a?.alt)throw refuse('This account is marked as an alt, so it can’t join games. Ask an admin if this is a mistake.',403);
+  }
+  return {seatFor,eachSeat,refuseAlt};
 }

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { results } from './engine.mjs';
 import { SCRIPTS } from './characters.mjs';
 import { pictureOf, keyOf, usernameOf } from './accounts.mjs';
-import { POINTS, lookOf } from './cosmetics.mjs';
+import { adminKeys } from './admin.mjs';
+import { POINTS, lookOf, CHAMPION_STYLE, championStyleOf } from './cosmetics.mjs';
 
 // With fewer accounts at the table, one person with several browser profiles could farm wins.
 export const MIN_ACCOUNTS=3;
@@ -11,13 +12,29 @@ export const MIN_ACCOUNTS=3;
 const tally=rows=>({games:rows.length,wins:rows.filter(r=>r.won).length});
 // The daily bonus resets at midnight UTC, the same moment for everyone.
 export const dayStart=(now=Date.now())=>new Date(Math.floor(now/86400000)*86400000);
+// The weekly board resets at midnight UTC on Monday (1 January 1970 was a Thursday).
+const DAY=86400000,WEEK=7*DAY;
+export const weekStart=(now=Date.now())=>{const day=Math.floor(now/DAY);return new Date((day-(day+3)%7)*DAY);};
+// Each win in a row is worth more than the last. `before` is how many wins in a row came before this one.
+export const streakBonus=before=>Math.min(POINTS.streakMax,POINTS.streak*before);
 // Points for one player's game, itemised so the end screen can explain them.
-export function pointsFor(p,firstWinToday){
+export function pointsFor(p,firstWinToday,streak=0){
   const parts=[['Finished the game',POINTS.finish]];
   if(p.won)parts.push(['Your team won',POINTS.win]);
   if(p.won&&p.demon)parts.push(['Won as the Demon',POINTS.demon]);
   if(p.won&&firstWinToday)parts.push(['First win today',POINTS.daily]);
+  if(p.won&&streak>0)parts.push([`${streak+1} wins in a row`,streakBonus(streak)]);
   return {total:parts.reduce((n,[,v])=>n+v,0),parts};
+}
+// The weekly board: most points first, then most wins, then fewest games.
+const byPoints=(a,b)=>b.points-a.points||b.wins-a.wins||a.games-b.games||a.username.localeCompare(b.username);
+const entry=t=>({username:t.username,avatar:pictureOf(t),look:lookOf(t.look),points:t.points,games:t.games,wins:t.wins});
+const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
+// The champion writes their own title: any text up to the limit, with invisible characters taken out.
+export function championTitleOf(value){
+  const v=String(value??'').normalize('NFKC').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim();
+  if(!v||[...v].length>CHAMPION_STYLE.maxLength)throw refuse(`Titles are 1–${CHAMPION_STYLE.maxLength} characters.`);
+  return v;
 }
 const scriptOf=value=>value&&value!=='all'?(Object.hasOwn(SCRIPTS,value)?value:null):undefined;
 
@@ -41,8 +58,7 @@ function profileOf(account,rows){
 }
 
 // `onRecorded(game,status)` hears how each finished game ended up: saved, skipped, called or failed.
-export function mountLeaderboard(router,{store,rooms,onRecorded=()=>{}}){
-  const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
+export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=adminKeys(),clock=Date.now,onRecorded=()=>{}}){
   const handle=fn=>async(req,res)=>{try{
     if(!store)throw refuse('The leaderboard is not set up on this server.',503);
     await fn(req,res);
@@ -58,6 +74,35 @@ export function mountLeaderboard(router,{store,rooms,onRecorded=()=>{}}){
     res.json({minAccounts:MIN_ACCOUNTS,player:profileOf(account,await store.history(account.id))});
   }));
 
+  // This week's board, last week's winner (this week's champion) and everyone on a win streak of two or more.
+  async function week(){
+    const start=weekStart(clock()),end=new Date(start.getTime()+WEEK),last=new Date(start.getTime()-WEEK);
+    const [rows,prev,streaks,crowned]=await Promise.all([store.weekly(start,end),store.weekly(last,start),store.streaks(2),store.champion(start)]);
+    const top=prev.sort(byPoints)[0]||null;
+    return {start:start.getTime(),ends:end.getTime(),players:rows.sort(byPoints).slice(0,10).map(entry),
+      champion:top&&{...entry(top),...(crowned?.account_id===top.id?{title:crowned.title,style:crowned.style&&championStyleOf(crowned.style)}:{title:null,style:null})},
+      streaks:Object.fromEntries(streaks.map(s=>[s.username,s.streak]))};
+  }
+  router.get('/leaderboard/week',handle(async(req,res)=>res.json(await week())));
+  // Seated in a game being played: the champion's title can't change then, so it can never carry a signal mid-game.
+  const playing=session=>[...rooms.values()].some(room=>{if(!room.state.includes(session))return false;const g=JSON.parse(room.state);return !['lobby','ended'].includes(g.phase)&&g.players.some(p=>p.session===session);});
+  router.post('/leaderboard/champion-title',handle(async(req,res)=>{
+    if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw refuse('Use the game website to change your title.',403);
+    const session=identity(req),account=session?await store.bySession(session):null;
+    if(!account)throw refuse('Log in first.',401);
+    const start=weekStart(clock()),top=(await store.weekly(new Date(start.getTime()-WEEK),start)).sort(byPoints)[0];
+    // An admin can clear a title nobody should see.
+    if(req.body?.clear){
+      if(!admins.has(keyOf(account.username)))throw refuse('Only an admin can clear the champion’s title.',403);
+      if(top)await store.setChampion(start,top.id,null,null);
+      return res.json(await week());
+    }
+    if(top?.id!==account.id)throw refuse('Only this week’s champion can write the title.',403);
+    if(playing(session))throw refuse('Change your title between games.');
+    await store.setChampion(start,account.id,championTitleOf(req.body?.title),championStyleOf(req.body?.style));
+    res.json(await week());
+  }));
+
   // Rewrite a room's saved state, but only while it still holds the same finished game.
   function settle(code,id,change){
     const room=rooms.get(code);if(!room)return;
@@ -70,7 +115,8 @@ export function mountLeaderboard(router,{store,rooms,onRecorded=()=>{}}){
       const players=rows.filter(r=>accounts.has(r.session)).map(({session,...r})=>({...r,account:accounts.get(session)}));
       if(players.length<MIN_ACCOUNTS){settle(code,id,l=>{l.status='skipped';});onRecorded(game,'skipped');return;}
       const wonToday=await store.wonSince(players.filter(p=>p.won).map(p=>p.account),dayStart());
-      const earned=new Map(players.map(p=>[p.account,pointsFor(p,!wonToday.has(p.account))]));
+      const streaks=await store.streaksOf(players.filter(p=>p.won).map(p=>p.account));
+      const earned=new Map(players.map(p=>[p.account,pointsFor(p,!wonToday.has(p.account),p.won?streaks.get(p.account)||0:0)]));
       players.forEach(p=>{p.points=earned.get(p.account).total;});
       await store.saveGame({id,script:game.settings.script,winner:game.winner,reason:game.reason,size:rows.length,players});
       settle(code,id,l=>{

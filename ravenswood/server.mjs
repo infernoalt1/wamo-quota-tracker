@@ -51,7 +51,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys
   router.use(express.json({limit:'4kb'}));
   const accounts=mountAccounts(router,{store,rooms,identity,setSession,admins});
   const bets=createBets({store});
-  const leaderboard=mountLeaderboard(router,{store,rooms,onRecorded:(game,status)=>bets.settle(game,status)});
+  const leaderboard=mountLeaderboard(router,{store,rooms,identity,admins,clock,onRecorded:(game,status)=>bets.settle(game,status)});
   mountShop(router,{store,identity,accounts,heldFor:bets.heldFor,clock});
   mountAdmin(router,{store,identity,admins,heldFor:bets.heldFor});
   // A logged-in spectator stakes points on which team wins the game they are watching.
@@ -60,6 +60,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys
     if(!store)return res.status(503).json({error:'Betting is not set up on this server.'});
     const session=identity(req),account=session?await store.bySession(session):null;
     if(!account)return res.status(401).json({error:'Log in to bet points.'});
+    await accounts.refuseAlt(session);
     const code=codeOf(req.body?.code),game=load(code);
     await bets.place(game,session,account,req.body?.team,req.body?.stake);
     send(req,res,game,session);
@@ -90,6 +91,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys
     if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return res.status(403).json({error:'Use the game website to submit actions.'});
     const data=req.body,session=identity(req)||randomUUID();
     setSession(req,res,session);
+    if(['create','join','spectate'].includes(data.type))await accounts.refuseAlt(session);
     const {avatar=null,...who}=['create','join'].includes(data.type)?await accounts.seatFor(session):{};
     if(data.type==='create'){
       const name=nameOf(data.name);

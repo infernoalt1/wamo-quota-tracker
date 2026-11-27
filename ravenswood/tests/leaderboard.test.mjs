@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { newGame, join, spectate, start, act, kill, view, results } from '../lib/engine.mjs';
-import { mountLeaderboard } from '../lib/leaderboard.mjs';
+import { mountLeaderboard, pointsFor, weekStart, championTitleOf } from '../lib/leaderboard.mjs';
 import { keyOf } from '../lib/accounts.mjs';
 import { botcApi } from '../server.mjs';
-import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, SETS, rollChest } from '../lib/cosmetics.mjs';
+import { lookOf, progressOf, ITEM, CHEST, CHEST_ITEMS, SETS, rollChest, championStyleOf, CHAMPION_STYLE } from '../lib/cosmetics.mjs';
 import { createBets } from '../lib/bets.mjs';
 import { adminKeys, GRANT } from '../lib/admin.mjs';
 
@@ -35,7 +35,7 @@ function memoryStore(){
     async recallChromas({items,setOf,by,per}){const out=[];for(const a of accounts){const mine=this.items.filter(i=>i.account===a.id&&items.includes(i.item)).map(i=>i.item);if(!mine.length)continue;const sets=[...new Set(mine.map(setOf))].sort();this.items=this.items.filter(i=>!(i.account===a.id&&items.includes(i.item)));const look=Object.fromEntries(Object.entries(a.look||{}).filter(([,v])=>!items.includes(v)));a.look=Object.keys(look).length?look:null;for(const set of sets)this.ledger.push({account:a.id,delta:per,kind:'recall',other:by,item:set,at:new Date()});out.push({username:a.username,sets,amount:per*sets.length});}return out.sort((x,y)=>x.username.localeCompare(y.username));},
     async grant({to,by,amount}){this.ledger.push({account:to,delta:amount,kind:'grant',other:by,at:new Date()});},
     async grants(){return this.ledger.filter(l=>l.kind==='grant').reverse().slice(0,20).map(l=>({to:accounts.find(a=>a.id===l.account).username,by:accounts.find(a=>a.id===l.other)?.username,amount:l.delta,at:l.at}));},
-    async balances(){return Promise.all(accounts.map(async a=>{const w=await this.wallet(a.id);return {id:a.id,username:a.username,created_at:new Date(),earned:w.earned,spent:w.spent,adjust:w.adjust,games:rows.filter(r=>r.account===a.id).length};}));},
+    async balances(){return Promise.all(accounts.map(async a=>{const w=await this.wallet(a.id);return {id:a.id,username:a.username,alt:!!a.alt,created_at:new Date(),earned:w.earned,spent:w.spent,adjust:w.adjust,games:rows.filter(r=>r.account===a.id).length};}));},
     async activity(id){const name=x=>accounts.find(a=>a.id===x)?.username??null;return [
       ...rows.filter(r=>r.account===id).map(r=>({kind:'game',delta:r.points||0,item:r.initialRole,won:r.won,script:games.find(g=>g.id===r.game_id).script,at:games.find(g=>g.id===r.game_id).ended_at})),
       ...this.items.filter(i=>i.account===id&&i.price>0).map(i=>({kind:'buy',delta:-i.price,item:i.item,at:new Date(0)})),
@@ -50,6 +50,20 @@ function memoryStore(){
       const n=(list,f)=>list.filter(f).length;
       return [...by].map(([id,list])=>{const a=accounts.find(x=>x.id===id);return {id,username:a.username,avatar_version:a.avatar_version,pictured:a.pictured,games:list.length,wins:n(list,r=>r.won),good_games:n(list,r=>!r.evil),good_wins:n(list,r=>!r.evil&&r.won),evil_games:n(list,r=>r.evil),evil_wins:n(list,r=>r.evil&&r.won),demon_wins:n(list,r=>r.demon&&r.won)};});
     },
+    // Rows with their game's end time, newest first.
+    playedRows(){return rows.map(r=>({...r,ended_at:games.find(g=>g.id===r.game_id).ended_at})).sort((a,b)=>b.ended_at-a.ended_at);},
+    async weekly(from,to){
+      const by=new Map();
+      for(const r of this.playedRows())if(r.ended_at>=from&&r.ended_at<to){const t=by.get(r.account)||{points:0,games:0,wins:0};t.points+=r.points||0;t.games++;t.wins+=r.won?1:0;by.set(r.account,t);}
+      return [...by].map(([id,t])=>{const a=accounts.find(x=>x.id===id);return {id,username:a.username,avatar_version:a.avatar_version,pictured:a.pictured,look:a.look,...t};});
+    },
+    streakOf(id){let n=0;for(const r of this.playedRows().filter(r=>r.account===id)){if(!r.won)break;n++;}return n;},
+    async streaksOf(ids){return new Map(ids.map(id=>[id,this.streakOf(id)]).filter(([,n])=>n));},
+    async streaks(min){return accounts.map(a=>({id:a.id,username:a.username,streak:this.streakOf(a.id)})).filter(s=>s.streak>=min);},
+    champions:[],
+    async champion(week){return this.champions.find(c=>c.week.getTime()===week.getTime())||null;},
+    async setChampion(week,id,title,style){this.champions=this.champions.filter(c=>c.week.getTime()!==week.getTime());this.champions.push({week,account_id:id,title,style});},
+    async setAlt(id,alt){accounts.find(a=>a.id===id).alt=alt;},
     async history(id){
       return rows.filter(r=>r.account===id).map(r=>{const g=games.find(x=>x.id===r.game_id);return {script:g.script,ended_at:g.ended_at,players:g.size,role:r.role,initial_role:r.initialRole,evil:r.evil,won:r.won,survived:r.survived,demon:r.demon};}).sort((a,b)=>b.ended_at-a.ended_at);
     },
@@ -219,7 +233,7 @@ test('decorations that no longer exist simply disappear',()=>{
   assert.equal(progressOf([{won:true,demon:true,evil:true,survived:false,initial_role:'imp'}]).demon_wins,1);
 });
 
-async function shop(clock=()=>Date.UTC(2026,0,15)){
+async function shop(clock=()=>Date.UTC(2026,0,15)){ // a Thursday
   const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store,admins:adminKeys(' Boss , '),clock}));
   const server=await new Promise(done=>{const s=app.listen(0,'127.0.0.1',()=>done(s));});
   const base=`http://127.0.0.1:${server.address().port}/botc/api/game`;
@@ -283,10 +297,12 @@ shopTest('a chest costs points and gives a random decoration; chest-only items c
   const got=ITEM[r.data.opened.item];assert(got&&(got.price||got.chest));assert.equal(r.data.opened.duplicate,false);
   assert.equal(r.data.balance,150-CHEST.price);assert(r.data.owned.includes(got.id));
   assert.equal((await call('/shop/chest',{})).status,400);
-  assert.equal((await call('/shop/equip',{kind:'frame',item:'eclipse'})).status,400);
-  store.items.push({account:account.id,item:'eclipse',price:0});
-  assert.equal((await call('/shop/equip',{kind:'frame',item:'eclipse'})).status,200);
-  assert.equal((await call('/shop/buy',{item:'eclipse'})).status,400);
+  // A chest-only frame the chest did not just give.
+  const other=['eclipse','frost','raven'].find(id=>!r.data.owned.includes(id));
+  assert.equal((await call('/shop/equip',{kind:'frame',item:other})).status,400);
+  store.items.push({account:account.id,item:other,price:0});
+  assert.equal((await call('/shop/equip',{kind:'frame',item:other})).status,200);
+  assert.equal((await call('/shop/buy',{item:other})).status,400);
 });
 test('a duplicate from a chest refunds part of the price instead',async()=>{
   const store=memoryStore(),ana=store.add('Ana');await played(store,ana,20,20,{points:30});
@@ -308,6 +324,70 @@ test('a sale takes its share off items and chests, cuts the duplicate refund too
     r=await call('/shop');assert.equal(r.data.sale,null);assert.equal(r.data.chest.price,CHEST.price);
     r=await call('/shop/buy',{item:'moon',price:270});assert.equal(r.status,409);assert.match(r.data.error,/sale has ended/);
   }finally{s.close();}
+});
+test('each win in a row is worth more than the last, up to a cap',()=>{
+  assert.equal(pointsFor({won:true},false).total,30);
+  assert.deepEqual(pointsFor({won:true},false,1).parts.at(-1),['2 wins in a row',15]);
+  assert.equal(pointsFor({won:true},false,3).total,30+45);
+  assert.equal(pointsFor({won:true},false,20).total,30+75);
+  assert.equal(pointsFor({won:false},false,4).total,5);
+});
+test('a game won on a streak pays the streak bonus, and a loss ends the streak',async()=>{
+  const store=memoryStore();
+  const ana=store.add('Ana');['Bo','Cy','Di','Ed'].forEach(n=>store.add(n));
+  await played(store,ana,2,2);
+  assert.equal(store.streakOf(ana.id),2);
+  assert.deepEqual((await store.streaksOf([ana.id])).get(ana.id),2);
+  await played(store,ana,1,0);
+  assert.equal(store.streakOf(ana.id),0);
+});
+test('weeks start at midnight UTC on Monday',()=>{
+  assert.equal(weekStart(Date.UTC(2026,10,27,18)).toISOString(),'2026-11-23T00:00:00.000Z');
+  assert.equal(weekStart(Date.UTC(2026,10,23)).toISOString(),'2026-11-23T00:00:00.000Z');
+  assert.equal(weekStart(Date.UTC(2026,10,22,23,59)).toISOString(),'2026-11-16T00:00:00.000Z');
+});
+test('a champion’s title is any text up to the limit, and its style keeps only real colours, effects and letterings',()=>{
+  assert.equal(championTitleOf('  The   Unbeatable '),'The Unbeatable');
+  assert.equal(championTitleOf('x'),'x');assert.equal(championTitleOf('Ana’s Revenge! 🔥'),'Ana’s Revenge! 🔥');
+  assert.equal(championTitleOf('a\u200bb\u0007c'),'abc');
+  for(const bad of ['','   ','a'.repeat(25),'\u200b'])assert.throws(()=>championTitleOf(bad),JSON.stringify(bad));
+  assert.deepEqual(championStyleOf({colors:['#FF0000','red','#00ff00','#0000ff','#ffffff'],effect:'wave',font:'caps',bg:{colors:['#101010','#ABCDEF'],effect:'stars'}}),{bg:{colors:['#101010','#abcdef'],effect:'stars'},colors:['#ff0000','#00ff00','#0000ff'],effect:'wave',font:'caps'});
+  assert.deepEqual(championStyleOf({bg:{colors:['#101010'],effect:'boom'}}).bg,{colors:[...CHAMPION_STYLE.standard.bg.colors],effect:'radiant'});
+  assert.deepEqual(championStyleOf({colors:'#fff',effect:'explode',font:'__proto__'}),{...CHAMPION_STYLE.standard,colors:[...CHAMPION_STYLE.standard.colors],bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]}});
+  assert.deepEqual(championStyleOf(null),championStyleOf({}));
+});
+test('the weekly board ranks this week’s points, last week’s winner is champion, and only they can write the title',async()=>{
+  const now=Date.UTC(2026,10,27,18),lastWeek=new Date(Date.UTC(2026,10,18,12)),thisWeek=new Date(Date.UTC(2026,10,24,12));
+  const s=await shop(()=>now);
+  try{
+    const ana=await s.member('Ana'),bo=await s.member('Bo'),boss=await s.member('Boss');
+    await played(s.store,ana.account,2,2,{points:30});await played(s.store,bo.account,1,1,{points:30});
+    s.store.games.forEach(g=>{g.ended_at=lastWeek;});
+    await played(s.store,bo.account,3,1,{points:20});
+    s.store.games.slice(3).forEach(g=>{g.ended_at=thisWeek;});
+    let r=await ana.call('/leaderboard/week');
+    assert.equal(r.status,200);assert.equal(r.data.start,Date.UTC(2026,10,23));assert.equal(r.data.ends,Date.UTC(2026,10,30));
+    assert.deepEqual(r.data.players.map(p=>[p.username,p.points,p.games,p.wins]),[['Bo',60,3,1]]);
+    assert.equal(r.data.champion.username,'Ana');assert.equal(r.data.champion.title,null);assert.equal(r.data.champion.points,60);
+    assert.equal((await bo.call('/leaderboard/champion-title',{title:'Not me'})).status,403);
+    assert.equal((await ana.call('/leaderboard/champion-title',{title:''})).status,400);
+    r=await ana.call('/leaderboard/champion-title',{title:'Queen of Ravenswood',style:{colors:['#ff0000','#0000ff'],effect:'glow',font:'bold'}});assert.equal(r.status,200);assert.equal(r.data.champion.title,'Queen of Ravenswood');
+    assert.deepEqual(r.data.champion.style,{bg:{...CHAMPION_STYLE.standard.bg,colors:[...CHAMPION_STYLE.standard.bg.colors]},colors:['#ff0000','#0000ff'],effect:'glow',font:'bold'});
+    assert.equal((await bo.call('/leaderboard/champion-title',{clear:true})).status,403);
+    r=await boss.call('/leaderboard/champion-title',{clear:true});assert.equal(r.status,200);assert.equal(r.data.champion.title,null);
+  }finally{s.close();}
+});
+shopTest('an admin can mark an alt account, which then can’t start, join or watch games, or bet',async({store,member})=>{
+  const boss=await member('Boss'),alt=await member('Spare'),ana=await member('Ana');
+  assert.equal((await ana.call('/admin/alt',{username:'Spare',alt:true})).status,403);
+  assert.equal((await boss.call('/admin/alt',{username:'Boss',alt:true})).status,400);
+  let r=await boss.call('/admin/alt',{username:'Spare',alt:true});assert.equal(r.status,200);assert.equal(r.data.players.find(p=>p.username==='Spare').alt,true);
+  assert.equal((await boss.call('/admin/player?username=Spare')).data.player.alt,true);
+  const code=(await ana.call('/',{type:'create',name:'Ana'})).data.code;
+  for(const body of [{type:'create',name:'Spare'},{type:'join',name:'Spare',code},{type:'spectate',name:'Spare',code}]){r=await alt.call('/',body);assert.equal(r.status,400,body.type);assert.match(r.data.error,/alt/);}
+  r=await alt.call('/bet',{code,team:'good',stake:10});assert.equal(r.status,403);
+  await boss.call('/admin/alt',{username:'Spare',alt:false});
+  assert.equal((await alt.call('/',{type:'join',name:'Spare',code})).status,200);
 });
 test('chest odds follow the published tiers and never give an earned-only item',()=>{
   const seen={};for(let i=0;i<4000;i++){const item=ITEM[rollChest()];assert(!item.unlock);seen[item.tier]=(seen[item.tier]||0)+1;}

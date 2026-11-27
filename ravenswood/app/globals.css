@@ -910,26 +910,6 @@ button.leader-row:hover{background:#ffffff08}
 @keyframes chroma-banner{0%{opacity:0;transform:translate(-50%,-14px) scale(.9)}8%{opacity:1;transform:translate(-50%,0) scale(1.04)}14%{transform:translate(-50%,0) scale(1)}88%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}
 @media(prefers-reduced-motion:reduce){.frame-glass::before,.frame-glass::after,.frame-wisps::before,.frame-kaleido::before,.frame-kaleido::after,.ink-glass_ink,.ink-wisps_ink,.ink-kaleido_ink,.deco-title.tier-chroma,.hand-indicator.hand-glass_hand,.hand-indicator.hand-wisps_hand,.hand-indicator.hand-kaleido_hand,.shop-item.tier-chroma,.chest-panel.tier-chroma{animation:none!important}}
 
-/* Goddess titles: upright capitals, each lit in its own colours. */
-.deco-title.goddess{display:inline-block;font-style:normal;font-weight:700;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding-right:2px;-webkit-background-clip:text;background-clip:text;color:transparent}
-.shop-title-sample .deco-title.goddess{font-size:12px}
-/* Artemis: silver moonlight with a slow gleam. */
-.deco-title.title-artemis{background-image:linear-gradient(105deg,transparent 42%,#ffffff 50%,transparent 58%),linear-gradient(90deg,#aebce6,#eef2ff 40%,#c4d2ff 70%,#aebce6);background-size:300% 100%,100% 100%;background-repeat:no-repeat,repeat;animation:goddess-gleam 5s linear infinite;filter:drop-shadow(0 0 4px #b8c8ff66)}
-/* Athena: gold and olive, a steady shine. */
-.deco-title.title-athena{background-image:linear-gradient(105deg,transparent 42%,#fffbe6 50%,transparent 58%),linear-gradient(90deg,#c9a640,#f4dc8a 35%,#a8b35a 65%,#c9a640);background-size:300% 100%,100% 100%;background-repeat:no-repeat,repeat;animation:goddess-gleam 7s linear infinite;filter:drop-shadow(0 0 3px #e8c66a55)}
-/* Eris: gold and red that now and then jolts. */
-.deco-title.title-eris{background-image:linear-gradient(90deg,#ffd24a,#ff7a3a,#ff3d5a,#ffd24a);background-size:200% 100%;animation:ink-drift 4s linear infinite,eris-jolt 3.7s steps(1) infinite;filter:drop-shadow(0 0 3px #ff5b3a55)}
-/* Hecate: poison green and violet, flickering like a torch at the crossroads. */
-.deco-title.title-hecate{background-image:linear-gradient(90deg,#8dffb0,#3fcf7a 30%,#b77bff 60%,#8dffb0);background-size:200% 100%;animation:ink-drift 6s linear infinite,hecate-flicker 2.3s steps(1) infinite}
-/* Nyx: deep violet night, with starlight passing through. */
-.deco-title.title-nyx{background-image:linear-gradient(90deg,#7a68e0,#b9a8ff 30%,#ffffff 45%,#b9a8ff 60%,#7a68e0);background-size:300% 100%;animation:ink-drift 9s linear infinite,nyx-twinkle 4s ease-in-out infinite}
-/* Persephone: pomegranate red giving way to spring. */
-.deco-title.title-persephone{background-image:linear-gradient(90deg,#ff5c7a,#ffc2d1 30%,#a6eba8 55%,#ff8fa8 80%,#ff5c7a);background-size:200% 100%;animation:ink-drift 8s linear infinite;filter:drop-shadow(0 0 3px #ff7a9455)}
-@keyframes goddess-gleam{0%{background-position:150% 0,0 0}60%,100%{background-position:-50% 0,0 0}}
-@keyframes eris-jolt{0%,88%{transform:none}90%{transform:translate(1px,-1px)}93%{transform:translate(-1px,1px)}96%{transform:none}}
-@keyframes hecate-flicker{0%{filter:drop-shadow(0 0 3px #3fcf7a66)}30%{filter:drop-shadow(0 0 5px #b77bff88)}45%{filter:drop-shadow(0 0 2px #3fcf7a44)}70%{filter:drop-shadow(0 0 6px #8dffb088)}}
-@keyframes nyx-twinkle{0%,100%{filter:drop-shadow(0 0 2px #7a68e055)}50%{filter:drop-shadow(0 0 6px #d9ccffaa)}}
-@media(prefers-reduced-motion:reduce){.deco-title.goddess{animation:none!important}}
 
 /* A sale: a black and gold banner in the shop, and the usual price struck through. */
 .sale-banner{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 14px;padding:10px 14px;border:1px solid #f2c35b66;border-radius:10px;background:linear-gradient(90deg,#0b0a0d,#1d1710 60%,#0b0a0d);box-shadow:0 0 18px #f2c35b22 inset}
@@ -938,3 +918,139 @@ button.leader-row:hover{background:#ffffff08}
 .sale-banner small{margin-left:auto;color:#bfae86}
 .was-price{margin-right:4px;opacity:.55;font-weight:400;text-decoration-thickness:1.5px}
 @media(prefers-reduced-motion:reduce){.sale-banner strong{animation:none!important}}
+
+/* The weekly champion: a gold banner on the home page and in the lobby, a trophy on their seat, and their own title. */
+.champion-banner>span{display:flex;flex-direction:column;gap:1px;min-width:0}
+.champion-banner small{font-size:10px;letter-spacing:2px;color:#bfae86}
+.champion-banner strong{font-size:15px;font-weight:600}
+.streak-flame{display:inline-flex;align-items:center;gap:1px;margin-left:4px;font-size:10px;font-weight:700;font-style:normal;color:#ff9a3c;vertical-align:1px}
+.champion-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.champion-form input{flex:1;min-width:150px}
+.leader-name small{color:var(--muted);font-size:11px}
+
+/* The champion's own title: their colours (--c1..--c3), an effect and a lettering. Only 2D effects, for the school computers. */
+.seat-sub:has(.champ-title){white-space:normal;line-height:1.15;overflow:visible}
+.champ-title{display:inline-block;max-width:100%;padding:0 2px 0 0;font-weight:700;line-height:1.3;-webkit-background-clip:text;background-clip:text;color:transparent;background-image:linear-gradient(90deg,var(--c1),var(--c2),var(--c3))}
+.champ-title.big{margin:2px 0 6px}
+.champ-title.font-serif{font-family:'Spectral',serif;font-style:italic}
+.champ-title.font-bold{font-style:normal}
+.champ-title.font-caps{font-style:normal;text-transform:uppercase;letter-spacing:.16em}
+.champ-title.fx-solid{background-image:none;color:var(--c1)}
+.champ-title.fx-shift,.champ-title.fx-rainbow{background-image:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c1));background-size:200% 100%;animation:ink-drift 4s linear infinite}
+.champ-title.fx-rainbow{animation:ink-drift 4s linear infinite,champ-hue 5s linear infinite}
+.champ-title.fx-glow{filter:drop-shadow(0 0 3px var(--c2)) drop-shadow(0 0 9px var(--c3))}
+.champ-title.fx-pulse{animation:champ-pulse 2.4s ease-in-out infinite}
+.champ-title.fx-shimmer{background-image:linear-gradient(105deg,transparent 40%,#ffffff 50%,transparent 60%),linear-gradient(90deg,var(--c1),var(--c2),var(--c3));background-size:300% 100%,100% 100%;background-repeat:no-repeat,repeat;animation:champ-gleam 3.5s linear infinite}
+.champ-title.fx-flicker{animation:champ-flicker 3.2s steps(1) infinite}
+.champ-title.fx-wave{background-image:none;color:var(--c1)}
+.champ-title.fx-wave>span{display:inline-block;animation:champ-wave 1.8s ease-in-out infinite}
+@keyframes champ-hue{to{filter:hue-rotate(360deg)}}
+@keyframes champ-pulse{0%,100%{filter:drop-shadow(0 0 1px var(--c2))}50%{filter:drop-shadow(0 0 5px var(--c2)) drop-shadow(0 0 12px var(--c3))}}
+@keyframes champ-gleam{0%{background-position:150% 0,0 0}60%,100%{background-position:-50% 0,0 0}}
+@keyframes champ-flicker{0%{opacity:1;filter:drop-shadow(0 0 4px var(--c1))}8%{opacity:.35;filter:none}10%{opacity:1;filter:drop-shadow(0 0 4px var(--c1))}47%{opacity:.7;filter:drop-shadow(0 0 1px var(--c1))}49%{opacity:1;filter:drop-shadow(0 0 6px var(--c2))}83%{opacity:.45;filter:none}85%{opacity:1;filter:drop-shadow(0 0 4px var(--c1))}}
+@keyframes champ-wave{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@media(prefers-reduced-motion:reduce){.champ-title,.champ-title>span{animation:none!important}}
+/* The title designer. */
+.title-editor{display:grid;gap:12px;margin-top:8px;padding:12px;border:1px solid #f2c35b33;border-radius:10px;background:#15121a}
+.title-preview{display:flex;flex-direction:column;align-items:center;gap:4px;padding:16px 8px 10px;border-radius:8px;background:radial-gradient(circle at 50% 30%,#2a2433,#15121a)}
+.title-preview small{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
+.title-text{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.title-row{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;align-items:start;font-size:12px;color:var(--muted)}
+.title-row>span{padding-top:7px}
+.title-colors,.title-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.title-color{display:inline-flex;align-items:center;gap:2px}
+.title-color input[type=color]{width:40px;height:32px;padding:2px;border:1px solid var(--line);border-radius:6px;background:#1d1922;cursor:pointer}
+.title-chips button{padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:#1d1922;font-size:13px}
+.title-chips button.active{border-color:#f2c35b;box-shadow:0 0 0 1px #f2c35b66 inset;background:#2a2218}
+/* Everyone sees what a champion can make. */
+.champion-showcase{margin:20px 0 6px;padding:14px;border:1px dashed #f2c35b55;border-radius:10px;background:#1a1620}
+.champion-showcase .eyebrow{display:flex;align-items:center;gap:5px;color:#d9b563}
+.champion-showcase p{margin:6px 0 12px}
+.showcase-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.showcase-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:62px;padding:10px 6px;border-radius:8px;background:#221d29;text-align:center;font-size:15px}
+.showcase-item small{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+/* Alt accounts in the admin page. */
+.alt-tag{margin-left:6px;padding:1px 7px;border-radius:999px;background:#5a2230;color:#ffb3c0;font-size:10px;font-style:normal;font-weight:600;vertical-align:2px}
+.admin-alt{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.admin-alt p{flex:1;min-width:200px;margin:0;font-size:13px}
+/* Titles read at a comfortable size on your account and on profiles. */
+
+/* The champion card: the picture gets room for its frame, the words line up beside it, and the designer opens full width below. */
+.champion-card{margin:14px 0;padding:18px 20px;border:1px solid #f2c35b66;border-radius:12px;background:linear-gradient(135deg,#2c2114,#1b1720)}
+.champion-top{display:flex;align-items:center;gap:22px}
+.champion-frame{width:112px;height:112px;flex-shrink:0;display:grid;place-items:center}
+.champion-card-text{flex:1;min-width:0;display:grid;justify-items:start;gap:4px}
+.champion-card .eyebrow{display:flex;align-items:center;gap:6px;margin:0;color:#d9b563}
+.champion-card h3{display:flex;align-items:baseline;gap:8px;margin:0;font-size:24px;line-height:1.15}
+.champion-card h3 em{font-style:normal;font-size:11px;font-weight:500;color:var(--gold)}
+.champion-card .champ-title.big{margin:0}
+.champion-none{color:var(--muted)}
+.champion-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-top:8px}
+@media(max-width:480px){.champion-top{flex-direction:column;text-align:center}.champion-card-text{justify-items:center}.champion-card h3{justify-content:center}}
+/* Your account: a wider window with a proper profile header. */
+.modal.account-modal{width:560px}
+.account-modal .account-head{gap:26px;margin:4px 0 20px}
+.account-modal .account-frame{width:156px;height:156px}
+.account-modal .account-frame .account-avatar{width:104px;height:104px;font-size:34px}
+.account-modal .account-who{gap:4px}
+.account-modal .account-who h2{margin:0;font-size:36px;line-height:1.1}
+.account-modal .account-picture-actions{margin-top:10px}
+/* One size for a title under a name in a header: your account, profiles and the champion card. The designer's preview is larger. */
+.champ-title.preview{font-size:22px}
+.champ-title.preview.font-caps{font-size:19px}
+/* Seats: room between the picture (and its frame) and the name. */
+.seat .seat-token{margin-bottom:clamp(2px,.8cqmin,5px)}
+/* The champion title is the same size as any other title; only the designer and the examples show it larger. */
+.champ-title{font-size:11px}
+.seat-sub .champ-title{font-size:inherit}
+.title-chips .champ-title{font-size:13px}
+.showcase-item .champ-title{font-size:14px}
+.champion-glow{position:absolute;left:-60px;top:50%;width:280px;height:280px;margin-top:-140px;z-index:-1;pointer-events:none;border-radius:50%;background:radial-gradient(circle,var(--ca-glow),var(--ca-faint) 45%,transparent 68%);animation:champ-breathe 4s ease-in-out infinite}
+.champion-watermark{position:absolute;right:-18px;bottom:-26px;width:160px;height:160px;z-index:-1;pointer-events:none;color:var(--ca);opacity:.08;stroke-width:1.5;transform:rotate(-12deg)}
+.champion-spark{position:absolute;z-index:-1;width:3px;height:3px;border-radius:50%;background:var(--ca-light);box-shadow:0 0 6px 1px var(--ca);opacity:0;pointer-events:none;animation:champ-twinkle 3.6s ease-in-out infinite}
+.champion-spark.spark-0{left:46%;top:18%;animation-delay:0s}
+.champion-spark.spark-1{left:70%;top:62%;animation-delay:.8s}
+.champion-spark.spark-2{left:86%;top:24%;animation-delay:1.7s}
+.champion-spark.spark-3{left:58%;top:84%;animation-delay:2.4s}
+.champion-spark.spark-4{left:94%;top:70%;animation-delay:3s}
+@keyframes champ-sweep{0%{background-position:160% 0}60%,100%{background-position:-60% 0}}
+@keyframes champ-breathe{0%,100%{opacity:.65}50%{opacity:1}}
+@keyframes champ-twinkle{0%,100%{opacity:0;transform:scale(.4)}45%{opacity:1;transform:scale(1)}70%{opacity:0;transform:scale(.4)}}
+@media(prefers-reduced-motion:reduce){.champion-bg::before,.champion-glow,.champion-spark{animation:none!important}}
+
+/* The champion's background, in their colours: the weekly card, the banner, and the designer's preview. */
+.champion-bg{position:relative;overflow:hidden;isolation:isolate;border:1px solid transparent;background:linear-gradient(120deg,var(--cb-dark),var(--cb) 45%,var(--cb-deep)) padding-box,linear-gradient(120deg,var(--ca-dim),var(--ca-light),var(--ca),var(--ca-light),var(--ca-dim)) border-box;box-shadow:0 0 22px var(--ca-15),inset 0 0 40px #00000066}
+.champion-bg::before{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(105deg,transparent 38%,var(--ca-sweep) 50%,transparent 62%);background-size:260% 100%;background-repeat:no-repeat;animation:champ-sweep 7s linear infinite}
+.bg-shine .champion-glow,.bg-shine .champion-spark,.bg-stars::before,.bg-still::before,.bg-still .champion-spark{display:none}
+.bg-still .champion-glow{animation:none;opacity:.8}
+.champion-banner{display:flex;align-items:center;gap:12px;width:100%;margin:16px 0 0;padding:10px 14px;border-radius:10px;color:#f3e6c4;text-align:left}
+.champion-banner>svg{color:var(--ca);flex:none;filter:drop-shadow(0 0 4px var(--ca-glow))}
+.champion-banner small{color:#ffffffa0}
+.champion-banner .champion-glow{left:-110px}
+.title-preview.champion-bg{border-radius:10px}
+.title-preview .champion-glow{left:50%;margin-left:-140px}
+.title-color.named{gap:6px;font-size:12px;color:var(--muted)}
+/* Compact champion card, with the designer as its own panel underneath. */
+.champion-card{padding:12px 16px}
+.champion-top{gap:14px}
+.champion-frame{width:82px;height:82px}
+.champion-frame .account-avatar{width:58px;height:58px;font-size:19px}
+.champion-card h3{font-size:19px}
+.champion-card-text{gap:2px}
+.champion-actions{margin-top:6px}
+.champion-watermark{width:112px;height:112px;right:-12px;bottom:-20px}
+.title-editor{gap:10px;margin:-4px 0 14px;padding:12px 14px}
+.title-preview{padding:12px 8px 10px}
+.champ-title.preview{font-size:20px}
+.champ-title.preview.font-caps{font-size:17px}
+.title-row{grid-template-columns:76px minmax(0,1fr);gap:8px}
+.title-row>span{padding-top:5px}
+.title-chips{gap:5px}
+.title-chips button{padding:4px 10px;font-size:12px}
+.title-chips .champ-title{font-size:12px}
+.title-color input[type=color]{width:34px;height:28px}
+.title-color.named{display:inline-flex;flex-direction:row;align-items:center;gap:6px;margin-right:4px}
+/* The champion's edit button (and the admin's clear button) sit quietly in the card's corner, so everyone sees the same card. */
+.champion-tools{position:absolute;top:8px;right:8px;z-index:1;display:flex;gap:4px}
+.champion-tools .icon-button{width:30px;height:30px;border-radius:50%;background:#0000004d;border:1px solid #ffffff1f;color:#ffffffb3}
+.champion-tools .icon-button:hover{color:#fff;border-color:var(--ca)}
