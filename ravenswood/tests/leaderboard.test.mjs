@@ -219,8 +219,8 @@ test('decorations that no longer exist simply disappear',()=>{
   assert.equal(progressOf([{won:true,demon:true,evil:true,survived:false,initial_role:'imp'}]).demon_wins,1);
 });
 
-async function shop(){
-  const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store,admins:adminKeys(' Boss , ')}));
+async function shop(clock=()=>Date.UTC(2026,0,15)){
+  const store=memoryStore(),app=express();app.use('/botc/api/game',botcApi({store,admins:adminKeys(' Boss , '),clock}));
   const server=await new Promise(done=>{const s=app.listen(0,'127.0.0.1',()=>done(s));});
   const base=`http://127.0.0.1:${server.address().port}/botc/api/game`;
   const browser=()=>{let cookie='';return async(path,body)=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(cookie?{cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)}),set=r.headers.get('set-cookie');if(set)cookie=set.split(';')[0];return {status:r.status,data:await r.json()};};};
@@ -294,6 +294,20 @@ test('a duplicate from a chest refunds part of the price instead',async()=>{
   const opened=await store.openChest(ana.id,{price:CHEST.price,refund:CHEST.refund,roll:()=>'brass'});
   assert.deepEqual(opened,{result:'opened',item:'brass',duplicate:true});
   assert.equal(await store.balance(ana.id),600-120-CHEST.price+CHEST.refund);
+});
+test('a sale takes its share off items and chests, cuts the duplicate refund too, and refuses a price that has changed',async()=>{
+  let now=Date.UTC(2026,10,27,20);const s=await shop(()=>now);
+  try{
+    const {call,account}=await s.member('Ana');await played(s.store,account,10,10,{points:100});
+    let r=await call('/shop');assert.equal(r.data.sale.name,'Black Friday');assert.equal(r.data.chest.price,30);assert.equal(r.data.chest.refund,12);
+    assert(r.data.chest.refund<r.data.chest.price);
+    assert.equal((await call('/shop/buy',{item:'clock',price:1600})).status,409);
+    r=await call('/shop/buy',{item:'clock',price:480});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.balance,1000-480);
+    r=await call('/shop/chest',{price:30});assert.equal(r.status,200);assert.equal(r.data.balance,1000-480-30);
+    now=Date.UTC(2026,10,28,8);
+    r=await call('/shop');assert.equal(r.data.sale,null);assert.equal(r.data.chest.price,CHEST.price);
+    r=await call('/shop/buy',{item:'moon',price:270});assert.equal(r.status,409);assert.match(r.data.error,/sale has ended/);
+  }finally{s.close();}
 });
 test('chest odds follow the published tiers and never give an earned-only item',()=>{
   const seen={};for(let i=0;i<4000;i++){const item=ITEM[rollChest()];assert(!item.unlock);seen[item.tier]=(seen[item.tier]||0)+1;}

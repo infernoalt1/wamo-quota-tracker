@@ -3,7 +3,7 @@ import {useState,useEffect,useRef,Fragment} from 'react';
 import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,ShieldCheck,Minus,KeyRound} from 'lucide-react';
 import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
-import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS} from '../lib/cosmetics.mjs';
+import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS,salePrice} from '../lib/cosmetics.mjs';
 const types={townsfolk:'Townsfolk',outsider:'Outsiders',minion:'Minions',demon:'Demon'};
 function RoleIcon({id}){return <img className="role-icon" src={`/botc/icons/${id}.png`} alt="" draggable={false}/>;}
 function Avatar({src,name}){return src?<img className="avatar-img" src={`/botc/api/game/avatar/${src}`} alt="" draggable={false}/>:(name||'').slice(0,2).toUpperCase();}
@@ -167,7 +167,7 @@ function FrameArt({look}){
 }
 function Face({className,src,name,look}){return <span className={`${className}${frameOf(look)}`}><Avatar src={src} name={name}/><FrameArt look={look}/></span>;}
 function Named({name,look}){return look?.color?<span className={`ink-${look.color}`}>{name}</span>:name;}
-function Title({look}){const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}${t.set?` title-${t.set}`:''}`}>{t.name}</span>:null;}
+function Title({look}){const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}${t.set?` title-${t.set}`:''}${t.goddess?` goddess title-${t.id}`:''}`}>{t.name}</span>:null;}
 // A chat picture opens the sender's profile, when they have one.
 function ChatFace({who,name,onOpen}){const face=<Face className="chat-avatar" src={who?.avatar} name={name} look={who?.look}/>;return who?.account?<button className="face-button" onClick={()=>onOpen(who.account)} aria-label={`See ${name}'s profile`} title="See profile">{face}</button>:face;}
 const pct=(wins,games)=>games?`${Math.round(wins/games*100)}%`:'–';
@@ -390,26 +390,31 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
  if(!account)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p>Win games to earn points, then spend them on frames, name colours and titles that everyone at the table can see.</p><div className="shop-guest"><Lock size={18}/><div><strong>Log in to start earning points.</strong><p>Points come from games where at least three players are logged in.</p></div><button className="primary compact" onClick={onLogin}>Log in or sign up</button></div></>;
  if(!wallet)return <><span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2><p className="small">Opening the shop…</p></>;
  const look=wallet.look||{},shown=preview?{...look,[ITEM[preview].kind]:preview}:look;
+ const sale=wallet.sale,chestCost=wallet.chest||CHEST,cost=item=>salePrice(item.price,sale);
+ // A price shown during a sale, with the usual price struck through.
+ const Price=({was,now})=>now<was?<><s className="was-price">{was}</s>{now}</>:now;
+ const refresh=()=>getJson('/botc/api/game/shop').then(onWallet).catch(()=>{});
  async function call(path,body,done){
   if(busy)return;setBusy(true);setError('');setNote('');
   try{const data=await postJson(`/botc/api/game/shop${path}`,body);onWallet(data);setNote(done+(data.later?' You are in a game right now, so it shows from your next game.':''));setConfirm(null);setPreview(null);}
-  catch(e){setError(e.message);}finally{setBusy(false);}
+  catch(e){setError(e.message);refresh();}finally{setBusy(false);}
  }
  // The chest shakes for at least a second while the server rolls, then opens on what was inside.
  async function openChest(){
   if(busy)return;setBusy(true);setError('');setNote('');setChest({stage:'shaking'});const started=Date.now();
   try{
-   const data=await postJson('/botc/api/game/shop/chest',{}),wait=ms=>new Promise(done=>setTimeout(done,ms));await wait(Math.max(0,1100-(Date.now()-started)));
+   const data=await postJson('/botc/api/game/shop/chest',{price:chestCost.price}),wait=ms=>new Promise(done=>setTimeout(done,ms));await wait(Math.max(0,1100-(Date.now()-started)));
    // A Chroma takes its time: the chest draws in light, glowing through every rarity, before it opens.
    const found=ITEM[data.opened.item];
    if(found?.tier==='chroma'){setChest({stage:'gathering'});playOn(chestStage.current,'gather',SETS[found.set].tint,1.3);await wait(2100);}
    onWallet(data);setChest({stage:'open',at:Date.now(),...data.opened});
   }
-  catch(e){setChest(null);setError(e.message);}finally{setBusy(false);}
+  catch(e){setChest(null);setError(e.message);refresh();}finally{setBusy(false);}
  }
  const items=ITEMS.filter(i=>i.kind===kind);
  return <>
   <span className="eyebrow">THE CURIOSITY SHOP</span><h2>Dress your seat.</h2>
+  {sale&&<div className="sale-banner"><strong>{sale.name.toUpperCase()}</strong><span>{Math.round(sale.off*100)}% off everything in the shop, chests included</span><small>Ends in {hoursLeft(sale.until)}</small></div>}
   {/* Stays in view while the items scroll, so each one can be tried on. */}
   <div className="shop-preview" aria-live="polite">
    <Face className="shop-face big" src={account.avatar} name={account.username} look={shown}/>
@@ -434,14 +439,14 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
     <p>{prize?(chest.duplicate?`You already have this${prize.set?' set':''}, so ${chest.refund} points come back to you.`:prize.set?'You found a Chroma, the rarest thing in any chest. Every piece is yours:':prize.blurb):chest?.stage==='gathering'?'':'A random decoration of any kind, including a few you can only find in chests, and, once in a long while, a Chroma.'}</p>
     {prize?.set&&!chest.duplicate&&<ul className="chroma-pieces">{SETS[prize.set].items.map(id=><li key={id}><small>{KINDS[ITEM[id].kind].replace(/s$/,'')}</small><span>{ITEM[id].name}</span></li>)}</ul>}
     {!prize&&<div className="chest-odds" aria-label="Chances by rarity">{Object.entries(CHEST.odds).map(([t,o])=><span key={t} className={`odds-chip tier-${t}`}>{TIERS[t]} {o}%</span>)}</div>}
-    {!prize&&<small className="chest-dupes">Already own what you get? {CHEST.refund} points come back to you.</small>}
+    {!prize&&<small className="chest-dupes">Already own what you get? {chestCost.refund} points come back to you.</small>}
     <div className="chest-actions">
      {prize&&!chest.duplicate&&(prize.set
       ?SETS[prize.set].items.some(id=>look[ITEM[id].kind]!==id)&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip-set',{set:prize.set},`You are wearing all of ${prize.name}.`)}>Wear the whole set</button>
       :look[prize.kind]!==prize.id&&<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:prize.kind,item:prize.id},`You are wearing ${prize.name}.`)}>Wear it</button>)}
-     <button className={prize?'secondary compact':'primary compact'} disabled={busy||wallet.balance<CHEST.price} onClick={openChest}><Package size={14}/>{prize?'Open another':'Open'} · {CHEST.price}</button>
+     <button className={prize?'secondary compact':'primary compact'} disabled={busy||wallet.balance<chestCost.price} onClick={openChest}><Package size={14}/>{prize?'Open another':'Open'} · <Price was={CHEST.price} now={chestCost.price}/></button>
      {prize&&<button className="text-button" onClick={()=>setChest(null)}>Done</button>}
-     {!prize&&wallet.balance<CHEST.price&&<small className="need">{CHEST.price-wallet.balance} more needed</small>}
+     {!prize&&wallet.balance<chestCost.price&&<small className="need">{chestCost.price-wallet.balance} more needed</small>}
     </div>
    </div>
   </section>
@@ -450,7 +455,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
   <div className="role-tabs">{Object.entries(KINDS).map(([key,title])=><button className={kind===key?'active':''} key={key} onClick={()=>{setKind(key);setPreview(null);}}>{title}</button>)}</div>
   <div className="shop-grid">
    {items.map(item=>{
-    const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?item.price-wallet.balance:0;
+    const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?cost(item)-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
      <button className="shop-sample" title={item.fx?'Click to preview':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);const face=e.currentTarget.querySelector('.shop-face')||e.currentTarget;if(item.kind==='mark')previewDeath(face,item,{avatar:account.avatar,name:account.username});else if(item.fx)playAt(face,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
      <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.set&&item.kind!=='frame'?` · ${SETS[item.set].name} set`:''}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
@@ -459,9 +464,9 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
       :owned?<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:item.id},`You are wearing ${item.name}.`)}>Wear</button>
       :item.chest?<span className="chest-only"><Package size={13}/>Found in chests</span>
       :item.unlock?<div className="unlock-progress"><span><Lock size={12}/>{UNLOCKS[item.unlock].text}</span><div className="progress-bar"><i style={{width:`${wallet.progress[item.unlock]/UNLOCKS[item.unlock].goal*100}%`}}/></div><small>{wallet.progress[item.unlock]} / {UNLOCKS[item.unlock].goal}</small></div>
-      :confirm===item.id?<><button className="primary compact" disabled={busy} onClick={()=>call('/buy',{item:item.id},`You bought ${item.name} and are wearing it.`)}>Buy for {item.price}</button><button className="text-button" disabled={busy} onClick={()=>setConfirm(null)}>Cancel</button></>
-      :short>0?<><span className="price"><Coins size={13}/>{item.price}</span><small className="need">{short} more needed</small></>
-      :<button className="secondary compact" disabled={busy} onClick={()=>setConfirm(item.id)}><Coins size={13}/>{item.price}</button>}
+      :confirm===item.id?<><button className="primary compact" disabled={busy} onClick={()=>call('/buy',{item:item.id,price:cost(item)},`You bought ${item.name} and are wearing it.`)}>Buy for <Price was={item.price} now={cost(item)}/></button><button className="text-button" disabled={busy} onClick={()=>setConfirm(null)}>Cancel</button></>
+      :short>0?<><span className="price"><Coins size={13}/><Price was={item.price} now={cost(item)}/></span><small className="need">{short} more needed</small></>
+      :<button className="secondary compact" disabled={busy} onClick={()=>setConfirm(item.id)}><Coins size={13}/><Price was={item.price} now={cost(item)}/></button>}
      </div>
     </article>;})}
   </div>

@@ -909,3 +909,32 @@ button.leader-row:hover{background:#ffffff08}
 .chroma-banner svg{color:#ffe08a;flex-shrink:0}
 @keyframes chroma-banner{0%{opacity:0;transform:translate(-50%,-14px) scale(.9)}8%{opacity:1;transform:translate(-50%,0) scale(1.04)}14%{transform:translate(-50%,0) scale(1)}88%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-8px)}}
 @media(prefers-reduced-motion:reduce){.frame-glass::before,.frame-glass::after,.frame-wisps::before,.frame-kaleido::before,.frame-kaleido::after,.ink-glass_ink,.ink-wisps_ink,.ink-kaleido_ink,.deco-title.tier-chroma,.hand-indicator.hand-glass_hand,.hand-indicator.hand-wisps_hand,.hand-indicator.hand-kaleido_hand,.shop-item.tier-chroma,.chest-panel.tier-chroma{animation:none!important}}
+
+/* Goddess titles: upright capitals, each lit in its own colours. */
+.deco-title.goddess{display:inline-block;font-style:normal;font-weight:700;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding-right:2px;-webkit-background-clip:text;background-clip:text;color:transparent}
+.shop-title-sample .deco-title.goddess{font-size:12px}
+/* Artemis: silver moonlight with a slow gleam. */
+.deco-title.title-artemis{background-image:linear-gradient(105deg,transparent 42%,#ffffff 50%,transparent 58%),linear-gradient(90deg,#aebce6,#eef2ff 40%,#c4d2ff 70%,#aebce6);background-size:300% 100%,100% 100%;background-repeat:no-repeat,repeat;animation:goddess-gleam 5s linear infinite;filter:drop-shadow(0 0 4px #b8c8ff66)}
+/* Athena: gold and olive, a steady shine. */
+.deco-title.title-athena{background-image:linear-gradient(105deg,transparent 42%,#fffbe6 50%,transparent 58%),linear-gradient(90deg,#c9a640,#f4dc8a 35%,#a8b35a 65%,#c9a640);background-size:300% 100%,100% 100%;background-repeat:no-repeat,repeat;animation:goddess-gleam 7s linear infinite;filter:drop-shadow(0 0 3px #e8c66a55)}
+/* Eris: gold and red that now and then jolts. */
+.deco-title.title-eris{background-image:linear-gradient(90deg,#ffd24a,#ff7a3a,#ff3d5a,#ffd24a);background-size:200% 100%;animation:ink-drift 4s linear infinite,eris-jolt 3.7s steps(1) infinite;filter:drop-shadow(0 0 3px #ff5b3a55)}
+/* Hecate: poison green and violet, flickering like a torch at the crossroads. */
+.deco-title.title-hecate{background-image:linear-gradient(90deg,#8dffb0,#3fcf7a 30%,#b77bff 60%,#8dffb0);background-size:200% 100%;animation:ink-drift 6s linear infinite,hecate-flicker 2.3s steps(1) infinite}
+/* Nyx: deep violet night, with starlight passing through. */
+.deco-title.title-nyx{background-image:linear-gradient(90deg,#7a68e0,#b9a8ff 30%,#ffffff 45%,#b9a8ff 60%,#7a68e0);background-size:300% 100%;animation:ink-drift 9s linear infinite,nyx-twinkle 4s ease-in-out infinite}
+/* Persephone: pomegranate red giving way to spring. */
+.deco-title.title-persephone{background-image:linear-gradient(90deg,#ff5c7a,#ffc2d1 30%,#a6eba8 55%,#ff8fa8 80%,#ff5c7a);background-size:200% 100%;animation:ink-drift 8s linear infinite;filter:drop-shadow(0 0 3px #ff7a9455)}
+@keyframes goddess-gleam{0%{background-position:150% 0,0 0}60%,100%{background-position:-50% 0,0 0}}
+@keyframes eris-jolt{0%,88%{transform:none}90%{transform:translate(1px,-1px)}93%{transform:translate(-1px,1px)}96%{transform:none}}
+@keyframes hecate-flicker{0%{filter:drop-shadow(0 0 3px #3fcf7a66)}30%{filter:drop-shadow(0 0 5px #b77bff88)}45%{filter:drop-shadow(0 0 2px #3fcf7a44)}70%{filter:drop-shadow(0 0 6px #8dffb088)}}
+@keyframes nyx-twinkle{0%,100%{filter:drop-shadow(0 0 2px #7a68e055)}50%{filter:drop-shadow(0 0 6px #d9ccffaa)}}
+@media(prefers-reduced-motion:reduce){.deco-title.goddess{animation:none!important}}
+
+/* A sale: a black and gold banner in the shop, and the usual price struck through. */
+.sale-banner{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 14px;padding:10px 14px;border:1px solid #f2c35b66;border-radius:10px;background:linear-gradient(90deg,#0b0a0d,#1d1710 60%,#0b0a0d);box-shadow:0 0 18px #f2c35b22 inset}
+.sale-banner strong{font-size:13px;letter-spacing:3px;background-image:linear-gradient(90deg,#c9963f,#fff2c4,#e0b45e,#fff2c4,#c9963f);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:ink-drift 6s linear infinite}
+.sale-banner span{color:#f3e6c4;font-size:14px}
+.sale-banner small{margin-left:auto;color:#bfae86}
+.was-price{margin-right:4px;opacity:.55;font-weight:400;text-decoration-thickness:1.5px}
+@media(prefers-reduced-motion:reduce){.sale-banner strong{animation:none!important}}

@@ -1,5 +1,5 @@
 // Spending points on decorations, mystery chests and gifts. Points come only from playing; there is no real money here.
-import { ITEM, KINDS, UNLOCKS, CHEST, GIFT, SETS, bundleOf, lookOf, progressOf, unlocked, rollChest } from './cosmetics.mjs';
+import { ITEM, KINDS, UNLOCKS, CHEST, GIFT, SETS, bundleOf, lookOf, progressOf, unlocked, rollChest, saleAt, salePrice } from './cosmetics.mjs';
 import { flair } from './engine.mjs';
 import { dress, keyOf, usernameOf } from './accounts.mjs';
 import { dayStart } from './leaderboard.mjs';
@@ -7,7 +7,9 @@ import { dayStart } from './leaderboard.mjs';
 const itemOf=id=>typeof id==='string'&&Object.hasOwn(ITEM,id)?ITEM[id]:null;
 
 // `heldFor(accountId)` is what the account has staked on spectator bets still being played.
-export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
+export function mountShop(router,{store,identity,accounts,heldFor=()=>0,clock=Date.now}){
+  // Today's prices. The chest's duplicate refund is cut along with its price.
+  const pricesNow=()=>{const sale=saleAt(clock());return {sale,chest:{...CHEST,price:salePrice(CHEST.price,sale),refund:salePrice(CHEST.refund,sale)},of:item=>salePrice(item.price,sale)};};
   const refuse=(message,status=400)=>Object.assign(Error(message),{status,expose:true});
   const handle=fn=>async(req,res)=>{try{
     if(req.method==='POST'&&req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw refuse('Use the game website to shop.',403);
@@ -18,13 +20,13 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
   }catch(e){if(!e.expose)console.error('BOTC shop:',e.message);res.status(e.expose?e.status:503).json({error:e.expose?e.message:'The shop is unavailable right now.'});}};
 
   async function stateOf(account){
-    const since=dayStart();
+    const since=dayStart(),prices=pricesNow();
     const [wallet,rows,won,gifts]=await Promise.all([store.wallet(account.id),store.history(account.id),store.wonSince([account.id],since),store.giftsReceived(account.id)]);
     const held=heldFor(account.id);
     return {
       balance:wallet.earned-wallet.spent+(wallet.adjust||0)-held,held,earned:wallet.earned,owned:wallet.owned,look:lookOf(account.look)||{},
       progress:progressOf(rows),daily:{ready:!won.has(account.id),resetsAt:since.getTime()+86400000},
-      chest:CHEST,gift:{...GIFT,allowed:rows.length>=GIFT.minGames},
+      chest:prices.chest,sale:prices.sale&&{name:prices.sale.name,off:prices.sale.off,until:prices.sale.until},gift:{...GIFT,allowed:rows.length>=GIFT.minGames},
       gifts:gifts.map(g=>({from:g.username,amount:g.amount,at:new Date(g.at).getTime()})),
     };
   }
@@ -35,21 +37,25 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0}){
     return {saved,later};
   }
   router.get('/shop',handle(async(req,res,account)=>res.json(await stateOf(account))));
+  // The page sends the price it showed, so nobody pays a price they did not see when a sale starts or ends.
+  const checkPrice=(req,price,sale)=>{if(req.body?.price!==undefined&&req.body.price!==price)throw refuse(sale?'Prices have just changed. Check the new price and try again.':'The sale has ended, so prices are back to normal. Check the price and try again.',409);};
   router.post('/shop/buy',handle(async(req,res,account)=>{
     const item=itemOf(req.body?.item);
     if(!item?.price)throw refuse('That item is not for sale.');
-    if(await store.buy(account.id,item.id,item.price,heldFor(account.id))==='short')throw refuse('You do not have enough points for that yet.');
+    const prices=pricesNow(),price=prices.of(item);checkPrice(req,price,prices.sale);
+    if(await store.buy(account.id,item.id,price,heldFor(account.id))==='short')throw refuse('You do not have enough points for that yet.');
     // Most people buy something to wear it, so it goes straight on.
     const {saved,later}=await wear(account,{...lookOf(account.look),[item.kind]:item.id});
     res.json({...await stateOf(saved),later});
   }));
   router.post('/shop/chest',handle(async(req,res,account)=>{
-    const opened=await store.openChest(account.id,{price:CHEST.price,refund:CHEST.refund,held:heldFor(account.id),roll:()=>rollChest(),bundle:bundleOf});
-    if(opened.result==='short')throw refuse(`A chest costs ${CHEST.price} points.`);
+    const {chest,sale}=pricesNow();checkPrice(req,chest.price,sale);
+    const opened=await store.openChest(account.id,{price:chest.price,refund:chest.refund,held:heldFor(account.id),roll:()=>rollChest(),bundle:bundleOf});
+    if(opened.result==='short')throw refuse(`A chest costs ${chest.price} points.`);
     // A new Chroma is shown to everyone at the account's tables, but only between games, so it can never carry a signal mid-game.
     const set=ITEM[opened.item]?.set;
     if(set&&!opened.duplicate)accounts.eachSeat(account.session,(seat,game)=>{if(!['lobby','ended'].includes(game.phase))return false;flair(game,seat.id,set);});
-    res.json({...await stateOf(account),opened:{item:opened.item,duplicate:opened.duplicate,refund:opened.duplicate?CHEST.refund:0}});
+    res.json({...await stateOf(account),opened:{item:opened.item,duplicate:opened.duplicate,refund:opened.duplicate?chest.refund:0}});
   }));
   router.post('/shop/gift',handle(async(req,res,account)=>{
     const amount=req.body?.amount;

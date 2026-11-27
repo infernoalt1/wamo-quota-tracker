@@ -23,7 +23,7 @@ function reply(req,res,data){
 }
 
 // A closed tab says goodbye at once; this catches crashes and lost connections, and is long enough for a throttled background tab.
-export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys()}={}) {
+export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys(),clock=Date.now}={}) {
   // Rooms hold serialized state so an engine error partway through an action cannot leave a half-applied game.
   const router=express(),rooms=new Map(),presence=new Map();
   // Presence changes on every poll, so it stays out of the saved game.
@@ -52,7 +52,7 @@ export function botcApi({store=defaultStore(),awayAfter=90*1000,admins=adminKeys
   const accounts=mountAccounts(router,{store,rooms,identity,setSession,admins});
   const bets=createBets({store});
   const leaderboard=mountLeaderboard(router,{store,rooms,onRecorded:(game,status)=>bets.settle(game,status)});
-  mountShop(router,{store,identity,accounts,heldFor:bets.heldFor});
+  mountShop(router,{store,identity,accounts,heldFor:bets.heldFor,clock});
   mountAdmin(router,{store,identity,admins,heldFor:bets.heldFor});
   // A logged-in spectator stakes points on which team wins the game they are watching.
   router.post('/bet',async(req,res)=>{try{

@@ -15,6 +15,13 @@ export const UNLOCKS = Object.freeze({
   saint_win: { goal: 1, text: 'Win a game as the Saint', counts: r => r.won && r.initial_role === 'saint' },
   minion_wins: { goal: 5, text: 'Win 5 games as a Minion', counts: r => r.won && ROLES[r.initial_role]?.type === 'minion' },
   veteran: { goal: 50, text: 'Play 50 games', counts: () => true },
+  // The goddess titles.
+  artemis: { goal: 10, text: 'Win 10 games on the good team and live to see it', counts: r => r.won && !r.evil && r.survived },
+  athena: { goal: 15, text: 'Win 15 games as a Townsfolk', counts: r => r.won && ROLES[r.initial_role]?.type === 'townsfolk' },
+  eris: { goal: 5, text: 'Win 5 games as an Outsider', counts: r => r.won && ROLES[r.initial_role]?.type === 'outsider' },
+  hecate: { goal: 3, text: 'Win 3 games as the Poisoner or the Pukka', counts: r => r.won && ['poisoner', 'pukka'].includes(r.initial_role) },
+  nyx: { goal: 15, text: 'Win 15 games on the evil team', counts: r => r.won && r.evil },
+  persephone: { goal: 10, text: 'Win 10 games after dying', counts: r => r.won && !r.survived },
 });
 
 export const ITEMS = Object.freeze([
@@ -52,6 +59,15 @@ export const ITEMS = Object.freeze([
   { id: 'saint', kind: 'title', name: 'The Saint', tier: 'unlock', unlock: 'saint_win', blurb: 'Survived the town’s judgement.' },
   { id: 'mastermind', kind: 'title', name: 'Mastermind', tier: 'unlock', unlock: 'minion_wins', blurb: 'The hand behind the Demon.' },
   { id: 'veteran', kind: 'title', name: 'Veteran', tier: 'unlock', unlock: 'veteran', blurb: 'Fifty stories told.' },
+  // Goddess titles: earned only, each with its own light.
+  ...[
+    ['artemis', 'Artemis', 'The huntress under the moon, still standing when the hunt is over.'],
+    ['athena', 'Athena', 'Wisdom, and the patience to be right.'],
+    ['eris', 'Eris', 'One golden apple, and the whole town at each other’s throats.'],
+    ['hecate', 'Hecate', 'Queen of the crossroads. Mind what you drink.'],
+    ['nyx', 'Nyx', 'Even the Demon is afraid of the night.'],
+    ['persephone', 'Persephone', 'Went down to the underworld, and came back to win.'],
+  ].map(([id, name, blurb]) => ({ id, kind: 'title', name, tier: 'unlock', unlock: id, goddess: true, blurb })),
   // Vote hands: how your raised hand looks, and the effect when it goes up or is counted. `fx` names a particle effect.
   { id: 'gilded_hand', kind: 'hand', name: 'Gilded Hand', tier: 'common', price: 150, fx: 'sparks', tint: ['#fff1c2', '#f2c35b', '#d99a2b'], blurb: 'A shower of gold sparks with every vote.' },
   { id: 'bone_hand', kind: 'hand', name: 'Bone Hand', tier: 'rare', price: 300, fx: 'dust', tint: ['#fff8e8', '#e9dcc0', '#cfc2a4'], blurb: 'Old ivory, and a little dust.' },
@@ -104,6 +120,12 @@ export const bundleOf = id => SETS[ITEM[id]?.set]?.items || [id];
 // Mystery chests: a random decoration from everything in the shop plus the chest-only items (never the earned ones).
 // The tier is drawn first with these odds, then an item within it (for Chroma, a whole set). A duplicate refunds part of the price.
 export const CHEST = Object.freeze({ price: 100, refund: 40, odds: Object.freeze({ common: 54, rare: 30, epic: 11, legendary: 4.7, chroma: 0.3 }) });
+// Sales: a share off every shop price and the chest. The duplicate refund is cut by the same share, so a chest never pays for itself.
+export const SALES = Object.freeze([
+  { name: 'Black Friday', off: 0.7, from: Date.UTC(2026, 10, 27, 8), until: Date.UTC(2026, 10, 28, 8) }, // 27 November, Pacific time
+]);
+export const saleAt = (now = Date.now()) => SALES.find(s => now >= s.from && now < s.until) || null;
+export const salePrice = (price, sale) => sale ? Math.max(1, Math.round(price * (1 - sale.off))) : price;
 export const CHEST_ITEMS = Object.freeze(ITEMS.filter(i => i.price || i.chest));
 export function rollChest(random = Math.random) {
   const tiers = Object.entries(CHEST.odds), total = tiers.reduce((n, [, w]) => n + w, 0);
