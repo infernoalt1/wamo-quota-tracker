@@ -100,7 +100,7 @@ function chroma(set, tint, pieces) {
 // The weekly champion's own title: any colours (one to three), one effect and one lettering.
 export const CHAMPION_STYLE = Object.freeze({
   effects: Object.freeze({ solid: 'Solid', gradient: 'Gradient', shift: 'Shifting', glow: 'Glow', pulse: 'Pulse', shimmer: 'Shimmer', flicker: 'Flicker', rainbow: 'Rainbow', wave: 'Wave' }),
-  fonts: Object.freeze({ serif: 'Classic', bold: 'Bold', caps: 'Capitals' }),
+  fonts: Object.freeze({ serif: 'Classic', italic: 'Italic', bold: 'Bold', caps: 'Capitals' }),
   // The card and banner behind the title: a base colour, a glow colour and an effect.
   backgrounds: Object.freeze({ radiant: 'Radiant', shine: 'Shine', stars: 'Stars', still: 'Still' }),
   standard: Object.freeze({ colors: ['#f2c35b', '#fff2c4', '#c9963f'], effect: 'shift', font: 'serif', bg: Object.freeze({ colors: ['#2b1e10', '#f2c35b'], effect: 'radiant' }) }),

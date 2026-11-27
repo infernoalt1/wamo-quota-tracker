@@ -1058,3 +1058,7 @@ button.leader-row:hover{background:#ffffff08}
 /* On the champion card the name is larger, so the title is too. */
 .champion-card .champ-title.big{font-size:14px}
 .champion-card .champion-none{font-size:13px}
+/* Plain italic lettering, in the page's own font. */
+.champ-title.font-italic{font-style:italic}
+/* Under a big name the title is its own line, without the extra line height an inline box brings. */
+.profile-head h2+.champ-title,.account-who h2+.champ-title{display:block;width:fit-content;margin-top:2px;line-height:1.3}
