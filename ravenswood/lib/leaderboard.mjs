@@ -4,7 +4,7 @@ import { results } from './engine.mjs';
 import { SCRIPTS } from './characters.mjs';
 import { pictureOf, keyOf, usernameOf } from './accounts.mjs';
 import { adminKeys } from './admin.mjs';
-import { POINTS, lookOf, CHAMPION_STYLE, championStyleOf } from './cosmetics.mjs';
+import { POINTS, lookOf, CHAMPION_STYLE, championStyleOf, stillStyleOf } from './cosmetics.mjs';
 
 // With fewer accounts at the table, one person with several browser profiles could farm wins.
 export const MIN_ACCOUNTS=3;
@@ -49,6 +49,14 @@ export function championTitleOf(value){
   if(!v||[...v].length>CHAMPION_STYLE.maxLength)throw refuse(`Titles are 1–${CHAMPION_STYLE.maxLength} characters.`);
   return v;
 }
+// From the Hall of Champions (newest first): rounds won per account, and the title each player keeps once they have won enough.
+// The kept title is the last one they wrote, held still.
+export function keptTitles(hall){
+  const wins=new Map(),kept=new Map();
+  for(const h of hall)wins.set(h.id,(wins.get(h.id)||0)+1);
+  for(const h of hall)if(h.title&&wins.get(h.id)>=CHAMPION_STYLE.keep&&!kept.has(h.id))kept.set(h.id,{title:h.title,style:stillStyleOf(championStyleOf(h.style))});
+  return {wins,kept};
+}
 const scriptOf=value=>value&&value!=='all'?(Object.hasOwn(SCRIPTS,value)?value:null):undefined;
 
 // The player list is alphabetical and shows no results, so it cannot be read as a ranking.
@@ -87,14 +95,45 @@ export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=ad
     res.json({minAccounts:MIN_ACCOUNTS,player:profileOf(account,await store.history(account.id))});
   }));
 
-  // This round's board, last round's winner (the reigning champion) and everyone on a win streak of two or more.
+  // Every reign is written down, so wins can be counted. The reign under way follows last round's board (an account marked
+  // as an alt loses it); a past reign nobody loaded the board during is filled in from its round's games, once per server start.
+  let crowned='',filled=null;
+  async function crown(start,top){
+    const key=`${start.getTime()}:${top?.id||''}`;if(crowned===key)return;
+    await (top?store.crown(start,top.id,true):store.uncrown(start));crowned=key;
+  }
+  function fill(start){
+    if(filled?.at===start.getTime())return filled.done;
+    const done=(async()=>{
+      const first=await store.firstGameAt();if(!first)return;
+      const have=new Set((await store.hall()).map(h=>new Date(h.week).getTime()));
+      for(let r=roundOf(new Date(first).getTime()).end;r<start;r=roundOf(r.getTime()).end){
+        if(have.has(r.getTime()))continue;
+        const top=(await store.weekly(roundOf(r.getTime()-1).start,r)).sort(byPoints)[0];
+        if(top)await store.crown(r,top.id,false);
+      }
+    })().catch(e=>{filled=null;throw e;});
+    filled={at:start.getTime(),done};return done;
+  }
+  // The round a reign was won in: the one before it began.
+  const wonIn=week=>{const end=new Date(week).getTime();return {start:roundOf(end-1).start.getTime(),end,name:roundOf(end-1).name};};
+  // This round's board, last round's winner (the reigning champion), everyone on a win streak of two or more,
+  // the Hall of Champions and the titles players have kept.
   async function week(){
     const {start,end,name}=roundOf(clock()),last=roundOf(start.getTime()-1).start;
-    const [rows,prev,streaks,crowned]=await Promise.all([store.weekly(start,end),store.weekly(last,start),store.streaks(2),store.champion(start)]);
+    const [rows,prev,streaks]=await Promise.all([store.weekly(start,end),store.weekly(last,start),store.streaks(2)]);
     const top=prev.sort(byPoints)[0]||null;
+    await crown(start,top);await fill(start);
+    const hall=await store.hall(),{wins,kept}=keptTitles(hall),marked=new Set(),now=hall.find(h=>new Date(h.week).getTime()===start.getTime()&&h.id===top?.id);
     return {start:start.getTime(),ends:end.getTime(),round:name,players:rows.sort(byPoints).slice(0,10).map(entry),
-      champion:top&&{...entry(top),...(crowned?.account_id===top.id?{title:crowned.title,style:crowned.style&&championStyleOf(crowned.style)}:{title:null,style:null})},
-      streaks:Object.fromEntries(streaks.map(s=>[s.username,s.streak]))};
+      champion:top&&{...entry(top),title:now?.title??null,style:now?.title?championStyleOf(now.style):null,wins:wins.get(top.id)||0},
+      streaks:Object.fromEntries(streaks.map(s=>[s.username,s.streak])),
+      hall:hall.slice(0,30).map(h=>({week:new Date(h.week).getTime(),won:wonIn(h.week),username:h.username,avatar:pictureOf(h),look:lookOf(h.look),
+        title:h.title,style:h.title?stillStyleOf(championStyleOf(h.style)):null,wins:wins.get(h.id),
+        // The round whose title the player keeps: their newest with one, once they have won enough.
+        kept:!!h.title&&kept.has(h.id)&&!marked.has(h.id)&&!!marked.add(h.id)})),
+      kept:Object.fromEntries(hall.filter(h=>kept.has(h.id)).map(h=>[h.username,kept.get(h.id)])),
+      wins:Object.fromEntries(hall.map(h=>[h.username,wins.get(h.id)]))};
   }
   router.get('/leaderboard/week',handle(async(req,res)=>res.json(await week())));
   // Seated in a game being played: the champion's title can't change then, so it can never carry a signal mid-game.
@@ -104,10 +143,12 @@ export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=ad
     const session=identity(req),account=session?await store.bySession(session):null;
     if(!account)throw refuse('Log in first.',401);
     const {start}=roundOf(clock()),top=(await store.weekly(roundOf(start.getTime()-1).start,start)).sort(byPoints)[0];
-    // An admin can clear a title nobody should see.
+    // An admin can clear a title nobody should see: the reigning champion's, or any round's in the Hall (`week`).
     if(req.body?.clear){
       if(!admins.has(keyOf(account.username)))throw refuse('Only an admin can clear the champion’s title.',403);
-      if(top)await store.setChampion(start,top.id,null,null);
+      const at=req.body.week===undefined?start:Number.isSafeInteger(req.body.week)?new Date(req.body.week):null;
+      if(!at)throw refuse('Choose a round.');
+      await store.clearTitle(at);
       return res.json(await week());
     }
     if(top?.id!==account.id)throw refuse('Only the reigning champion can write the title.',403);

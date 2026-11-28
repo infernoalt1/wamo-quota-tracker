@@ -126,8 +126,14 @@ export function pgStore(pool){
     streaksOf:async ids=>new Map((await query(STREAK+' AND p.account_id=ANY($1::uuid[]) GROUP BY a.id,a.username',[ids])).map(r=>[r.id,r.streak])),
     // Alt accounts are left off every board, the champion pick and the streaks.
     streaks:min=>query(STREAK+' AND NOT a.alt GROUP BY a.id,a.username HAVING count(*)>=$1',[min]),
-    // The title a week's champion wrote for themself.
-    champion:week=>one('SELECT account_id,title,style FROM botc_champions WHERE week=$1',[week]),
+    // Every round's champion, newest first, keyed by the start of their reign. Alts are left out.
+    hall:()=>query(`SELECT c.week,c.title,c.style,a.id,a.username,a.avatar_version,a.avatar IS NOT NULL AS pictured,a.look
+      FROM botc_champions c JOIN botc_accounts a ON a.id=c.account_id WHERE NOT a.alt ORDER BY c.week DESC`),
+    // Record a reign's champion. `replace` (for the reign under way) swaps in a different account, title cleared.
+    crown:(week,id,replace)=>query(`INSERT INTO botc_champions(week,account_id) VALUES($1,$2) ON CONFLICT(week) DO ${replace?'UPDATE SET account_id=$2,title=NULL,style=NULL,set_at=now() WHERE botc_champions.account_id<>$2':'NOTHING'}`,[week,id]),
+    uncrown:week=>query('DELETE FROM botc_champions WHERE week=$1',[week]),
+    clearTitle:week=>query('UPDATE botc_champions SET title=NULL,style=NULL,set_at=now() WHERE week=$1',[week]),
+    firstGameAt:async()=>(await one('SELECT min(ended_at) AS at FROM botc_games'))?.at??null,
     setChampion:(week,id,title,style)=>query('INSERT INTO botc_champions(week,account_id,title,style) VALUES($1,$2,$3,$4) ON CONFLICT(week) DO UPDATE SET account_id=$2,title=$3,style=$4,set_at=now()',[week,id,title,style&&JSON.stringify(style)]),
     setAlt:(id,alt)=>query('UPDATE botc_accounts SET alt=$2 WHERE id=$1',[id,alt]),
     history:id=>query(`SELECT g.script,g.ended_at,g.players,p.role,p.initial_role,p.evil,p.won,p.survived,p.demon

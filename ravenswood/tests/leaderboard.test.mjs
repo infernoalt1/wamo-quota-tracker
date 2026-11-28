@@ -60,9 +60,14 @@ function memoryStore(){
     streakOf(id){let n=0;for(const r of this.playedRows().filter(r=>r.account===id)){if(!r.won)break;n++;}return n;},
     async streaksOf(ids){return new Map(ids.map(id=>[id,this.streakOf(id)]).filter(([,n])=>n));},
     async streaks(min){return accounts.filter(a=>!a.alt).map(a=>({id:a.id,username:a.username,streak:this.streakOf(a.id)})).filter(s=>s.streak>=min);},
-    champions:[],
-    async champion(week){return this.champions.find(c=>c.week.getTime()===week.getTime())||null;},
-    async setChampion(week,id,title,style){this.champions=this.champions.filter(c=>c.week.getTime()!==week.getTime());this.champions.push({week,account_id:id,title,style});},
+    crowns:[],
+    crownAt(week){return this.crowns.find(c=>c.week.getTime()===week.getTime());},
+    async hall(){return this.crowns.map(c=>({...c,a:accounts.find(a=>a.id===c.account_id)})).filter(c=>!c.a.alt).sort((x,y)=>y.week-x.week).map(({a,...c})=>({week:c.week,title:c.title,style:c.style,id:a.id,username:a.username,avatar_version:a.avatar_version,pictured:a.pictured,look:a.look}));},
+    async crown(week,id,replace){const c=this.crownAt(week);if(!c)this.crowns.push({week,account_id:id,title:null,style:null});else if(replace&&c.account_id!==id)Object.assign(c,{account_id:id,title:null,style:null});},
+    async uncrown(week){this.crowns=this.crowns.filter(c=>c.week.getTime()!==week.getTime());},
+    async clearTitle(week){const c=this.crownAt(week);if(c)Object.assign(c,{title:null,style:null});},
+    async firstGameAt(){return games.length?new Date(Math.min(...games.map(g=>g.ended_at))):null;},
+    async setChampion(week,id,title,style){this.crowns=this.crowns.filter(c=>c.week.getTime()!==week.getTime());this.crowns.push({week,account_id:id,title,style});},
     async setAlt(id,alt){accounts.find(a=>a.id===id).alt=alt;},
     async history(id){
       return rows.filter(r=>r.account===id).map(r=>{const g=games.find(x=>x.id===r.game_id);return {script:g.script,ended_at:g.ended_at,players:g.size,role:r.role,initial_role:r.initialRole,evil:r.evil,won:r.won,survived:r.survived,demon:r.demon};}).sort((a,b)=>b.ended_at-a.ended_at);
@@ -315,12 +320,14 @@ test('a sale takes its share off items and chests, cuts the duplicate refund too
   let now=Date.UTC(2026,10,27,20);const s=await shop(()=>now);
   try{
     const {call,account}=await s.member('Ana');await played(s.store,account,10,10,{points:100});
-    let r=await call('/shop');assert.equal(r.data.sale.name,'Black Friday');assert.equal(r.data.chest.price,30);assert.equal(r.data.chest.refund,12);
+    let r=await call('/shop');assert.equal(r.data.sale.name,'Black Friday to Cyber Monday');assert.equal(r.data.chest.price,30);assert.equal(r.data.chest.refund,12);
     assert(r.data.chest.refund<r.data.chest.price);
     assert.equal((await call('/shop/buy',{item:'clock',price:1600})).status,409);
     r=await call('/shop/buy',{item:'clock',price:480});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.balance,1000-480);
     r=await call('/shop/chest',{price:30});assert.equal(r.status,200);assert.equal(r.data.balance,1000-480-30);
-    now=Date.UTC(2026,10,28,8);
+    // Still on through Cyber Monday (30 November, Pacific), and over at midnight.
+    now=Date.UTC(2026,11,1,7,59);assert.equal((await call('/shop')).data.sale.off,0.7);
+    now=Date.UTC(2026,11,1,8);
     r=await call('/shop');assert.equal(r.data.sale,null);assert.equal(r.data.chest.price,CHEST.price);
     r=await call('/shop/buy',{item:'moon',price:270});assert.equal(r.status,409);assert.match(r.data.error,/sale has ended/);
   }finally{s.close();}
@@ -393,6 +400,44 @@ test('the board ranks this round’s points, last round’s winner is champion, 
     assert.equal((await ana.call('/leaderboard')).data.players.some(p=>p.username==='Bo'),false);
     await boss.call('/admin/alt',{username:'Ana',alt:true});
     r=await ana.call('/leaderboard/week');assert.equal(r.data.champion,null);
+  }finally{s.close();}
+});
+test('three round wins keep the title for good, held still, and the Hall of Champions records every round',async()=>{
+  // Ana tops three rounds in a row: 16–19 November, 20–22 November and 23–26 November. Now is Friday 27 November, her third reign.
+  const now=Date.UTC(2026,10,27,18),s=await shop(()=>now);
+  try{
+    const ana=await s.member('Ana'),bo=await s.member('Bo'),boss=await s.member('Boss');
+    const inRound=async(at,a,b)=>{await played(s.store,ana.account,1,1,{points:a});await played(s.store,bo.account,1,1,{points:b});s.store.games.slice(-2).forEach(g=>{g.ended_at=new Date(at);});};
+    await inRound(Date.UTC(2026,10,17,20),50,10);await inRound(Date.UTC(2026,10,21,20),50,10);await inRound(Date.UTC(2026,10,24,20),50,10);
+    // She wrote a title during her first reign, before this server started.
+    s.store.crowns.push({week:new Date(Date.UTC(2026,10,20,8)),account_id:ana.account.id,title:'First Light',style:{colors:['#ff0000','#00ff00'],effect:'wave'}});
+    let r=await bo.call('/leaderboard/week');
+    // The two earlier reigns are filled in from their rounds' games.
+    assert.deepEqual(r.data.hall.map(h=>[new Date(h.week).toISOString(),h.username,h.title,h.wins]),[
+      ['2026-11-27T08:00:00.000Z','Ana',null,3],['2026-11-23T08:00:00.000Z','Ana',null,3],['2026-11-20T08:00:00.000Z','Ana','First Light',3]]);
+    assert.deepEqual(r.data.hall.map(h=>h.kept),[false,false,true]);
+    assert.deepEqual(r.data.hall[0].won,{start:Date.UTC(2026,10,23,8),end:Date.UTC(2026,10,27,8),name:'Monday–Thursday'});
+    assert.equal(r.data.champion.wins,3);assert.equal(r.data.wins.Ana,3);
+    // Kept titles hold still: the Wave becomes a plain gradient in the same colours.
+    assert.equal(r.data.kept.Ana.title,'First Light');assert.equal(r.data.kept.Ana.style.effect,'gradient');assert.deepEqual(r.data.kept.Ana.style.colors,['#ff0000','#00ff00']);
+    // A new title replaces the kept one; the reigning champion's still moves.
+    r=await ana.call('/leaderboard/champion-title',{title:'Thrice Crowned',style:{colors:['#ffffff'],effect:'shimmer'}});
+    assert.equal(r.data.champion.style.effect,'shimmer');assert.equal(r.data.kept.Ana.title,'Thrice Crowned');assert.equal(r.data.kept.Ana.style.effect,'gradient');
+    // Ana can wear it; Bo has won no rounds.
+    r=await ana.call('/shop');assert.equal(r.data.progress.champion,3);assert.equal(r.data.kept.title,'Thrice Crowned');
+    r=await ana.call('/shop/equip',{kind:'title',item:'legend'});assert.equal(r.status,200);assert.equal(r.data.look.title,'legend');
+    r=await bo.call('/shop/equip',{kind:'title',item:'legend'});assert.equal(r.status,400);assert.match(r.data.error,/3 leaderboard rounds/);
+    // An admin can clear any round's title in the Hall; the kept title falls back to the last one left.
+    assert.equal((await bo.call('/leaderboard/champion-title',{clear:true,week:Date.UTC(2026,10,20,8)})).status,403);
+    r=await boss.call('/leaderboard/champion-title',{clear:true,week:Date.UTC(2026,10,27,8)});assert.equal(r.data.kept.Ana.title,'First Light');assert.equal(r.data.champion.title,null);
+    r=await boss.call('/leaderboard/champion-title',{clear:true,week:Date.UTC(2026,10,20,8)});assert.equal(r.data.kept.Ana,undefined);
+    assert.equal((await ana.call('/shop/equip',{kind:'title',item:'legend'})).status,400);
+    // Two wins are not enough, even with a title written.
+    Object.assign(s.store.crownAt(new Date(Date.UTC(2026,10,23,8))),{title:'Again'});
+    r=await bo.call('/leaderboard/week');assert.equal(r.data.kept.Ana.title,'Again');
+    s.store.crowns=s.store.crowns.filter(c=>c.week.getTime()!==Date.UTC(2026,10,20,8));
+    r=await bo.call('/leaderboard/week');assert.equal(r.data.wins.Ana,2);assert.equal(r.data.kept.Ana,undefined);
+    assert.equal((await ana.call('/shop')).data.progress.champion,2);
   }finally{s.close();}
 });
 shopTest('an admin can mark an alt account, which then can’t start, join or watch games, or bet',async({store,member})=>{

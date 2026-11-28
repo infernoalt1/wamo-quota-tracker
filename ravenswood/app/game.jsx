@@ -3,7 +3,7 @@ import {useState,useEffect,useRef,Fragment,createContext,useContext} from 'react
 import {Moon,Sun,Users,BookOpen,ArrowRight,ArrowLeft,Copy,Check,X,Send,LockKeyhole,Eye,EyeOff,Skull,Crown,Hand,Sparkles,ScrollText,Clock3,MessageCircle,LogOut,Pause,Play,Target,Hash,NotebookPen,User,Armchair,Plus,UserX,RotateCcw,Megaphone,Camera,Trophy,Store,Coins,Lock,Gift,Dices,Package,ShieldCheck,Minus,KeyRound,Flame,Pencil,Eraser} from 'lucide-react';
 import {playOn,motes} from './particles.js';
 import {ROLES,ROLE_LIST,SCRIPTS,COUNTS} from '../lib/characters.mjs';
-import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS,salePrice,CHAMPION_STYLE} from '../lib/cosmetics.mjs';
+import {ITEMS,ITEM,KINDS,TIERS,UNLOCKS,POINTS,CHEST,GIFT,SETS,salePrice,CHAMPION_STYLE,stillStyleOf} from '../lib/cosmetics.mjs';
 const types={townsfolk:'Townsfolk',outsider:'Outsiders',minion:'Minions',demon:'Demon'};
 function RoleIcon({id}){return <img className="role-icon" src={`/botc/icons/${id}.png`} alt="" draggable={false}/>;}
 function Avatar({src,name}){return src?<img className="avatar-img" src={`/botc/api/game/avatar/${src}`} alt="" draggable={false}/>:(name||'').slice(0,2).toUpperCase();}
@@ -209,12 +209,13 @@ const SHOWCASE=[
  ['Old Money',{colors:['#e9c46a','#a67c2e'],effect:'gradient'}],
 ];
 // The champion writes their title: any text, any colours, an effect and a background, with a live preview.
-function TitleEditor({initial,onSave,onCancel,busy}){
+function TitleEditor({initial,wins,onSave,onCancel,busy}){
  const [text,setText]=useState(initial.title||''),[style,setStyle]=useState(initial.style||CHAMPION_STYLE.standard);
  const set=(k,v)=>setStyle(x=>({...x,[k]:v})),setColor=(i,v)=>set('colors',style.colors.map((c,j)=>j===i?v:c));
  const bg=style.bg||CHAMPION_STYLE.standard.bg,setBg=(k,v)=>set('bg',{...bg,[k]:v});
  return <form className="title-editor" onSubmit={e=>{e.preventDefault();onSave({title:text,style});}}>
   <div className={`title-preview ${backdropClass(style.bg)}`} style={backdropOf(style.bg)}><Backdrop/><small>Preview</small><ChampionTitle title={text.trim()||'Your title'} style={style} className="preview"/></div>
+  <p className="title-keep">{wins>=CHAMPION_STYLE.keep?`You have won ${wins} rounds, so the title you save is yours to keep.`:`Win ${plural(CHAMPION_STYLE.keep-wins,'more round')} and the title you write then is yours to keep.`}</p>
   <label className="title-text">Title<input value={text} maxLength={CHAMPION_STYLE.maxLength} onChange={e=>setText(e.target.value)} placeholder={`Up to ${CHAMPION_STYLE.maxLength} characters`} autoFocus/></label>
   <div className="title-row"><span>Colours</span><div className="title-colors">
    {style.colors.map((c,i)=><span key={i} className="title-color"><input type="color" value={c} onChange={e=>setColor(i,e.target.value)} aria-label={`Colour ${i+1}`}/>{style.colors.length>1&&<button type="button" className="icon-button" onClick={()=>set('colors',style.colors.filter((_,j)=>j!==i))} aria-label={`Remove colour ${i+1}`}><X size={12}/></button>}</span>)}
@@ -257,7 +258,7 @@ function WeekBoard({me,admin,onPick,onWeek}){
     </div>
    </div>
   </section>}
-  {champ&&mine&&editing&&<TitleEditor initial={champ} busy={busy} onSave={save} onCancel={()=>setEditing(false)}/>}
+  {champ&&mine&&editing&&<TitleEditor initial={champ} wins={champ.wins||0} busy={busy} onSave={save} onCancel={()=>setEditing(false)}/>}
   {error&&<p className="status-note error">{error}</p>}
   {week.players.length===0?<p className="small">Nobody has finished a recorded game this round yet.</p>:
   <div className="leader-list">
@@ -268,16 +269,30 @@ function WeekBoard({me,admin,onPick,onWeek}){
     <span className="leader-num">{p.wins}</span><span className="leader-num"><b>{p.points}</b></span>
    </button>)}
   </div>}
+  {week.hall?.length>0&&<section className="champion-hall" aria-label="Hall of Champions">
+   <span className="eyebrow"><Crown size={12}/>HALL OF CHAMPIONS</span>
+   <div className="leader-list">{week.hall.map(h=><div key={h.week} className={`leader-row hall-row ${h.username===me?'you':''}`}>
+    <span className="hall-round">{roundDates(h.won)}</span>
+    <button className="leader-player hall-player" onClick={()=>onPick(h.username)}><Face className="chat-avatar" src={h.avatar} name={h.username} look={h.look}/><span className="leader-name"><strong><Named name={h.username} look={h.look}/>{h.username===me&&<em> you</em>}</strong>{h.title?<ChampionTitle title={h.title} style={h.style}/>:<small>No title</small>}</span></button>
+    <span className="hall-wins">{h.kept&&<span className="hall-kept" title={`${h.username} has won ${h.wins} rounds and keeps this title`}><Check size={11}/>Kept</span>}{admin&&h.title&&<button className="icon-button" disabled={busy} onClick={()=>save({clear:true,week:h.week})} aria-label={`Clear ${h.username}’s title (admin)`} title="Clear this title (admin)"><Eraser size={13}/></button>}</span>
+   </div>)}</div>
+  </section>}
   <section className="champion-showcase">
    <span className="eyebrow"><Trophy size={12}/>THE CHAMPION’S TITLE</span>
    <p>Finish a round on top and you design your own title: any words, any colours, an effect and a background. It shows everywhere your name does until the next round ends. Rounds run Monday–Thursday and Friday–Sunday.</p>
+   <p>Win {CHAMPION_STYLE.keep} rounds and your title is yours to keep: the last one you wrote, in its colours, held still. Wear it from the shop’s Titles.{me&&<> You have won {plural(week.wins?.[me]||0,'round')}.</>}</p>
    <div className="showcase-grid">{SHOWCASE.map(([t,st])=><div key={t} className="showcase-item"><ChampionTitle title={t} style={st}/><small>{CHAMPION_STYLE.effects[st.effect]}</small></div>)}</div>
   </section>
  </>;
 }
-// This week's champion, for every title on the page: while they hold a title of their own, it replaces the one they wear.
+// The round's board, for every title on the page: while the champion holds a title of their own, it replaces the one they wear.
+// A kept champion's title (`legend`) shows the words that player wrote; `owner` names whose, where `name` is left out.
 const ChampionContext=createContext(null);
-function Title({look,name}){const champ=useContext(ChampionContext);if(name&&champ?.title&&champ.username===name)return <ChampionTitle title={champ.title} style={champ.style}/>;const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}${t.set?` title-${t.set}`:''}`}>{t.name}</span>:null;}
+const roundDay=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Los_Angeles',day:'numeric',month:'short'});
+function roundDates(won){const [a,b]=[roundDay.format(won.start),roundDay.format(won.end-1)],[da,ma]=a.split(' '),[db,mb]=b.split(' ');return ma===mb?`${da}–${db} ${mb}`:`${a} – ${b}`;}
+function Title({look,name,owner=name}){const w=useContext(ChampionContext),champ=w?.champion;if(name&&champ?.title&&champ.username===name)return <ChampionTitle title={champ.title} style={champ.style}/>;
+ if(look?.title==='legend'){const k=w?.kept?.[owner];return k?<ChampionTitle title={k.title} style={k.style}/>:null;}
+ const t=ITEM[look?.title];return t?<span className={`deco-title tier-${t.tier}${t.set?` title-${t.set}`:''}`}>{t.name}</span>:null;}
 // A chat picture opens the sender's profile, when they have one.
 function ChatFace({who,name,onOpen}){const face=<Face className="chat-avatar" src={who?.avatar} name={name} look={who?.look}/>;return who?.account?<button className="face-button" onClick={()=>onOpen(who.account)} aria-label={`See ${name}'s profile`} title="See profile">{face}</button>:face;}
 const pct=(wins,games)=>games?`${Math.round(wins/games*100)}%`:'–';
@@ -478,13 +493,14 @@ function Admin(){
  </>;
 }
 const hoursLeft=at=>{const h=Math.max(1,Math.ceil((at-Date.now())/3600000));return h===1?'1 hour':`${h} hours`;};
-function ShopSample({item,account,look}){
+function ShopSample({item,account,look,keptTitle}){
  const wearing={...look,[item.kind]:item.id};
  if(item.kind==='frame')return <Face className="shop-face" src={account.avatar} name={account.username} look={wearing}/>;
  if(item.kind==='color')return <span className="shop-ink"><Named name={account.username} look={wearing}/></span>;
  if(item.kind==='hand')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><span className={`hand-indicator hand-${item.id}`}><Hand size={11}/></span><small className="sample-hint">Click to preview</small></span>;
  if(item.kind==='mark')return <span className="shop-seat"><Face className="shop-face" src={account.avatar} name={account.username} look={{frame:look?.frame}}/><small className="sample-hint">Click to preview</small></span>;
- return <span className="shop-title-sample"><strong>{account.username}</strong><Title look={wearing}/></span>;
+ if(item.id==='legend'&&!keptTitle)return <span className="shop-title-sample"><strong>{account.username}</strong><ChampionTitle title="Your title" style={stillStyleOf(CHAMPION_STYLE.standard)}/></span>;
+ return <span className="shop-title-sample"><strong>{account.username}</strong><Title look={wearing} owner={account.username}/></span>;
 }
 function Shop({account,wallet,onWallet,inGame,onLogin}){
  const [kind,setKind]=useState('frame'),[preview,setPreview]=useState(null),[confirm,setConfirm]=useState(null),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[error,setError]=useState(''),[chest,setChest]=useState(null),chestStage=useRef(null);
@@ -534,7 +550,7 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
   {/* Stays in view while the items scroll, so each one can be tried on. */}
   <div className="shop-preview" aria-live="polite">
    <Face className="shop-face big" src={account.avatar} name={account.username} look={shown}/>
-   <div className="shop-preview-text"><strong className="shop-preview-name"><Named name={account.username} look={shown}/></strong><Title look={shown} name={preview&&ITEM[preview].kind==='title'?null:account.username}/><small>{preview?`Previewing ${ITEM[preview].name}`:'How you look at the table'}</small></div>
+   <div className="shop-preview-text"><strong className="shop-preview-name"><Named name={account.username} look={shown}/></strong><Title look={shown} name={preview&&ITEM[preview].kind==='title'?null:account.username} owner={account.username}/><small>{preview?`Previewing ${ITEM[preview].name}`:'How you look at the table'}</small></div>
    <span className="shop-balance"><Coins size={18}/>{wallet.balance}<small>points</small></span>
   </div>
   <div className="shop-wallet">
@@ -574,10 +590,11 @@ function Shop({account,wallet,onWallet,inGame,onLogin}){
    {items.map(item=>{
     const owned=item.price||item.chest?wallet.owned.includes(item.id):wallet.progress[item.unlock]>=UNLOCKS[item.unlock].goal,wearing=look[item.kind]===item.id,short=item.price&&!owned?cost(item)-wallet.balance:0;
     return <article key={item.id} className={`shop-item tier-${item.tier} ${wearing?'wearing':''} ${preview===item.id?'previewing':''}`} onMouseEnter={()=>setPreview(item.id)} onMouseLeave={()=>setPreview(p=>p===item.id?null:p)}>
-     <button className="shop-sample" title={item.fx?'Click to preview':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);const face=e.currentTarget.querySelector('.shop-face')||e.currentTarget;if(item.kind==='mark')previewDeath(face,item,{avatar:account.avatar,name:account.username});else if(item.fx)playAt(face,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look}/></button>
+     <button className="shop-sample" title={item.fx?'Click to preview':undefined} onClick={e=>{setPreview(p=>p===item.id?null:item.id);const face=e.currentTarget.querySelector('.shop-face')||e.currentTarget;if(item.kind==='mark')previewDeath(face,item,{avatar:account.avatar,name:account.username});else if(item.fx)playAt(face,item);}} onFocus={()=>setPreview(item.id)} aria-label={`Preview ${item.name}`}><ShopSample item={item} account={account} look={look} keptTitle={wallet.kept}/></button>
      <div className="shop-item-text"><span className="tier-tag">{TIERS[item.tier]}{item.set&&item.kind!=='frame'?` · ${SETS[item.set].name} set`:''}{item.chest&&' · Chest only'}</span><h3>{item.name}</h3><p>{item.blurb}</p></div>
      <div className="shop-item-action">
       {wearing?<><span className="wearing-tag"><Check size={14}/>Wearing</span><button className="text-button" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:null},`${item.name} is off.`)}>Take off</button></>
+      :owned&&item.unlock==='champion'&&!wallet.kept?<small className="need">Write a title while you are champion</small>
       :owned?<button className="primary compact" disabled={busy} onClick={()=>call('/equip',{kind:item.kind,item:item.id},`You are wearing ${item.name}.`)}>Wear</button>
       :item.chest?<span className="chest-only"><Package size={13}/>Found in chests</span>
       :item.unlock?<div className="unlock-progress"><span><Lock size={12}/>{UNLOCKS[item.unlock].text}</span><div className="progress-bar"><i style={{width:`${wallet.progress[item.unlock]/UNLOCKS[item.unlock].goal*100}%`}}/></div><small>{wallet.progress[item.unlock]} / {UNLOCKS[item.unlock].goal}</small></div>
@@ -806,7 +823,7 @@ export default function Game(){
  const canState=script==='bmr'&&view==='town'&&phase==='day'&&!g?.paused&&!!me?.alive&&!g?.me.statementUsed;
  const tallyCounted=tally?tally.b.votes.slice(0,tally.step):[],tallyYes=new Set(tallyCounted.filter(v=>v.yes).map(v=>v.id)),tallyOn=tally&&!tally.done?tallyCounted.at(-1)?.id:null;
  const nominateBlock=!chosen?'':g.nomination?'A vote is in progress.':!me.alive?'Dead players cannot nominate.':me.nominator?'You already nominated today.':chosen.nominated?`${chosen.name} was already nominated today.`:'';
- return <ChampionContext.Provider value={week?.champion||null}><div className={`app ${night?'night':''} ${g?'in-game':'no-game'}`}>
+ return <ChampionContext.Provider value={week}><div className={`app ${night?'night':''} ${g?'in-game':'no-game'}`}>
  <header className="topbar"><a href="/botc/" className="brand"><span className="brand-mark">R</span><span>RAVENSWOOD<small>BLOOD ON THE CLOCKTOWER</small></span></a><div className="edition"><i/> {SCRIPTS[script].toUpperCase()}</div><nav><button className="text-button" onClick={()=>setDrawer('help')}><BookOpen size={16}/><span>How to play</span></button><button className="text-button" onClick={()=>setDrawer('roles')}><ScrollText size={16}/><span>Characters</span></button>{accountsOn&&<button className="text-button" onClick={()=>openLeaders()}><Users size={16}/><span>Players</span></button>}{accountsOn&&<button className="text-button" onClick={()=>openShop()} aria-label={wallet?`Shop, ${wallet.balance} points`:'Shop'}><Store size={16}/><span>Shop</span>{wallet&&<b className="points-pill"><Coins size={12}/>{wallet.balance}</b>}</button>}{account?.admin&&<button className="text-button" onClick={openAdmin}><ShieldCheck size={16}/><span>Admin</span></button>}{accountsOn&&<button className="text-button" onClick={()=>openAccount()}>{account?<Face className="nav-avatar" src={account.avatar} name={account.username} look={account.look}/>:<User size={16}/>}<span>{account?account.username:'Log in'}</span></button>}</nav></header>
  {(!online||error)&&<div className="toasts">{!online&&<div className="connection-banner" role="status">Reconnecting… Your seat is saved in this browser.</div>}{error&&<div className="error-banner" role="alert">{error}<button className="icon-button" onClick={()=>setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}</div>}
  <main className={`workspace screen-${screen} ${chatOpen?'chat-open':''}`}>

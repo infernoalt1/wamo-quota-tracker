@@ -2,7 +2,7 @@
 import { ITEM, KINDS, UNLOCKS, CHEST, GIFT, SETS, bundleOf, lookOf, progressOf, unlocked, rollChest, saleAt, salePrice } from './cosmetics.mjs';
 import { flair } from './engine.mjs';
 import { dress, keyOf, usernameOf } from './accounts.mjs';
-import { dayStart } from './leaderboard.mjs';
+import { dayStart, keptTitles } from './leaderboard.mjs';
 
 const itemOf=id=>typeof id==='string'&&Object.hasOwn(ITEM,id)?ITEM[id]:null;
 
@@ -19,13 +19,15 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0,clock=Da
     await fn(req,res,account);
   }catch(e){if(!e.expose)console.error('BOTC shop:',e.message);res.status(e.expose?e.status:503).json({error:e.expose?e.message:'The shop is unavailable right now.'});}};
 
+  // Rounds won, and the title kept once there are enough.
+  async function championOf(account){const {wins,kept}=keptTitles(await store.hall());return {wins:wins.get(account.id)||0,kept:kept.get(account.id)||null};}
   async function stateOf(account){
     const since=dayStart(),prices=pricesNow();
-    const [wallet,rows,won,gifts]=await Promise.all([store.wallet(account.id),store.history(account.id),store.wonSince([account.id],since),store.giftsReceived(account.id)]);
+    const [wallet,rows,won,gifts,champ]=await Promise.all([store.wallet(account.id),store.history(account.id),store.wonSince([account.id],since),store.giftsReceived(account.id),championOf(account)]);
     const held=heldFor(account.id);
     return {
       balance:wallet.earned-wallet.spent+(wallet.adjust||0)-held,held,earned:wallet.earned,owned:wallet.owned,look:lookOf(account.look)||{},
-      progress:progressOf(rows),daily:{ready:!won.has(account.id),resetsAt:since.getTime()+86400000},
+      progress:progressOf(rows,{champion:champ.wins}),kept:champ.kept,daily:{ready:!won.has(account.id),resetsAt:since.getTime()+86400000},
       chest:prices.chest,sale:prices.sale&&{name:prices.sale.name,off:prices.sale.off,until:prices.sale.until},gift:{...GIFT,allowed:rows.length>=GIFT.minGames},
       gifts:gifts.map(g=>({from:g.username,amount:g.amount,at:new Date(g.at).getTime()})),
     };
@@ -86,7 +88,9 @@ export function mountShop(router,{store,identity,accounts,heldFor=()=>0,clock=Da
       const item=itemOf(id);
       if(item?.kind!==kind)throw refuse('That item does not exist.');
       if((item.price||item.chest)&&!(await store.wallet(account.id)).owned.includes(id))throw refuse(item.chest?'Find this item in a chest first.':'Buy this item first.');
-      if(item.unlock&&!unlocked(item,progressOf(await store.history(account.id))))throw refuse(`Not unlocked yet: ${UNLOCKS[item.unlock].text.toLowerCase()}.`);
+      const champ=item.unlock==='champion'?await championOf(account):{wins:0};
+      if(item.unlock&&!unlocked(item,progressOf(await store.history(account.id),{champion:champ.wins})))throw refuse(`Not unlocked yet: ${UNLOCKS[item.unlock].text.toLowerCase()}.`);
+      if(item.unlock==='champion'&&!champ.kept)throw refuse('Write a title while you are champion first.');
     }
     const look={...lookOf(account.look)};
     if(id===null)delete look[kind];else look[kind]=id;

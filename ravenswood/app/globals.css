@@ -1061,3 +1061,16 @@ button.leader-row:hover{background:#ffffff08}
 .account-modal .account-who h2{margin-top:6px}
 /* At the table a title stays on one line, cut off with an ellipsis if it's long. */
 .seat-sub .champ-title{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+
+/* The Hall of Champions: every round's winner and the title they wrote, held still. */
+.champion-hall{margin-top:22px}
+.champion-hall .eyebrow{display:flex;align-items:center;gap:5px;color:#d9b563}
+.champion-hall .leader-list{margin-top:8px}
+.hall-row{grid-template-columns:86px minmax(0,1fr) auto}
+.hall-round{font-size:11px;color:var(--muted);white-space:nowrap}
+.hall-player{padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer;min-width:0}
+.hall-player .champ-title{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+.hall-player .leader-name small{font-style:italic}
+.hall-wins{display:flex;align-items:center;gap:6px}
+.hall-kept{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;border:1px solid #f2c35b55;color:#d9b563;font-size:10px;letter-spacing:.5px;text-transform:uppercase}
+.title-keep{margin:0 0 10px;font-size:12px;color:var(--muted)}

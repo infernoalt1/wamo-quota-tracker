@@ -16,6 +16,8 @@ export const UNLOCKS = Object.freeze({
   saint_win: { goal: 1, text: 'Win a game as the Saint', counts: r => r.won && r.initial_role === 'saint' },
   minion_wins: { goal: 5, text: 'Win 5 games as a Minion', counts: r => r.won && ROLES[r.initial_role]?.type === 'minion' },
   veteran: { goal: 50, text: 'Play 50 games', counts: () => true },
+  // Counted from the Hall of Champions, not from games.
+  champion: { goal: 3, text: 'Win 3 leaderboard rounds', counts: () => false },
 });
 
 export const ITEMS = Object.freeze([
@@ -52,6 +54,8 @@ export const ITEMS = Object.freeze([
   { id: 'voice', kind: 'title', name: 'Voice of the Clocktower', tier: 'legendary', price: 1300, blurb: 'When they speak, the town listens.' },
   { id: 'saint', kind: 'title', name: 'The Saint', tier: 'unlock', unlock: 'saint_win', blurb: 'Survived the town’s judgement.' },
   { id: 'mastermind', kind: 'title', name: 'Mastermind', tier: 'unlock', unlock: 'minion_wins', blurb: 'The hand behind the Demon.' },
+  // Shows the title the player last wrote as champion, so its text comes from the leaderboard, not from here.
+  { id: 'legend', kind: 'title', name: 'Champion’s Title', tier: 'unlock', unlock: 'champion', blurb: 'The title you wrote as champion, yours to keep.' },
   { id: 'veteran', kind: 'title', name: 'Veteran', tier: 'unlock', unlock: 'veteran', blurb: 'Fifty stories told.' },
   // Vote hands: how your raised hand looks, and the effect when it goes up or is counted. `fx` names a particle effect.
   { id: 'gilded_hand', kind: 'hand', name: 'Gilded Hand', tier: 'common', price: 150, fx: 'sparks', tint: ['#fff1c2', '#f2c35b', '#d99a2b'], blurb: 'A shower of gold sparks with every vote.' },
@@ -104,6 +108,8 @@ export const CHAMPION_STYLE = Object.freeze({
   backgrounds: Object.freeze({ radiant: 'Radiant', shine: 'Shine', stars: 'Stars', still: 'Still' }),
   standard: Object.freeze({ colors: ['#f2c35b', '#fff2c4', '#c9963f'], effect: 'shift', bg: Object.freeze({ colors: ['#2b1e10', '#f2c35b'], effect: 'radiant' }) }),
   maxLength: 24,
+  // Rounds a player must win to keep their title.
+  keep: 3,
 });
 const hexes = (list, max) => Array.isArray(list) ? list.filter(c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)).slice(0, max).map(c => c.toLowerCase()) : [];
 export function championStyleOf(raw) {
@@ -114,6 +120,8 @@ export function championStyleOf(raw) {
     effect: Object.hasOwn(CHAMPION_STYLE.effects, raw?.effect) ? raw.effect : CHAMPION_STYLE.standard.effect,
   };
 }
+// A kept title holds still in its colours: only the reigning champion's title moves.
+export const stillStyleOf = style => ({ ...style, effect: ['solid', 'gradient', 'glow'].includes(style.effect) ? style.effect : 'gradient' });
 export const ITEM = Object.freeze(Object.fromEntries(ITEMS.map(i => [i.id, i])));
 export const SETS = Object.freeze(Object.fromEntries(ITEMS.filter(i => i.set && i.kind === 'frame').map(i => [i.set, { id: i.set, name: i.name, tint: i.tint, items: ITEMS.filter(x => x.set === i.set).map(x => x.id) }])));
 // Everything one prize gives: a Chroma gives its whole set, anything else just itself.
@@ -124,7 +132,7 @@ export const bundleOf = id => SETS[ITEM[id]?.set]?.items || [id];
 export const CHEST = Object.freeze({ price: 100, refund: 40, odds: Object.freeze({ common: 54, rare: 30, epic: 11, legendary: 4.7, chroma: 0.3 }) });
 // Sales: a share off every shop price and the chest. The duplicate refund is cut by the same share, so a chest never pays for itself.
 export const SALES = Object.freeze([
-  { name: 'Black Friday', off: 0.7, from: Date.UTC(2026, 10, 27, 8), until: Date.UTC(2026, 10, 28, 8) }, // 27 November, Pacific time
+  { name: 'Black Friday to Cyber Monday', off: 0.7, from: Date.UTC(2026, 10, 27, 8), until: Date.UTC(2026, 11, 1, 8) }, // 27–30 November, Pacific time
 ]);
 export const saleAt = (now = Date.now()) => SALES.find(s => now >= s.from && now < s.until) || null;
 export const salePrice = (price, sale) => sale ? Math.max(1, Math.round(price * (1 - sale.off))) : price;
@@ -148,7 +156,8 @@ export function lookOf(raw) {
   for (const kind of Object.keys(KINDS)) if (ITEM[raw?.[kind]]?.kind === kind) look[kind] = raw[kind];
   return Object.keys(look).length ? look : null;
 }
-export function progressOf(rows) {
-  return Object.fromEntries(Object.entries(UNLOCKS).map(([id, u]) => [id, Math.min(u.goal, rows.filter(u.counts).length)]));
+// `counted` holds progress kept elsewhere, such as rounds won.
+export function progressOf(rows, counted = {}) {
+  return Object.fromEntries(Object.entries(UNLOCKS).map(([id, u]) => [id, Math.min(u.goal, counted[id] ?? rows.filter(u.counts).length)]));
 }
 export const unlocked = (item, progress) => !!item.unlock && progress[item.unlock] >= UNLOCKS[item.unlock].goal;
