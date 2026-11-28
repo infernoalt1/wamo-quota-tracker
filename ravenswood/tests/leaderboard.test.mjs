@@ -440,6 +440,21 @@ test('three round wins keep the title for good, held still, and the Hall of Cham
     assert.equal((await ana.call('/shop')).data.progress.champion,2);
   }finally{s.close();}
 });
+test('champions filed under the old weekly board move onto the round they reigned in, without counting twice',async()=>{
+  const now=Date.UTC(2026,10,27,18),s=await shop(()=>now);
+  try{
+    const ana=await s.member('Ana'),bo=await s.member('Bo');
+    // Ana topped 20–22 November, so she reigned from Monday 23 November, Pacific; the old board filed that at midnight UTC, with her title.
+    await played(s.store,ana.account,1,1,{points:50});s.store.games.at(-1).ended_at=new Date(Date.UTC(2026,10,21,20));
+    s.store.crowns.push({week:new Date(Date.UTC(2026,10,23)),account_id:ana.account.id,title:'Panzer',style:null});
+    // An old week with nothing recorded from the new rounds still moves.
+    s.store.crowns.push({week:new Date(Date.UTC(2026,10,16)),account_id:bo.account.id,title:null,style:null});
+    const r=await bo.call('/leaderboard/week');
+    assert.deepEqual(r.data.hall.map(h=>[new Date(h.week).toISOString(),h.username,h.title]),[
+      ['2026-11-23T08:00:00.000Z','Ana','Panzer'],['2026-11-16T08:00:00.000Z','Bo',null]]);
+    assert.equal(r.data.wins.Ana,1);
+  }finally{s.close();}
+});
 shopTest('an admin can mark an alt account, which then can’t start, join or watch games, or bet',async({store,member})=>{
   const boss=await member('Boss'),alt=await member('Spare'),ana=await member('Ana');
   assert.equal((await ana.call('/admin/alt',{username:'Spare',alt:true})).status,403);

@@ -105,6 +105,15 @@ export function mountLeaderboard(router,{store,rooms,identity=()=>null,admins=ad
   function fill(start){
     if(filled?.at===start.getTime())return filled.done;
     const done=(async()=>{
+      // Champions from the old weekly board were filed under midnight UTC, between round starts. Each moves to the reign
+      // it began (the next round start), and if that reign is already written down for the same player, its title joins it.
+      const old=await store.hall();
+      for(const h of old){
+        const at=new Date(h.week);if(roundOf(at.getTime()).start.getTime()===at.getTime())continue;
+        const to=roundOf(at.getTime()).end,there=old.find(x=>new Date(x.week).getTime()===to.getTime());
+        if(!there||there.id===h.id&&!there.title&&h.title)await store.setChampion(to,h.id,h.title,h.style);
+        await store.uncrown(at);
+      }
       const first=await store.firstGameAt();if(!first)return;
       const have=new Set((await store.hall()).map(h=>new Date(h.week).getTime()));
       for(let r=roundOf(new Date(first).getTime()).end;r<start;r=roundOf(r.getTime()).end){
